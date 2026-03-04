@@ -244,7 +244,7 @@ GPUresult gpuDeviceGetDefaultMemPool(GPUmemoryPool* pool, GPUdevice dev) {
 
 gpuError_t gpuDeviceSynchronize()
 {
-    return GPUresult(GPU_ERROR_UNKNOWN);
+    return gpuError_t(GPU_ERROR_UNKNOWN);
 }
 
 blasStatus_t blasCreate(blasHandle_t blas) {
