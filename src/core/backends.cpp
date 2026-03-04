@@ -59,6 +59,11 @@ GPUresult gpuMemsetD32Async(GPUdeviceptr dev, unsigned int val, size_t size, GPU
     return GPUresult(GPU_ERROR_UNKNOWN);
 }
 
+gpuError_t 	gpuMemsetAsync(void *dst, int value, size_t sizeBytes, GPUstream_t stream)
+{
+    return gpuError(GPU_ERROR_UNKNOWN);
+}
+
 GPUresult gpuMemcpyAsync(GPUdeviceptr dst, GPUdeviceptr src, size_t size, GPUstream_t stream) {
     return GPUresult(GPU_ERROR_UNKNOWN);
 }

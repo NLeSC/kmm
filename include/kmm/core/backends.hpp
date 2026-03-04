@@ -63,6 +63,7 @@ using bfloat16_type = __nv_bfloat16;
     #define gpuMemsetD8Async                     cuMemsetD8Async
     #define gpuMemsetD16Async                    cuMemsetD16Async
     #define gpuMemsetD32Async                    cuMemsetD32Async
+	#define gpuMemsetAsync						 cudaMemsetAsync
     #define gpuMemcpyAsync                       cuMemcpyAsync
     #define gpuMemHostAlloc                      cuMemHostAlloc
     #define gpuMemFreeHost                       cuMemFreeHost
@@ -189,6 +190,7 @@ using bfloat16_type = __hip_bfloat16;
     #define gpuMemsetD8Async                              hipMemsetD8Async
     #define gpuMemsetD16Async                             hipMemsetD16Async
     #define gpuMemsetD32Async                             hipMemsetD32Async
+	#define gpuMemsetAsync								  hipMemsetAsync
     #define gpuMemHostAlloc                               hipHostMalloc
     #define gpuMemFreeHost                                hipHostFree
     #define gpuMemAlloc                                   hipMalloc
@@ -380,6 +382,7 @@ GPUresult gpuStreamSynchronize(GPUstream_t);
 GPUresult gpuMemsetD8Async(GPUdeviceptr, unsigned char, size_t, GPUstream_t);
 GPUresult gpuMemsetD16Async(GPUdeviceptr, unsigned short, size_t, GPUstream_t);
 GPUresult gpuMemsetD32Async(GPUdeviceptr, unsigned int, size_t, GPUstream_t);
+gpuError_t 	gpuMemsetAsync(void *dst, int value, size_t sizeBytes, GPUstream_t stream);
 GPUresult gpuMemcpyAsync(GPUdeviceptr, GPUdeviceptr, size_t, GPUstream_t);
 GPUresult gpuMemHostAlloc(void**, size_t, unsigned int);
 GPUresult gpuMemFreeHost(void*);
