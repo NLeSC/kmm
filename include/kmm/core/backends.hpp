@@ -106,6 +106,7 @@ using bfloat16_type = __nv_bfloat16;
     #define gpuMemPoolTrimTo                     cuMemPoolTrimTo
     #define gpuDeviceGetDefaultMemPool           cuDeviceGetDefaultMemPool
     #define gpuPointerGetAttribute               cuPointerGetAttribute
+	#define gpuDeviceSynchronize				 cudaDeviceSynchronize
 
 using GPUresult = CUresult;
 using gpuError_t = cudaError_t;
@@ -229,6 +230,7 @@ using bfloat16_type = __hip_bfloat16;
     #define gpuDeviceGetDefaultMemPool                    hipDeviceGetDefaultMemPool
     #define gpuPointerGetAttribute                        hipPointerGetAttribute
     #define GPU_POINTER_ATTRIBUTE_MEMORY_TYPE             HIP_POINTER_ATTRIBUTE_MEMORY_TYPE
+	#define gpuDeviceSynchronize				 		  hipDeviceSynchronize
 
 using GPUresult = hipError_t;
 using gpuError_t = hipError_t;
@@ -419,6 +421,7 @@ GPUresult gpuCtxPopCurrent(GPUcontext*);
 gpuError_t GPUrtLaunchKernel(const void*, dim3, dim3, void**, size_t, GPUstream_t);
 GPUresult gpuMemPoolTrimTo(GPUmemoryPool, size_t);
 GPUresult gpuDeviceGetDefaultMemPool(GPUmemoryPool*, GPUdevice);
+gpuError_t gpuDeviceSynchronize();
 
 // Atomics
 template<typename T>
