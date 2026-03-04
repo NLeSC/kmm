@@ -424,7 +424,7 @@ gpuError_t GPUrtLaunchKernel(const void*, dim3, dim3, void**, size_t, GPUstream_
 GPUresult gpuMemPoolTrimTo(GPUmemoryPool, size_t);
 GPUresult gpuDeviceGetDefaultMemPool(GPUmemoryPool*, GPUdevice);
 gpuError_t gpuDeviceSynchronize();
-gpuError_t gpuEventElapsedTime(float *ms, gpuEvent_t start, gpuEvent_t stop);
+gpuError_t gpuEventElapsedTime(float *ms, GPUevent_t start, GPUevent_t stop);
 
 // Atomics
 template<typename T>

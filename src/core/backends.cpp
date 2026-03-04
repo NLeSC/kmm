@@ -247,7 +247,7 @@ gpuError_t gpuDeviceSynchronize()
     return gpuError_t(GPU_ERROR_UNKNOWN);
 }
 
-gpuError_t gpuEventElapsedTime(float *ms, gpuEvent_t start, gpuEvent_t stop)
+gpuError_t gpuEventElapsedTime(float *ms, GPUevent_t start, GPUevent_t stop)
 {
     return gpuError_t(GPU_ERROR_UNKNOWN);
 }
