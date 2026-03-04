@@ -68,11 +68,14 @@ using bfloat16_type = __nv_bfloat16;
     #define gpuMemHostAlloc                      cuMemHostAlloc
     #define gpuMemFreeHost                       cuMemFreeHost
     #define gpuMemAlloc                          cuMemAlloc
+    #define gpuAlloc							 cudaMalloc
     #define gpuMemFree                           cuMemFree
+	#define gpuFree                           	 cudaFree
     #define gpuMemPoolCreate                     cuMemPoolCreate
     #define gpuMemPoolDestroy                    cuMemPoolDestroy
     #define gpuMemAllocFromPoolAsync             cuMemAllocFromPoolAsync
     #define gpuMemFreeAsync                      cuMemFreeAsync
+	#define gpuFreeAsync                      	 cudaFreeAsync
     #define gpuGetStreamPriorityRange            cuCtxGetStreamPriorityRange
     #define gpuStreamCreateWithPriority          cuStreamCreateWithPriority
     #define gpuStreamQuery                       cuStreamQuery
@@ -194,11 +197,14 @@ using bfloat16_type = __hip_bfloat16;
     #define gpuMemHostAlloc                               hipHostMalloc
     #define gpuMemFreeHost                                hipHostFree
     #define gpuMemAlloc                                   hipMalloc
+    #define gpuMalloc									  hipMalloc
     #define gpuMemFree                                    hipFree
+    #define gpuFree										  hipFree
     #define gpuMemPoolCreate                              hipMemPoolCreate
     #define gpuMemPoolDestroy                             hipMemPoolDestroy
     #define gpuMemAllocFromPoolAsync                      hipMallocFromPoolAsync
     #define gpuMemFreeAsync                               hipFreeAsync
+	#define gpuFreeAsync                               	  hipFreeAsync
     #define gpuGetStreamPriorityRange                     hipDeviceGetStreamPriorityRange
     #define gpuStreamCreateWithPriority                   hipStreamCreateWithPriority
     #define gpuStreamQuery                                hipStreamQuery
@@ -387,11 +393,14 @@ GPUresult gpuMemcpyAsync(GPUdeviceptr, GPUdeviceptr, size_t, GPUstream_t);
 GPUresult gpuMemHostAlloc(void**, size_t, unsigned int);
 GPUresult gpuMemFreeHost(void*);
 GPUresult gpuMemAlloc(GPUdeviceptr*, size_t);
+gpuError_t gpuMalloc(GPUdeviceptr*, size_t);
 GPUresult gpuMemFree(GPUdeviceptr);
+gpuError_t gpuFree(GPUdeviceptr);
 GPUresult gpuMemPoolCreate(GPUmemoryPool*, const GPUmemPoolProps*);
 GPUresult gpuMemPoolDestroy(GPUmemoryPool);
 GPUresult gpuMemAllocFromPoolAsync(GPUdeviceptr*, size_t, GPUmemoryPool, GPUstream_t);
 GPUresult gpuMemFreeAsync(GPUdeviceptr, GPUstream_t);
+gpuError_t gpuFreeAsync(GPUdeviceptr, GPUstream_t);
 GPUresult gpuGetStreamPriorityRange(int*, int*);
 GPUresult gpuStreamCreateWithPriority(GPUstream_t*, unsigned int, int);
 GPUresult gpuStreamQuery(GPUstream_t);

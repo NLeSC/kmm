@@ -80,8 +80,18 @@ GPUresult gpuMemAlloc(GPUdeviceptr* dev, size_t size) {
     return GPUresult(GPU_ERROR_UNKNOWN);
 }
 
+gpuError_t gpuMalloc(GPUdeviceptr*, size_t)
+{
+    return gpuError_t(GPU_ERROR_UNKNOWN);
+}
+
 GPUresult gpuMemFree(GPUdeviceptr dev) {
     return GPUresult(GPU_ERROR_UNKNOWN);
+}
+
+gpuError_t gpuFree(GPUdeviceptr)
+{
+    return gpuError_t(GPU_ERROR_UNKNOWN);
 }
 
 GPUresult gpuMemPoolCreate(GPUmemoryPool* pool, const GPUmemPoolProps* props) {
@@ -103,6 +113,11 @@ GPUresult gpuMemAllocFromPoolAsync(
 
 GPUresult gpuMemFreeAsync(GPUdeviceptr dev, GPUstream_t stream) {
     return GPUresult(GPU_ERROR_UNKNOWN);
+}
+
+gpuError_t gpuFreeAsync(GPUdeviceptr, GPUstream_t)
+{
+    return gpuError_t(GPU_ERROR_UNKNOWN);
 }
 
 GPUresult gpuGetStreamPriorityRange(int* least, int* greatest) {
