@@ -247,6 +247,11 @@ gpuError_t gpuDeviceSynchronize()
     return gpuError_t(GPU_ERROR_UNKNOWN);
 }
 
+gpuError_t gpuEventElapsedTime(float *ms, gpuEvent_t start, gpuEvent_t stop)
+{
+    return gpuError_t(GPU_ERROR_UNKNOWN);
+}
+
 blasStatus_t blasCreate(blasHandle_t blas) {
     return blasStatus_t(1);
 }
