@@ -63,20 +63,20 @@ using bfloat16_type = __nv_bfloat16;
     #define gpuMemsetD8Async                     cuMemsetD8Async
     #define gpuMemsetD16Async                    cuMemsetD16Async
     #define gpuMemsetD32Async                    cuMemsetD32Async
-	#define gpuMemsetAsync						 cudaMemsetAsync
-    #define gpuMemcpy							 cudaMemcpy
-	#define gpuMemcpyAsync                       cuMemcpyAsync
+    #define gpuMemsetAsync                       cudaMemsetAsync
+    #define gpuMemcpy                            cudaMemcpy
+    #define gpuMemcpyAsync                       cuMemcpyAsync
     #define gpuMemHostAlloc                      cuMemHostAlloc
     #define gpuMemFreeHost                       cuMemFreeHost
     #define gpuMemAlloc                          cuMemAlloc
-    #define gpuAlloc							 cudaMalloc
+    #define gpuAlloc                             cudaMalloc
     #define gpuMemFree                           cuMemFree
-	#define gpuFree                           	 cudaFree
+    #define gpuFree                              cudaFree
     #define gpuMemPoolCreate                     cuMemPoolCreate
     #define gpuMemPoolDestroy                    cuMemPoolDestroy
     #define gpuMemAllocFromPoolAsync             cuMemAllocFromPoolAsync
     #define gpuMemFreeAsync                      cuMemFreeAsync
-	#define gpuFreeAsync                      	 cudaFreeAsync
+    #define gpuFreeAsync                         cudaFreeAsync
     #define gpuGetStreamPriorityRange            cuCtxGetStreamPriorityRange
     #define gpuStreamCreateWithPriority          cuStreamCreateWithPriority
     #define gpuStreamQuery                       cuStreamQuery
@@ -111,9 +111,13 @@ using bfloat16_type = __nv_bfloat16;
     #define gpuMemPoolTrimTo                     cuMemPoolTrimTo
     #define gpuDeviceGetDefaultMemPool           cuDeviceGetDefaultMemPool
     #define gpuPointerGetAttribute               cuPointerGetAttribute
-	#define gpuDeviceSynchronize				 cudaDeviceSynchronize
-	#define gpuEventElapsedTime                  cudaEventElapsedTime
-	#define gpuMemcpyDeviceToHost 				 cudaMemcpyDeviceToHost
+    #define gpuDeviceSynchronize                 cudaDeviceSynchronize
+    #define gpuEventElapsedTime                  cudaEventElapsedTime
+    #define gpuMemcpyHostToHost                  cudaMemcpyHostToHost
+    #define gpuMemcpyHostToDevice                cudaMemcpyHostToDevice
+    #define gpuMemcpyDeviceToHost                cudaMemcpyDeviceToHost
+    #define gpuMemcpyDeviceToDevice              cudaMemcpyDeviceToDevice
+    #define gpuMemcpyDefault                     cudaMemcpyDefault
 
 using GPUresult = CUresult;
 using gpuError_t = cudaError_t;
@@ -195,18 +199,18 @@ using bfloat16_type = __hip_bfloat16;
     #define gpuMemsetD8Async                              hipMemsetD8Async
     #define gpuMemsetD16Async                             hipMemsetD16Async
     #define gpuMemsetD32Async                             hipMemsetD32Async
-	#define gpuMemsetAsync								  hipMemsetAsync
+    #define gpuMemsetAsync                                hipMemsetAsync
     #define gpuMemHostAlloc                               hipHostMalloc
     #define gpuMemFreeHost                                hipHostFree
     #define gpuMemAlloc                                   hipMalloc
-    #define gpuMalloc									  hipMalloc
+    #define gpuMalloc                                     hipMalloc
     #define gpuMemFree                                    hipFree
-    #define gpuFree										  hipFree
+    #define gpuFree                                       hipFree
     #define gpuMemPoolCreate                              hipMemPoolCreate
     #define gpuMemPoolDestroy                             hipMemPoolDestroy
     #define gpuMemAllocFromPoolAsync                      hipMallocFromPoolAsync
     #define gpuMemFreeAsync                               hipFreeAsync
-	#define gpuFreeAsync                               	  hipFreeAsync
+    #define gpuFreeAsync                                  hipFreeAsync
     #define gpuGetStreamPriorityRange                     hipDeviceGetStreamPriorityRange
     #define gpuStreamCreateWithPriority                   hipStreamCreateWithPriority
     #define gpuStreamQuery                                hipStreamQuery
@@ -222,7 +226,7 @@ using bfloat16_type = __hip_bfloat16;
     #define gpuMemcpyDtoH                                 hipMemcpyDtoH
     #define gpuMemcpyDtoDAsync                            hipMemcpyDtoDAsync
     #define gpuMemcpyDtoD                                 hipMemcpyDtoD
-	#define gpuMemcpy									  hipMemcpy
+    #define gpuMemcpy                                     hipMemcpy
     #define gpuGetErrorName                               hipDrvGetErrorName
     #define gpuGetErrorString                             hipDrvGetErrorString
     #define GPUrtGetErrorName                             hipGetErrorName
@@ -242,9 +246,13 @@ using bfloat16_type = __hip_bfloat16;
     #define gpuDeviceGetDefaultMemPool                    hipDeviceGetDefaultMemPool
     #define gpuPointerGetAttribute                        hipPointerGetAttribute
     #define GPU_POINTER_ATTRIBUTE_MEMORY_TYPE             HIP_POINTER_ATTRIBUTE_MEMORY_TYPE
-	#define gpuDeviceSynchronize				 		  hipDeviceSynchronize
-	#define gpuEventElapsedTime                           hipEventElapsedTime
-	#define gpuMemcpyDeviceToHost 				 		  hipMemcpyDeviceToHost
+    #define gpuDeviceSynchronize                          hipDeviceSynchronize
+    #define gpuEventElapsedTime                           hipEventElapsedTime
+    #define gpuMemcpyHostToHost                           hipMemcpyHostToHost
+    #define gpuMemcpyHostToDevice                         hipMemcpyHostToDevice
+    #define gpuMemcpyDeviceToHost                         hipMemcpyDeviceToHost
+    #define gpuMemcpyDeviceToDevice                       hipMemcpyDeviceToDevice
+    #define gpuMemcpyDefault                              hipMemcpyDefault
 
 using GPUresult = hipError_t;
 using gpuError_t = hipError_t;
@@ -297,7 +305,11 @@ GPUresult gpuMemcpyPeerAsync(
     #define GPU_EVENT_DISABLE_TIMING   2
     #define GPU_ERROR_NO_DEVICE        100
     #define GPU_CTX_MAP_HOST           0x08
-	#define gpuMemcpyDeviceToHost 	   2
+    #define gpuMemcpyHostToHost        0
+    #define gpuMemcpyHostToDevice      1
+    #define gpuMemcpyDeviceToHost      2
+    #define gpuMemcpyDeviceToDevice    3
+    #define gpuMemcpyDefault           4
 
 using half_type = unsigned char;
 using bfloat16_type = char;
@@ -394,8 +406,8 @@ GPUresult gpuStreamSynchronize(GPUstream_t);
 GPUresult gpuMemsetD8Async(GPUdeviceptr, unsigned char, size_t, GPUstream_t);
 GPUresult gpuMemsetD16Async(GPUdeviceptr, unsigned short, size_t, GPUstream_t);
 GPUresult gpuMemsetD32Async(GPUdeviceptr, unsigned int, size_t, GPUstream_t);
-gpuError_t gpuMemsetAsync(void *dst, int value, size_t sizeBytes, GPUstream_t stream);
-gpuError_t gpuMemcpy(void *, const void *, size_t, enum gpuMemcpyKind);
+gpuError_t gpuMemsetAsync(void* dst, int value, size_t sizeBytes, GPUstream_t stream);
+gpuError_t gpuMemcpy(void*, const void*, size_t, enum gpuMemcpyKind);
 GPUresult gpuMemcpyAsync(GPUdeviceptr, GPUdeviceptr, size_t, GPUstream_t);
 GPUresult gpuMemHostAlloc(void**, size_t, unsigned int);
 GPUresult gpuMemFreeHost(void*);
@@ -443,7 +455,7 @@ gpuError_t GPUrtLaunchKernel(const void*, dim3, dim3, void**, size_t, GPUstream_
 GPUresult gpuMemPoolTrimTo(GPUmemoryPool, size_t);
 GPUresult gpuDeviceGetDefaultMemPool(GPUmemoryPool*, GPUdevice);
 gpuError_t gpuDeviceSynchronize();
-gpuError_t gpuEventElapsedTime(float *ms, GPUevent_t start, GPUevent_t stop);
+gpuError_t gpuEventElapsedTime(float* ms, GPUevent_t start, GPUevent_t stop);
 
 // Atomics
 template<typename T>

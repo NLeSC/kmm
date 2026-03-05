@@ -59,13 +59,11 @@ GPUresult gpuMemsetD32Async(GPUdeviceptr dev, unsigned int val, size_t size, GPU
     return GPUresult(GPU_ERROR_UNKNOWN);
 }
 
-gpuError_t gpuMemsetAsync(void *dst, int value, size_t sizeBytes, GPUstream_t stream)
-{
+gpuError_t gpuMemsetAsync(void* dst, int value, size_t sizeBytes, GPUstream_t stream) {
     return gpuError_t(GPU_ERROR_UNKNOWN);
 }
 
-gpuError_t gpuMemcpy(void * dst, const void * src, size_t count, enum gpuMemcpyKind kind)
-{
+gpuError_t gpuMemcpy(void* dst, const void* src, size_t count, enum gpuMemcpyKind kind) {
     return gpuError_t(GPU_ERROR_UNKNOWN);
 }
 
@@ -85,8 +83,7 @@ GPUresult gpuMemAlloc(GPUdeviceptr* dev, size_t size) {
     return GPUresult(GPU_ERROR_UNKNOWN);
 }
 
-gpuError_t gpuMalloc(GPUdeviceptr*, size_t)
-{
+gpuError_t gpuMalloc(GPUdeviceptr*, size_t) {
     return gpuError_t(GPU_ERROR_UNKNOWN);
 }
 
@@ -94,8 +91,7 @@ GPUresult gpuMemFree(GPUdeviceptr dev) {
     return GPUresult(GPU_ERROR_UNKNOWN);
 }
 
-gpuError_t gpuFree(GPUdeviceptr)
-{
+gpuError_t gpuFree(GPUdeviceptr) {
     return gpuError_t(GPU_ERROR_UNKNOWN);
 }
 
@@ -120,8 +116,7 @@ GPUresult gpuMemFreeAsync(GPUdeviceptr dev, GPUstream_t stream) {
     return GPUresult(GPU_ERROR_UNKNOWN);
 }
 
-gpuError_t gpuFreeAsync(GPUdeviceptr, GPUstream_t)
-{
+gpuError_t gpuFreeAsync(GPUdeviceptr, GPUstream_t) {
     return gpuError_t(GPU_ERROR_UNKNOWN);
 }
 
@@ -267,13 +262,11 @@ GPUresult gpuDeviceGetDefaultMemPool(GPUmemoryPool* pool, GPUdevice dev) {
     return GPUresult(GPU_ERROR_UNKNOWN);
 }
 
-gpuError_t gpuDeviceSynchronize()
-{
+gpuError_t gpuDeviceSynchronize() {
     return gpuError_t(GPU_ERROR_UNKNOWN);
 }
 
-gpuError_t gpuEventElapsedTime(float *ms, GPUevent_t start, GPUevent_t stop)
-{
+gpuError_t gpuEventElapsedTime(float* ms, GPUevent_t start, GPUevent_t stop) {
     return gpuError_t(GPU_ERROR_UNKNOWN);
 }
 
