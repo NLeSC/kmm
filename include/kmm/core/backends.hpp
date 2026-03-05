@@ -260,7 +260,7 @@ using GPUmemAllocationHandleType = hipMemAllocationHandleType;
 using GPUmemLocationType = hipMemLocationType;
 using GPUevent_t = hipEvent_t;
 using GPU_MEMCPY2D = hip_Memcpy2D;
-using gpuMemcpyKind = hipMemcpyKind;
+using gpuMemcpyDeviceToHost = cudaMemcpyDeviceToHost;
 
     // cuBLAS
     #define blasCreate                                    rocblas_create_handle
@@ -297,6 +297,7 @@ GPUresult gpuMemcpyPeerAsync(
     #define GPU_EVENT_DISABLE_TIMING   2
     #define GPU_ERROR_NO_DEVICE        100
     #define GPU_CTX_MAP_HOST           0x08
+	#define gpuMemcpyDeviceToHost 	   2
 
 using half_type = unsigned char;
 using bfloat16_type = char;
