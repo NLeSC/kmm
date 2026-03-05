@@ -129,6 +129,7 @@ using GPUmemAllocationHandleType = CUmemAllocationHandleType;
 using GPUmemLocationType = CUmemLocationType;
 using GPUevent_t = CUevent;
 using GPU_MEMCPY2D = CUDA_MEMCPY2D;
+using gpuMemcpyDeviceToHost = cudaMemcpyDeviceToHost;
 
 GPUresult gpuMemcpyPeerAsync(
     GPUdeviceptr,
@@ -259,6 +260,7 @@ using GPUmemAllocationHandleType = hipMemAllocationHandleType;
 using GPUmemLocationType = hipMemLocationType;
 using GPUevent_t = hipEvent_t;
 using GPU_MEMCPY2D = hip_Memcpy2D;
+using gpuMemcpyKind = hipMemcpyKind;
 
     // cuBLAS
     #define blasCreate                                    rocblas_create_handle
