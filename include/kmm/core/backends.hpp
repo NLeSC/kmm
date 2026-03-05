@@ -113,6 +113,7 @@ using bfloat16_type = __nv_bfloat16;
     #define gpuPointerGetAttribute               cuPointerGetAttribute
 	#define gpuDeviceSynchronize				 cudaDeviceSynchronize
 	#define gpuEventElapsedTime                  cudaEventElapsedTime
+	#define gpuMemcpyDeviceToHost 				 cudaMemcpyDeviceToHost
 
 using GPUresult = CUresult;
 using gpuError_t = cudaError_t;
@@ -129,7 +130,6 @@ using GPUmemAllocationHandleType = CUmemAllocationHandleType;
 using GPUmemLocationType = CUmemLocationType;
 using GPUevent_t = CUevent;
 using GPU_MEMCPY2D = CUDA_MEMCPY2D;
-using gpuMemcpyDeviceToHost = cudaMemcpyDeviceToHost;
 
 GPUresult gpuMemcpyPeerAsync(
     GPUdeviceptr,
@@ -244,6 +244,7 @@ using bfloat16_type = __hip_bfloat16;
     #define GPU_POINTER_ATTRIBUTE_MEMORY_TYPE             HIP_POINTER_ATTRIBUTE_MEMORY_TYPE
 	#define gpuDeviceSynchronize				 		  hipDeviceSynchronize
 	#define gpuEventElapsedTime                           hipEventElapsedTime
+	#define gpuMemcpyDeviceToHost 				 		  hipMemcpyDeviceToHost
 
 using GPUresult = hipError_t;
 using gpuError_t = hipError_t;
@@ -260,7 +261,6 @@ using GPUmemAllocationHandleType = hipMemAllocationHandleType;
 using GPUmemLocationType = hipMemLocationType;
 using GPUevent_t = hipEvent_t;
 using GPU_MEMCPY2D = hip_Memcpy2D;
-using gpuMemcpyDeviceToHost = hipMemcpyDeviceToHost;
 
     // cuBLAS
     #define blasCreate                                    rocblas_create_handle
