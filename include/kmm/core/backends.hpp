@@ -260,7 +260,7 @@ using GPUmemAllocationHandleType = hipMemAllocationHandleType;
 using GPUmemLocationType = hipMemLocationType;
 using GPUevent_t = hipEvent_t;
 using GPU_MEMCPY2D = hip_Memcpy2D;
-using gpuMemcpyDeviceToHost = cudaMemcpyDeviceToHost;
+using gpuMemcpyDeviceToHost = hipMemcpyDeviceToHost;
 
     // cuBLAS
     #define blasCreate                                    rocblas_create_handle
