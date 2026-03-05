@@ -64,7 +64,8 @@ using bfloat16_type = __nv_bfloat16;
     #define gpuMemsetD16Async                    cuMemsetD16Async
     #define gpuMemsetD32Async                    cuMemsetD32Async
 	#define gpuMemsetAsync						 cudaMemsetAsync
-    #define gpuMemcpyAsync                       cuMemcpyAsync
+    #define gpuMemcpy							 cudaMemcpy
+	#define gpuMemcpyAsync                       cuMemcpyAsync
     #define gpuMemHostAlloc                      cuMemHostAlloc
     #define gpuMemFreeHost                       cuMemFreeHost
     #define gpuMemAlloc                          cuMemAlloc
@@ -220,6 +221,7 @@ using bfloat16_type = __hip_bfloat16;
     #define gpuMemcpyDtoH                                 hipMemcpyDtoH
     #define gpuMemcpyDtoDAsync                            hipMemcpyDtoDAsync
     #define gpuMemcpyDtoD                                 hipMemcpyDtoD
+	#define gpuMemcpy									  hipMemcpy
     #define gpuGetErrorName                               hipDrvGetErrorName
     #define gpuGetErrorString                             hipDrvGetErrorString
     #define GPUrtGetErrorName                             hipGetErrorName
@@ -347,6 +349,7 @@ struct GPU_MEMCPY2D {
 };
 enum GPUresult {};
 enum gpuError_t {};
+enum gpuMemcpyKind {};
 using GPUdevice_attribute = int;
 using GPUstream_flags = int;
 using GPUevent_wait_flags = int;
@@ -388,7 +391,8 @@ GPUresult gpuStreamSynchronize(GPUstream_t);
 GPUresult gpuMemsetD8Async(GPUdeviceptr, unsigned char, size_t, GPUstream_t);
 GPUresult gpuMemsetD16Async(GPUdeviceptr, unsigned short, size_t, GPUstream_t);
 GPUresult gpuMemsetD32Async(GPUdeviceptr, unsigned int, size_t, GPUstream_t);
-gpuError_t 	gpuMemsetAsync(void *dst, int value, size_t sizeBytes, GPUstream_t stream);
+gpuError_t gpuMemsetAsync(void *dst, int value, size_t sizeBytes, GPUstream_t stream);
+gpuError_t gpuMemcpy(void *, const void *, size_t, enum gpuMemcpyKind);
 GPUresult gpuMemcpyAsync(GPUdeviceptr, GPUdeviceptr, size_t, GPUstream_t);
 GPUresult gpuMemHostAlloc(void**, size_t, unsigned int);
 GPUresult gpuMemFreeHost(void*);
