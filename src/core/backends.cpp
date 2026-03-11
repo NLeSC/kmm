@@ -83,6 +83,10 @@ GPUresult gpuMemAlloc(GPUdeviceptr* dev, size_t size) {
     return GPUresult(GPU_ERROR_UNKNOWN);
 }
 
+GPUresult gpuMemAllocAsync(GPUdeviceptr*, size_t, GPUstream_t) {
+    return GPUresult(GPU_ERROR_UNKNOWN);
+}
+
 gpuError_t gpuMalloc(GPUdeviceptr*, size_t) {
     return gpuError_t(GPU_ERROR_UNKNOWN);
 }

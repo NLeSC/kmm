@@ -69,6 +69,7 @@ using bfloat16_type = __nv_bfloat16;
     #define gpuMemHostAlloc                      cuMemHostAlloc
     #define gpuMemFreeHost                       cuMemFreeHost
     #define gpuMemAlloc                          cuMemAlloc
+    #define gpuMemAllocAsync                     cuMemAllocAsync
     #define gpuAlloc                             cudaMalloc
     #define gpuMemFree                           cuMemFree
     #define gpuFree                              cudaFree
@@ -203,6 +204,7 @@ using bfloat16_type = __hip_bfloat16;
     #define gpuMemHostAlloc                               hipHostMalloc
     #define gpuMemFreeHost                                hipHostFree
     #define gpuMemAlloc                                   hipMalloc
+    #define gpuMemAllocAsync                              hipMallocAsync
     #define gpuMalloc                                     hipMalloc
     #define gpuMemFree                                    hipFree
     #define gpuFree                                       hipFree
@@ -412,6 +414,7 @@ GPUresult gpuMemcpyAsync(GPUdeviceptr, GPUdeviceptr, size_t, GPUstream_t);
 GPUresult gpuMemHostAlloc(void**, size_t, unsigned int);
 GPUresult gpuMemFreeHost(void*);
 GPUresult gpuMemAlloc(GPUdeviceptr*, size_t);
+GPUresult gpuMemAllocAsync(GPUdeviceptr*, size_t, GPUstream_t);
 gpuError_t gpuMalloc(GPUdeviceptr*, size_t);
 GPUresult gpuMemFree(GPUdeviceptr);
 gpuError_t gpuFree(GPUdeviceptr);
