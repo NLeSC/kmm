@@ -111,6 +111,7 @@ using bfloat16_type = __nv_bfloat16;
     #define GPUrtLaunchKernel                    cudaLaunchKernel
     #define gpuMemPoolTrimTo                     cuMemPoolTrimTo
     #define gpuDeviceGetDefaultMemPool           cuDeviceGetDefaultMemPool
+    #define gpuMemPoolSetAttribute               cuMemPoolSetAttribute
     #define gpuPointerGetAttribute               cuPointerGetAttribute
     #define gpuDeviceSynchronize                 cudaDeviceSynchronize
     #define gpuEventElapsedTime                  cudaEventElapsedTime
@@ -119,6 +120,7 @@ using bfloat16_type = __nv_bfloat16;
     #define gpuMemcpyDeviceToHost                cudaMemcpyDeviceToHost
     #define gpuMemcpyDeviceToDevice              cudaMemcpyDeviceToDevice
     #define gpuMemcpyDefault                     cudaMemcpyDefault
+    #define gpuMemPoolAttrReleaseThreshold       cuMemPoolAttrReleaseThreshold
 
 using GPUresult = CUresult;
 using gpuError_t = cudaError_t;
@@ -135,6 +137,14 @@ using GPUmemAllocationHandleType = CUmemAllocationHandleType;
 using GPUmemLocationType = CUmemLocationType;
 using GPUevent_t = CUevent;
 using GPU_MEMCPY2D = CUDA_MEMCPY2D;
+using gpuMemPoolAttr = cuMemPoolAttr;
+
+    // cuBLAS
+    #define blasCreate          cublasCreate
+    #define blasSetStream       cublasSetStream
+    #define blasDestroy         cublasDestroy
+    #define blasGetStatusName   cublasGetStatusName
+    #define blasGetStatusString cublasGetStatusString
 
 GPUresult gpuMemcpyPeerAsync(
     GPUdeviceptr,
@@ -246,6 +256,7 @@ using bfloat16_type = __hip_bfloat16;
     #define GPUrtLaunchKernel                             hipLaunchKernel
     #define gpuMemPoolTrimTo                              hipMemPoolTrimTo
     #define gpuDeviceGetDefaultMemPool                    hipDeviceGetDefaultMemPool
+    #define gpuMemPoolSetAttribute                        hipMemPoolSetAttribute
     #define gpuPointerGetAttribute                        hipPointerGetAttribute
     #define GPU_POINTER_ATTRIBUTE_MEMORY_TYPE             HIP_POINTER_ATTRIBUTE_MEMORY_TYPE
     #define gpuDeviceSynchronize                          hipDeviceSynchronize
@@ -255,6 +266,7 @@ using bfloat16_type = __hip_bfloat16;
     #define gpuMemcpyDeviceToHost                         hipMemcpyDeviceToHost
     #define gpuMemcpyDeviceToDevice                       hipMemcpyDeviceToDevice
     #define gpuMemcpyDefault                              hipMemcpyDefault
+    #define
 
 using GPUresult = hipError_t;
 using gpuError_t = hipError_t;
@@ -271,12 +283,13 @@ using GPUmemAllocationHandleType = hipMemAllocationHandleType;
 using GPUmemLocationType = hipMemLocationType;
 using GPUevent_t = hipEvent_t;
 using GPU_MEMCPY2D = hip_Memcpy2D;
+using gpuMemPoolAttr = hipMemPoolAttr;
 
     // cuBLAS
-    #define blasCreate                                    rocblas_create_handle
-    #define blasSetStream                                 rocblas_set_stream
-    #define blasDestroy                                   rocblas_destroy_handle
-    #define blasGetStatusString                           rocblas_status_to_string
+    #define blasCreate          rocblas_create_handle
+    #define blasSetStream       rocblas_set_stream
+    #define blasDestroy         rocblas_destroy_handle
+    #define blasGetStatusString rocblas_status_to_string
 
 using blasStatus_t = rocblas_status;
 using blasHandle_t = rocblas_handle;
@@ -297,21 +310,21 @@ GPUresult gpuMemcpyPeerAsync(
 );
 
 #else
-    #define GPU_DEVICE_ATTRIBUTE_MAX   1
-    #define GPU_MEMHOSTALLOC_PORTABLE  0
-    #define GPU_MEMHOSTALLOC_DEVICEMAP 0
-    #define GPU_SUCCESS                0
-    #define GPU_ERROR_OUT_OF_MEMORY    0
-    #define GPU_ERROR_UNKNOWN          0
-    #define GPU_ERROR_NOT_READY        0
-    #define GPU_EVENT_DISABLE_TIMING   2
-    #define GPU_ERROR_NO_DEVICE        100
-    #define GPU_CTX_MAP_HOST           0x08
-    #define gpuMemcpyHostToHost        0
-    #define gpuMemcpyHostToDevice      1
-    #define gpuMemcpyDeviceToHost      2
-    #define gpuMemcpyDeviceToDevice    3
-    #define gpuMemcpyDefault           4
+    #define GPU_DEVICE_ATTRIBUTE_MAX       1
+    #define GPU_MEMHOSTALLOC_PORTABLE      0
+    #define GPU_MEMHOSTALLOC_DEVICEMAP     0
+    #define GPU_SUCCESS                    0
+    #define GPU_ERROR_OUT_OF_MEMORY        0
+    #define GPU_ERROR_UNKNOWN              0
+    #define GPU_ERROR_NOT_READY            0
+    #define GPU_EVENT_DISABLE_TIMING       2
+    #define GPU_ERROR_NO_DEVICE            100
+    #define GPU_CTX_MAP_HOST               0x08
+    #define gpuMemcpyHostToHost            0
+    #define gpuMemcpyHostToDevice          1
+    #define gpuMemcpyDeviceToHost          2
+    #define gpuMemcpyDeviceToDevice        3
+    #define gpuMemcpyDefault               4
 
 using half_type = unsigned char;
 using bfloat16_type = char;
@@ -367,6 +380,8 @@ struct GPU_MEMCPY2D {
 enum GPUresult {};
 enum gpuError_t {};
 enum gpuMemcpyKind {};
+enum gpuMemPoolAttr {};
+    #define gpuMemPoolAttrReleaseThreshold gpuMemPoolAttr(3)
 using GPUdevice_attribute = int;
 using GPUstream_flags = int;
 using GPUevent_wait_flags = int;
@@ -457,6 +472,7 @@ GPUresult gpuCtxPopCurrent(GPUcontext*);
 gpuError_t GPUrtLaunchKernel(const void*, dim3, dim3, void**, size_t, GPUstream_t);
 GPUresult gpuMemPoolTrimTo(GPUmemoryPool, size_t);
 GPUresult gpuDeviceGetDefaultMemPool(GPUmemoryPool*, GPUdevice);
+GPUresult gpuMemPoolSetAttribute(GPUmemoryPool, gpuMemPoolAttr, void*);
 gpuError_t gpuDeviceSynchronize();
 gpuError_t gpuEventElapsedTime(float* ms, GPUevent_t start, GPUevent_t stop);
 

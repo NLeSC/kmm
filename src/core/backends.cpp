@@ -266,6 +266,10 @@ GPUresult gpuDeviceGetDefaultMemPool(GPUmemoryPool* pool, GPUdevice dev) {
     return GPUresult(GPU_ERROR_UNKNOWN);
 }
 
+GPUresult gpuMemPoolSetAttribute(GPUmemoryPool memPool, gpuMemPoolAttr attr, void* value) {
+    return GPUresult(GPU_ERROR_UNKNOWN);
+}
+
 gpuError_t gpuDeviceSynchronize() {
     return gpuError_t(GPU_ERROR_UNKNOWN);
 }
