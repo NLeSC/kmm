@@ -266,7 +266,7 @@ using bfloat16_type = __hip_bfloat16;
     #define gpuMemcpyDeviceToHost                         hipMemcpyDeviceToHost
     #define gpuMemcpyDeviceToDevice                       hipMemcpyDeviceToDevice
     #define gpuMemcpyDefault                              hipMemcpyDefault
-    #define
+    #define gpuMemPoolAttrReleaseThreshold                hipMemPoolAttrReleaseThreshold
 
 using GPUresult = hipError_t;
 using gpuError_t = hipError_t;
@@ -286,10 +286,10 @@ using GPU_MEMCPY2D = hip_Memcpy2D;
 using gpuMemPoolAttr = hipMemPoolAttr;
 
     // cuBLAS
-    #define blasCreate          rocblas_create_handle
-    #define blasSetStream       rocblas_set_stream
-    #define blasDestroy         rocblas_destroy_handle
-    #define blasGetStatusString rocblas_status_to_string
+    #define blasCreate                                    rocblas_create_handle
+    #define blasSetStream                                 rocblas_set_stream
+    #define blasDestroy                                   rocblas_destroy_handle
+    #define blasGetStatusString                           rocblas_status_to_string
 
 using blasStatus_t = rocblas_status;
 using blasHandle_t = rocblas_handle;
