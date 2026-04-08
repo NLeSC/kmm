@@ -126,7 +126,7 @@ using GPUmemAllocationHandleType = CUmemAllocationHandleType;
 using GPUmemLocationType = CUmemLocationType;
 using GPUevent_t = CUevent;
 using GPU_MEMCPY2D = CUDA_MEMCPY2D;
-using gpuMemPoolAttr = cuMemPoolAttr;
+using gpuMemPoolAttr = cudaMemPoolAttr;
 
 // cuBLAS
 #define blasCreate          cublasCreate
