@@ -68,21 +68,21 @@ using GPUevent_wait_flags = int;
 enum GPUpointer_attribute {};
 
 // Constants
-#define GPU_DEVICE_ATTRIBUTE_MAX   1
-#define GPU_MEMHOSTALLOC_PORTABLE  0
-#define GPU_MEMHOSTALLOC_DEVICEMAP 0
-#define GPU_SUCCESS                0
-#define GPU_ERROR_OUT_OF_MEMORY    0
-#define GPU_ERROR_UNKNOWN          0
-#define GPU_ERROR_NOT_READY        0
-#define GPU_EVENT_DISABLE_TIMING   2
-#define GPU_ERROR_NO_DEVICE        100
-#define GPU_CTX_MAP_HOST           0x08
-#define gpuMemcpyHostToHost        0
-#define gpuMemcpyHostToDevice      1
-#define gpuMemcpyDeviceToHost      2
-#define gpuMemcpyDeviceToDevice    3
-#define gpuMemcpyDefault           4
+#define GPU_DEVICE_ATTRIBUTE_MAX                      1
+#define GPU_MEMHOSTALLOC_PORTABLE                     0
+#define GPU_MEMHOSTALLOC_DEVICEMAP                    0
+#define GPU_SUCCESS                                   0
+#define GPU_ERROR_OUT_OF_MEMORY                       0
+#define GPU_ERROR_UNKNOWN                             0
+#define GPU_ERROR_NOT_READY                           0
+#define GPU_EVENT_DISABLE_TIMING                      2
+#define GPU_ERROR_NO_DEVICE                           100
+#define GPU_CTX_MAP_HOST                              0x08
+#define gpuMemcpyHostToHost                           0
+#define gpuMemcpyHostToDevice                         1
+#define gpuMemcpyDeviceToHost                         2
+#define gpuMemcpyDeviceToDevice                       3
+#define gpuMemcpyDefault                              4
 #define GPU_DEVICE_ATTRIBUTE_MAX_THREADS_PER_BLOCK    GPUdevice_attribute(1)
 #define GPU_DEVICE_ATTRIBUTE_MAX_BLOCK_DIM_X          GPUdevice_attribute(2)
 #define GPU_DEVICE_ATTRIBUTE_MAX_BLOCK_DIM_Y          GPUdevice_attribute(3)
@@ -94,8 +94,8 @@ enum GPUpointer_attribute {};
 #define GPU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MINOR GPUdevice_attribute(76)
 #define GPU_STREAM_NON_BLOCKING                       GPUstream_flags(1)
 #define GPU_EVENT_WAIT_DEFAULT                        GPUevent_wait_flags(0)
-#define GPU_POINTER_ATTRIBUTE_MEMORY_TYPE    GPUpointer_attribute(2)
-#define GPU_POINTER_ATTRIBUTE_DEVICE_ORDINAL GPUpointer_attribute(9)
+#define GPU_POINTER_ATTRIBUTE_MEMORY_TYPE             GPUpointer_attribute(2)
+#define GPU_POINTER_ATTRIBUTE_DEVICE_ORDINAL          GPUpointer_attribute(9)
 
 // Dummy functions
 GPUresult gpuCtxGetDevice(GPUdevice*);
