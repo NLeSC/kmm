@@ -11,9 +11,27 @@
 
 namespace kmm {
 
+// Types
 using half_type = __half;
 using bfloat16_type = __nv_bfloat16;
+using GPUresult = CUresult;
+using gpuError_t = cudaError_t;
+using GPUdevice = CUdevice;
+using GPUdevice_attribute = CUdevice_attribute;
+using GPUcontext = CUcontext;
+using GPUmemorytype = CUmemorytype;
+using GPUstream_t = CUstream;
+using GPUdeviceptr = CUdeviceptr;
+using GPUmemoryPool = CUmemoryPool;
+using GPUmemPoolProps = CUmemPoolProps;
+using GPUmemAllocationType = CUmemAllocationType;
+using GPUmemAllocationHandleType = CUmemAllocationHandleType;
+using GPUmemLocationType = CUmemLocationType;
+using GPUevent_t = CUevent;
+using GPU_MEMCPY2D = CUDA_MEMCPY2D;
+using gpuMemPoolAttr = cudaMemPoolAttr;
 
+// Constants
 #define GPU_DEVICE_ATTRIBUTE_MAX                      CU_DEVICE_ATTRIBUTE_MAX
 #define GPU_DEVICE_ATTRIBUTE_MAX_THREADS_PER_BLOCK    CU_DEVICE_ATTRIBUTE_MAX_THREADS_PER_BLOCK
 #define GPU_DEVICE_ATTRIBUTE_MAX_BLOCK_DIM_X          CU_DEVICE_ATTRIBUTE_MAX_BLOCK_DIM_X
@@ -42,102 +60,76 @@ using bfloat16_type = __nv_bfloat16;
 #define GPU_POINTER_ATTRIBUTE_MEMORY_TYPE             CU_POINTER_ATTRIBUTE_MEMORY_TYPE
 #define GPU_POINTER_ATTRIBUTE_DEVICE_ORDINAL          CU_POINTER_ATTRIBUTE_DEVICE_ORDINAL
 #define GPU_CTX_MAP_HOST                              CU_CTX_MAP_HOST
-#define gpuCtxGetDevice                               cuCtxGetDevice
-#define gpuDeviceGetName                              cuDeviceGetName
-#define gpuDeviceGetAttribute                         cuDeviceGetAttribute
-#define gpuMemGetInfo                                 cuMemGetInfo
-#define gpuMemcpyHtoDAsync                            cuMemcpyHtoDAsync
-#define gpuMemcpyDtoHAsync                            cuMemcpyDtoHAsync
-#define gpuStreamSynchronize                          cuStreamSynchronize
-#define gpuMemsetD8Async                              cuMemsetD8Async
-#define gpuMemsetD16Async                             cuMemsetD16Async
-#define gpuMemsetD32Async                             cuMemsetD32Async
-#define gpuMemsetAsync                                cudaMemsetAsync
-#define gpuMemcpy                                     cudaMemcpy
-#define gpuMemcpyAsync                                cuMemcpyAsync
-#define gpuMemHostAlloc                               cuMemHostAlloc
-#define gpuMemFreeHost                                cuMemFreeHost
-#define gpuMemAlloc                                   cuMemAlloc
-#define gpuMemAllocAsync                              cuMemAllocAsync
-#define gpuAlloc                                      cudaMalloc
-#define gpuMemFree                                    cuMemFree
-#define gpuFree                                       cudaFree
-#define gpuMemPoolCreate                              cuMemPoolCreate
-#define gpuMemPoolDestroy                             cuMemPoolDestroy
-#define gpuMemAllocFromPoolAsync                      cuMemAllocFromPoolAsync
-#define gpuMemFreeAsync                               cuMemFreeAsync
-#define gpuFreeAsync                                  cudaFreeAsync
-#define gpuGetStreamPriorityRange                     cuCtxGetStreamPriorityRange
-#define gpuStreamCreateWithPriority                   cuStreamCreateWithPriority
-#define gpuStreamQuery                                cuStreamQuery
-#define gpuStreamDestroy                              cuStreamDestroy
-#define gpuEventSynchronize                           cuEventSynchronize
-#define gpuEventRecord                                cuEventRecord
-#define gpuStreamWaitEvent                            cuStreamWaitEvent
-#define gpuEventQuery                                 cuEventQuery
-#define gpuEventDestroy                               cuEventDestroy
-#define gpuEventCreate                                cuEventCreate
-#define gpuMemcpyHtoD                                 cuMemcpyHtoD
-#define gpuMemcpy2DAsync                              cuMemcpy2DAsync
-#define gpuMemcpy2D                                   cuMemcpy2D
-#define gpuMemcpyDtoH                                 cuMemcpyDtoH
-#define gpuMemcpyDtoDAsync                            cuMemcpyDtoDAsync
-#define gpuMemcpyDtoD                                 cuMemcpyDtoD
-#define gpuGetErrorName                               cuGetErrorName
-#define gpuGetErrorString                             cuGetErrorString
-#define GPUrtGetErrorName                             cudaGetErrorName
-#define GPUrtGetErrorString                           cudaGetErrorString
-#define gpuGetLastError                               cudaGetLastError
-#define gpuInit                                       cuInit
-#define gpuDeviceGetCount                             cuDeviceGetCount
-#define gpuDeviceGet                                  cuDeviceGet
-#define gpuCtxCreate                                  cuCtxCreate
-#define gpuCtxDestroy                                 cuCtxDestroy
-#define gpuDevicePrimaryCtxRetain                     cuDevicePrimaryCtxRetain
-#define gpuDevicePrimaryCtxRelease                    cuDevicePrimaryCtxRelease
-#define gpuCtxPushCurrent                             cuCtxPushCurrent
-#define gpuCtxPopCurrent                              cuCtxPopCurrent
-#define GPUrtLaunchKernel                             cudaLaunchKernel
-#define gpuMemPoolTrimTo                              cuMemPoolTrimTo
-#define gpuDeviceGetDefaultMemPool                    cuDeviceGetDefaultMemPool
-#define gpuMemPoolSetAttribute                        cuMemPoolSetAttribute
-#define gpuPointerGetAttribute                        cuPointerGetAttribute
-#define gpuDeviceSynchronize                          cudaDeviceSynchronize
-#define gpuEventElapsedTime                           cudaEventElapsedTime
-#define gpuMemcpyHostToHost                           cudaMemcpyHostToHost
-#define gpuMemcpyHostToDevice                         cudaMemcpyHostToDevice
-#define gpuMemcpyDeviceToHost                         cudaMemcpyDeviceToHost
-#define gpuMemcpyDeviceToDevice                       cudaMemcpyDeviceToDevice
-#define gpuMemcpyDefault                              cudaMemcpyDefault
-#define gpuMemPoolAttrReleaseThreshold                cuMemPoolAttrReleaseThreshold
 
-using GPUresult = CUresult;
-using gpuError_t = cudaError_t;
-using GPUdevice = CUdevice;
-using GPUdevice_attribute = CUdevice_attribute;
-using GPUcontext = CUcontext;
-using GPUmemorytype = CUmemorytype;
-using GPUstream_t = CUstream;
-using GPUdeviceptr = CUdeviceptr;
-using GPUmemoryPool = CUmemoryPool;
-using GPUmemPoolProps = CUmemPoolProps;
-using GPUmemAllocationType = CUmemAllocationType;
-using GPUmemAllocationHandleType = CUmemAllocationHandleType;
-using GPUmemLocationType = CUmemLocationType;
-using GPUevent_t = CUevent;
-using GPU_MEMCPY2D = CUDA_MEMCPY2D;
-using gpuMemPoolAttr = cudaMemPoolAttr;
-
-// cuBLAS
-#define blasCreate          cublasCreate
-#define blasSetStream       cublasSetStream
-#define blasDestroy         cublasDestroy
-#define blasGetStatusName   cublasGetStatusName
-#define blasGetStatusString cublasGetStatusString
-
-using blasStatus_t = cublasStatus_t;
-using blasHandle_t = cublasHandle_t;
-
+// CUDA Functions
+#define gpuCtxGetDevice                cuCtxGetDevice
+#define gpuDeviceGetName               cuDeviceGetName
+#define gpuDeviceGetAttribute          cuDeviceGetAttribute
+#define gpuMemGetInfo                  cuMemGetInfo
+#define gpuMemcpyHtoDAsync             cuMemcpyHtoDAsync
+#define gpuMemcpyDtoHAsync             cuMemcpyDtoHAsync
+#define gpuStreamSynchronize           cuStreamSynchronize
+#define gpuMemsetD8Async               cuMemsetD8Async
+#define gpuMemsetD16Async              cuMemsetD16Async
+#define gpuMemsetD32Async              cuMemsetD32Async
+#define gpuMemsetAsync                 cudaMemsetAsync
+#define gpuMemcpy                      cudaMemcpy
+#define gpuMemcpyAsync                 cuMemcpyAsync
+#define gpuMemHostAlloc                cuMemHostAlloc
+#define gpuMemFreeHost                 cuMemFreeHost
+#define gpuMemAlloc                    cuMemAlloc
+#define gpuMemAllocAsync               cuMemAllocAsync
+#define gpuAlloc                       cudaMalloc
+#define gpuMemFree                     cuMemFree
+#define gpuFree                        cudaFree
+#define gpuMemPoolCreate               cuMemPoolCreate
+#define gpuMemPoolDestroy              cuMemPoolDestroy
+#define gpuMemAllocFromPoolAsync       cuMemAllocFromPoolAsync
+#define gpuMemFreeAsync                cuMemFreeAsync
+#define gpuFreeAsync                   cudaFreeAsync
+#define gpuGetStreamPriorityRange      cuCtxGetStreamPriorityRange
+#define gpuStreamCreateWithPriority    cuStreamCreateWithPriority
+#define gpuStreamQuery                 cuStreamQuery
+#define gpuStreamDestroy               cuStreamDestroy
+#define gpuEventSynchronize            cuEventSynchronize
+#define gpuEventRecord                 cuEventRecord
+#define gpuStreamWaitEvent             cuStreamWaitEvent
+#define gpuEventQuery                  cuEventQuery
+#define gpuEventDestroy                cuEventDestroy
+#define gpuEventCreate                 cuEventCreate
+#define gpuMemcpyHtoD                  cuMemcpyHtoD
+#define gpuMemcpy2DAsync               cuMemcpy2DAsync
+#define gpuMemcpy2D                    cuMemcpy2D
+#define gpuMemcpyDtoH                  cuMemcpyDtoH
+#define gpuMemcpyDtoDAsync             cuMemcpyDtoDAsync
+#define gpuMemcpyDtoD                  cuMemcpyDtoD
+#define gpuGetErrorName                cuGetErrorName
+#define gpuGetErrorString              cuGetErrorString
+#define GPUrtGetErrorName              cudaGetErrorName
+#define GPUrtGetErrorString            cudaGetErrorString
+#define gpuGetLastError                cudaGetLastError
+#define gpuInit                        cuInit
+#define gpuDeviceGetCount              cuDeviceGetCount
+#define gpuDeviceGet                   cuDeviceGet
+#define gpuCtxCreate                   cuCtxCreate
+#define gpuCtxDestroy                  cuCtxDestroy
+#define gpuDevicePrimaryCtxRetain      cuDevicePrimaryCtxRetain
+#define gpuDevicePrimaryCtxRelease     cuDevicePrimaryCtxRelease
+#define gpuCtxPushCurrent              cuCtxPushCurrent
+#define gpuCtxPopCurrent               cuCtxPopCurrent
+#define GPUrtLaunchKernel              cudaLaunchKernel
+#define gpuMemPoolTrimTo               cuMemPoolTrimTo
+#define gpuDeviceGetDefaultMemPool     cuDeviceGetDefaultMemPool
+#define gpuMemPoolSetAttribute         cuMemPoolSetAttribute
+#define gpuPointerGetAttribute         cuPointerGetAttribute
+#define gpuDeviceSynchronize           cudaDeviceSynchronize
+#define gpuEventElapsedTime            cudaEventElapsedTime
+#define gpuMemcpyHostToHost            cudaMemcpyHostToHost
+#define gpuMemcpyHostToDevice          cudaMemcpyHostToDevice
+#define gpuMemcpyDeviceToHost          cudaMemcpyDeviceToHost
+#define gpuMemcpyDeviceToDevice        cudaMemcpyDeviceToDevice
+#define gpuMemcpyDefault               cudaMemcpyDefault
+#define gpuMemPoolAttrReleaseThreshold cuMemPoolAttrReleaseThreshold
 GPUresult gpuMemcpyPeerAsync(
     GPUdeviceptr,
     GPUcontext,
@@ -148,5 +140,16 @@ GPUresult gpuMemcpyPeerAsync(
     size_t,
     GPUstream_t
 );
+
+// cuBLAS types
+using blasStatus_t = cublasStatus_t;
+using blasHandle_t = cublasHandle_t;
+
+// cuBLAS functions
+#define blasCreate          cublasCreate
+#define blasSetStream       cublasSetStream
+#define blasDestroy         cublasDestroy
+#define blasGetStatusName   cublasGetStatusName
+#define blasGetStatusString cublasGetStatusString
 
 }  // namespace kmm

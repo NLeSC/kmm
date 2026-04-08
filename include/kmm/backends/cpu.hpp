@@ -6,26 +6,10 @@
 
 namespace kmm {
 
-#define GPU_DEVICE_ATTRIBUTE_MAX   1
-#define GPU_MEMHOSTALLOC_PORTABLE  0
-#define GPU_MEMHOSTALLOC_DEVICEMAP 0
-#define GPU_SUCCESS                0
-#define GPU_ERROR_OUT_OF_MEMORY    0
-#define GPU_ERROR_UNKNOWN          0
-#define GPU_ERROR_NOT_READY        0
-#define GPU_EVENT_DISABLE_TIMING   2
-#define GPU_ERROR_NO_DEVICE        100
-#define GPU_CTX_MAP_HOST           0x08
-#define gpuMemcpyHostToHost        0
-#define gpuMemcpyHostToDevice      1
-#define gpuMemcpyDeviceToHost      2
-#define gpuMemcpyDeviceToDevice    3
-#define gpuMemcpyDefault           4
-
+// Types
 using half_type = unsigned char;
 using bfloat16_type = char;
 using size_t = std::size_t;
-
 using GPUdevice = int;
 class dim3 {
   public:
@@ -81,7 +65,24 @@ enum gpuMemPoolAttr {};
 using GPUdevice_attribute = int;
 using GPUstream_flags = int;
 using GPUevent_wait_flags = int;
+enum GPUpointer_attribute {};
 
+// Constants
+#define GPU_DEVICE_ATTRIBUTE_MAX   1
+#define GPU_MEMHOSTALLOC_PORTABLE  0
+#define GPU_MEMHOSTALLOC_DEVICEMAP 0
+#define GPU_SUCCESS                0
+#define GPU_ERROR_OUT_OF_MEMORY    0
+#define GPU_ERROR_UNKNOWN          0
+#define GPU_ERROR_NOT_READY        0
+#define GPU_EVENT_DISABLE_TIMING   2
+#define GPU_ERROR_NO_DEVICE        100
+#define GPU_CTX_MAP_HOST           0x08
+#define gpuMemcpyHostToHost        0
+#define gpuMemcpyHostToDevice      1
+#define gpuMemcpyDeviceToHost      2
+#define gpuMemcpyDeviceToDevice    3
+#define gpuMemcpyDefault           4
 #define GPU_DEVICE_ATTRIBUTE_MAX_THREADS_PER_BLOCK    GPUdevice_attribute(1)
 #define GPU_DEVICE_ATTRIBUTE_MAX_BLOCK_DIM_X          GPUdevice_attribute(2)
 #define GPU_DEVICE_ATTRIBUTE_MAX_BLOCK_DIM_Y          GPUdevice_attribute(3)
@@ -93,8 +94,6 @@ using GPUevent_wait_flags = int;
 #define GPU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MINOR GPUdevice_attribute(76)
 #define GPU_STREAM_NON_BLOCKING                       GPUstream_flags(1)
 #define GPU_EVENT_WAIT_DEFAULT                        GPUevent_wait_flags(0)
-
-enum GPUpointer_attribute {};
 #define GPU_POINTER_ATTRIBUTE_MEMORY_TYPE    GPUpointer_attribute(2)
 #define GPU_POINTER_ATTRIBUTE_DEVICE_ORDINAL GPUpointer_attribute(9)
 
@@ -172,7 +171,7 @@ GPUresult gpuMemPoolSetAttribute(GPUmemoryPool, gpuMemPoolAttr, void*);
 gpuError_t gpuDeviceSynchronize();
 gpuError_t gpuEventElapsedTime(float* ms, GPUevent_t start, GPUevent_t stop);
 
-// Atomics
+// Dummy atomic operations
 template<typename T>
 T atomicAnd(T* input, T output) {
     return 0;
@@ -194,9 +193,11 @@ T atomicMax(T* input, T output) {
     return 0;
 };
 
-// Dummy BLAS
+// Dummy BLAS types
 using blasHandle_t = void*;
 enum blasStatus_t {};
+
+// Dummy BLAS functions
 blasStatus_t blasCreate(blasHandle_t);
 blasStatus_t blasSetStream(blasHandle_t, GPUstream_t);
 blasStatus_t blasDestroy(blasHandle_t);
