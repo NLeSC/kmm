@@ -1,3 +1,5 @@
+#ifdef KMM_USE_HIP
+
 #include "kmm/core/backends.hpp"
 #include "kmm/memops/types.hpp"
 
@@ -43,3 +45,5 @@ GPUresult gpuMemcpyPeerAsync(
 }
 
 }  // namespace kmm
+
+#endif  // KMM_USE_HIP

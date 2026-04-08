@@ -1,3 +1,5 @@
+#ifdef KMM_USE_CUDA
+
 #include "kmm/core/backends.hpp"
 #include "kmm/memops/types.hpp"
 
@@ -24,3 +26,5 @@ GPUresult gpuMemcpyPeerAsync(
 }
 
 }  // namespace kmm
+
+#endif  // KMM_USE_CUDA
