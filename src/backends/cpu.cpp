@@ -1,5 +1,3 @@
-#if !defined(KMM_USE_CUDA) && !defined(KMM_USE_HIP)
-
 #include "kmm/core/backends.hpp"
 #include "kmm/memops/types.hpp"
 
@@ -316,5 +314,3 @@ void execute_gpu_reduction_async(
 void execute_gpu_fill_async(GPUstream_t stream, GPUdeviceptr dst_buffer, const FillDef& fill) {}
 
 }  // namespace kmm
-
-#endif  // !defined(KMM_USE_CUDA) && !defined(KMM_USE_HIP)

@@ -29,6 +29,9 @@ file(GLOB_RECURSE sources
   "${PROJECT_SOURCE_DIR}/src/*.cu"
 )
 
+# Exclude backend implementation files from compilation, as they are included in `src/core/backends.cpp`
+list(FILTER sources EXCLUDE REGEX "src/backends/(cuda|hip|cpu)\\.cpp$")
+
 # Create library
 if(KMM_STATIC)
   add_library(${PROJECT_NAME} STATIC ${sources})
