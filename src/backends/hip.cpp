@@ -43,5 +43,3 @@ GPUresult gpuMemcpyPeerAsync(
 }
 
 }  // namespace kmm
-
-#endif  // KMM_USE_
