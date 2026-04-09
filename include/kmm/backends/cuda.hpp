@@ -60,7 +60,7 @@ using gpu_mem_pool_attr_t = cudaMemPoolAttr;
 
 // Stream Management Constants & Functions
 
-#define G_STREAM_NON_BLOCKING           G_STREAM_NON_BLOCKING
+#define G_STREAM_NON_BLOCKING           CU_STREAM_NON_BLOCKING
 #define g_ctx_get_stream_priority_range cuCtxGetStreamPriorityRange
 #define g_stream_create_with_priority   cuStreamCreateWithPriority
 #define g_stream_query                  cuStreamQuery

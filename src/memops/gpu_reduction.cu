@@ -69,9 +69,9 @@ __global__ void reduction_kernel(
 
 template<typename T, Reduction Op>
 void execute_reduction_for_type_and_op(
-    GPUstream_t stream,
-    GPUdeviceptr src_buffer,
-    GPUdeviceptr dst_buffer,
+    g_stream_t stream,
+    g_device_ptr_t src_buffer,
+    g_device_ptr_t dst_buffer,
     size_t num_outputs,
     size_t num_partials_per_output,
     size_t input_stride
@@ -134,7 +134,7 @@ void execute_reduction_for_type_and_op(
                 items_per_thread
             );
 
-            KMM_GPU_CHECK(gpuGetLastError());
+            KMM_GPU_CHECK(gpu_get_last_error());
             return;
         }
 
@@ -148,7 +148,7 @@ void execute_reduction_for_type_and_op(
                 items_per_thread
             );
 
-            KMM_GPU_CHECK(gpuGetLastError());
+            KMM_GPU_CHECK(gpu_get_last_error());
             return;
         }
 
@@ -165,7 +165,7 @@ void execute_reduction_for_type_and_op(
                 items_per_thread
             );
 
-            KMM_GPU_CHECK(gpuGetLastError());
+            KMM_GPU_CHECK(gpu_get_last_error());
             return;
         }
     }
@@ -184,10 +184,10 @@ void execute_reduction_for_type_and_op(
 
 template<typename T>
 void execute_reduction_for_type(
-    GPUstream_t stream,
+    g_stream_t stream,
     Reduction operation,
-    GPUdeviceptr src_buffer,
-    GPUdeviceptr dst_buffer,
+    g_device_ptr_t src_buffer,
+    g_device_ptr_t dst_buffer,
     size_t num_outputs,
     size_t num_partials_per_output,
     size_t input_stride
@@ -229,18 +229,18 @@ void execute_reduction_for_type(
 }
 
 void execute_gpu_reduction_async(
-    GPUstream_t stream,
-    GPUdeviceptr src_buffer,
-    GPUdeviceptr dst_buffer,
+    g_stream_t stream,
+    g_device_ptr_t src_buffer,
+    g_device_ptr_t dst_buffer,
     ReductionDef reduction
 ) {
 #define KMM_CALL_REDUCTION_FOR_TYPE(T)                                  \
     execute_reduction_for_type<T>(                                      \
         stream,                                                         \
         reduction.operation,                                            \
-        (GPUdeviceptr)((unsigned long long)(src_buffer)                 \
+        (g_device_ptr_t)((unsigned long long)(src_buffer)                 \
                        + reduction.input_offset_elements * sizeof(T)),  \
-        (GPUdeviceptr)((unsigned long long)(dst_buffer)                 \
+        (g_device_ptr_t)((unsigned long long)(dst_buffer)                 \
                        + reduction.output_offset_elements * sizeof(T)), \
         reduction.num_outputs,                                          \
         reduction.num_inputs_per_output,                                \
@@ -251,9 +251,9 @@ void execute_gpu_reduction_async(
     execute_reduction_for_type<T>(                                          \
         stream,                                                             \
         reduction.operation,                                                \
-        (GPUdeviceptr)((unsigned long long)(src_buffer)                     \
+        (g_device_ptr_t)((unsigned long long)(src_buffer)                     \
                        + reduction.input_offset_elements * 2 * sizeof(T)),  \
-        (GPUdeviceptr)((unsigned long long)(dst_buffer)                     \
+        (g_device_ptr_t)((unsigned long long)(dst_buffer)                     \
                        + reduction.output_offset_elements * 2 * sizeof(T)), \
         2 * reduction.num_outputs,                                          \
         reduction.num_inputs_per_output,                                    \

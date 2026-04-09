@@ -20,8 +20,8 @@ __global__ void fill_kernel(size_t nelements, T* dest_buffer, T fill_value) {
 
 template<typename T>
 void submit_fill_kernel(
-    GPUstream_t stream,
-    GPUdeviceptr dest_buffer,
+    g_stream_t stream,
+    g_device_ptr_t dest_buffer,
     size_t nelements,
     const void* fill_pattern
 ) {
@@ -57,7 +57,7 @@ bool is_fill_pattern_repetitive(const void* fill_pattern, size_t fill_pattern_si
     return true;
 }
 
-void execute_gpu_fill_async(GPUstream_t stream, GPUdeviceptr dest_buffer, const FillDef& fill) {
+void execute_gpu_fill_async(g_stream_t stream, g_device_ptr_t dest_buffer, const FillDef& fill) {
     size_t element_size = fill.fill_value.size();
     size_t nbytes = fill.num_elements * element_size;
     const void* fill_pattern = fill.fill_value.data();
@@ -69,8 +69,8 @@ void execute_gpu_fill_async(GPUstream_t stream, GPUdeviceptr dest_buffer, const 
     if (is_fill_pattern_repetitive<1>(fill_pattern, element_size)) {
         uint8_t pattern;
         ::memcpy(&pattern, fill_pattern, sizeof(uint8_t));
-        KMM_GPU_CHECK(gpuMemsetD8Async(  //
-            GPUdeviceptr(dest_buffer),
+        KMM_GPU_CHECK(g_memset_d8_async(  //
+            g_device_ptr_t(dest_buffer),
             pattern,
             nbytes,
             stream
@@ -79,8 +79,8 @@ void execute_gpu_fill_async(GPUstream_t stream, GPUdeviceptr dest_buffer, const 
     } else if (is_fill_pattern_repetitive<2>(fill_pattern, element_size)) {
         uint16_t pattern;
         ::memcpy(&pattern, fill_pattern, sizeof(uint16_t));
-        KMM_GPU_CHECK(gpuMemsetD16Async(  //
-            GPUdeviceptr(dest_buffer),
+        KMM_GPU_CHECK(g_memset_d16_async(  //
+            g_device_ptr_t(dest_buffer),
             pattern,
             nbytes / sizeof(uint16_t),
             stream
@@ -89,8 +89,8 @@ void execute_gpu_fill_async(GPUstream_t stream, GPUdeviceptr dest_buffer, const 
     } else if (is_fill_pattern_repetitive<4>(fill_pattern, element_size)) {
         uint32_t pattern;
         ::memcpy(&pattern, fill_pattern, sizeof(uint32_t));
-        KMM_GPU_CHECK(gpuMemsetD32Async(  //
-            GPUdeviceptr(dest_buffer),
+        KMM_GPU_CHECK(g_memset_d32_async(  //
+            g_device_ptr_t(dest_buffer),
             pattern,
             nbytes / sizeof(uint32_t),
             stream
