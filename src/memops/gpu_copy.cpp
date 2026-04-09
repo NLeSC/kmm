@@ -82,18 +82,11 @@ void execute_gpu_d2h_copy_impl(
 
     if (dim == 0) {
         if (stream) {
-            KMM_GPU_CHECK(g_memcpy_d_to_h_async(
-                dst_ptr,
-                src_ptr,
-                copy_description.element_size,
-                *stream
-            ));
+            KMM_GPU_CHECK(
+                g_memcpy_d_to_h_async(dst_ptr, src_ptr, copy_description.element_size, *stream)
+            );
         } else {
-            KMM_GPU_CHECK(g_memcpy_d_to_h(
-                dst_ptr,
-                src_ptr,
-                copy_description.element_size
-            ));
+            KMM_GPU_CHECK(g_memcpy_d_to_h(dst_ptr, src_ptr, copy_description.element_size));
         }
     } else if (dim == 1) {
         gpu_memcpy2d_t info;
