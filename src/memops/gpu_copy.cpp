@@ -19,49 +19,49 @@ void throw_unsupported_dimension_exception(size_t dim) {
 }
 
 void execute_gpu_h2d_copy_impl(
-    std::optional<GPUstream_t> stream,
+    std::optional<g_stream_t> stream,
     const void* src_buffer,
-    GPUdeviceptr dst_buffer,
+    g_device_ptr_t dst_buffer,
     CopyDef copy_description
 ) {
     copy_description.simplify();
     size_t dim = copy_description.effective_dimensionality();
 
-    GPUdeviceptr dst_ptr = gpu_deviceptr_offset(dst_buffer, copy_description.dst_offset);
+    g_device_ptr_t dst_ptr = gpu_deviceptr_offset(dst_buffer, copy_description.dst_offset);
     const void* src_ptr = static_cast<const uint8_t*>(src_buffer) + copy_description.src_offset;
 
     if (dim == 0) {
         if (stream) {
-            KMM_GPU_CHECK(gpuMemcpyHtoDAsync(  //
+            KMM_GPU_CHECK(g_memcpy_h_to_d_async(  //
                 dst_ptr,
                 src_ptr,
                 copy_description.element_size,
                 *stream
             ));
         } else {
-            KMM_GPU_CHECK(gpuMemcpyHtoD(  //
+            KMM_GPU_CHECK(g_memcpy_h_to_d(  //
                 dst_ptr,
                 src_ptr,
                 copy_description.element_size
             ));
         }
     } else if (dim == 1) {
-        GPU_MEMCPY2D info;
-        ::memset(&info, 0, sizeof(GPU_MEMCPY2D));
+        gpu_memcpy2d_t info;
+        ::memset(&info, 0, sizeof(gpu_memcpy2d_t));
 
-        info.srcMemoryType = GPUmemorytype::GPU_MEMORYTYPE_HOST;
+        info.srcMemoryType = g_memory_type_t::G_MEMORYTYPE_HOST;
         info.srcHost = src_ptr;
         info.srcPitch = checked_cast<unsigned int>(copy_description.src_strides[0]);
-        info.dstMemoryType = GPUmemorytype ::GPU_MEMORYTYPE_DEVICE;
+        info.dstMemoryType = g_memory_type_t::G_MEMORYTYPE_DEVICE;
         info.dstDevice = dst_ptr;
         info.dstPitch = checked_cast<unsigned int>(copy_description.dst_strides[0]);
         info.WidthInBytes = checked_cast<unsigned int>(copy_description.element_size);
         info.Height = checked_cast<unsigned int>(copy_description.counts[0]);
 
         if (stream) {
-            KMM_GPU_CHECK(gpuMemcpy2DAsync(&info, *stream));
+            KMM_GPU_CHECK(g_memcpy_2d_async(&info, *stream));
         } else {
-            KMM_GPU_CHECK(gpuMemcpy2D(&info));
+            KMM_GPU_CHECK(g_memcpy_2d(&info));
         }
     } else {
         throw_unsupported_dimension_exception(dim);
@@ -69,8 +69,8 @@ void execute_gpu_h2d_copy_impl(
 }
 
 void execute_gpu_d2h_copy_impl(
-    std::optional<GPUstream_t> stream,
-    GPUdeviceptr src_buffer,
+    std::optional<g_stream_t> stream,
+    g_device_ptr_t src_buffer,
     void* dst_buffer,
     CopyDef copy_description
 ) {
@@ -78,40 +78,40 @@ void execute_gpu_d2h_copy_impl(
     size_t dim = copy_description.effective_dimensionality();
 
     void* dst_ptr = static_cast<uint8_t*>(dst_buffer) + copy_description.dst_offset;
-    GPUdeviceptr src_ptr = gpu_deviceptr_offset(src_buffer, copy_description.src_offset);
+    g_device_ptr_t src_ptr = gpu_deviceptr_offset(src_buffer, copy_description.src_offset);
 
     if (dim == 0) {
         if (stream) {
-            KMM_GPU_CHECK(gpuMemcpyDtoHAsync(  //
+            KMM_GPU_CHECK(g_memcpy_d_to_h_async(
                 dst_ptr,
                 src_ptr,
                 copy_description.element_size,
                 *stream
             ));
         } else {
-            KMM_GPU_CHECK(gpuMemcpyDtoH(  //
+            KMM_GPU_CHECK(g_memcpy_d_to_h(
                 dst_ptr,
                 src_ptr,
                 copy_description.element_size
             ));
         }
     } else if (dim == 1) {
-        GPU_MEMCPY2D info;
-        ::memset(&info, 0, sizeof(GPU_MEMCPY2D));
+        gpu_memcpy2d_t info;
+        ::memset(&info, 0, sizeof(gpu_memcpy2d_t));
 
-        info.srcMemoryType = GPUmemorytype::GPU_MEMORYTYPE_DEVICE;
+        info.srcMemoryType = g_memory_type_t::G_MEMORYTYPE_DEVICE;
         info.srcDevice = src_ptr;
         info.srcPitch = checked_cast<unsigned int>(copy_description.src_strides[0]);
-        info.dstMemoryType = GPUmemorytype ::GPU_MEMORYTYPE_HOST;
+        info.dstMemoryType = g_memory_type_t::G_MEMORYTYPE_HOST;
         info.dstHost = dst_ptr;
         info.dstPitch = checked_cast<unsigned int>(copy_description.dst_strides[0]);
         info.WidthInBytes = checked_cast<unsigned int>(copy_description.element_size);
         info.Height = checked_cast<unsigned int>(copy_description.counts[0]);
 
         if (stream) {
-            KMM_GPU_CHECK(gpuMemcpy2DAsync(&info, *stream));
+            KMM_GPU_CHECK(g_memcpy_2d_async(&info, *stream));
         } else {
-            KMM_GPU_CHECK(gpuMemcpy2D(&info));
+            KMM_GPU_CHECK(g_memcpy_2d(&info));
         }
     } else {
         throw_unsupported_dimension_exception(dim);
@@ -119,49 +119,49 @@ void execute_gpu_d2h_copy_impl(
 }
 
 void execute_gpu_d2d_copy_impl(
-    std::optional<GPUstream_t> stream,
-    GPUdeviceptr src_buffer,
-    GPUdeviceptr dst_buffer,
+    std::optional<g_stream_t> stream,
+    g_device_ptr_t src_buffer,
+    g_device_ptr_t dst_buffer,
     CopyDef copy_description
 ) {
     copy_description.simplify();
     size_t dim = copy_description.effective_dimensionality();
 
-    GPUdeviceptr dst_ptr = gpu_deviceptr_offset(dst_buffer, copy_description.dst_offset);
-    GPUdeviceptr src_ptr = gpu_deviceptr_offset(src_buffer, copy_description.src_offset);
+    g_device_ptr_t dst_ptr = gpu_deviceptr_offset(dst_buffer, copy_description.dst_offset);
+    g_device_ptr_t src_ptr = gpu_deviceptr_offset(src_buffer, copy_description.src_offset);
 
     if (dim == 0) {
         if (stream) {
-            KMM_GPU_CHECK(gpuMemcpyDtoDAsync(  //
+            KMM_GPU_CHECK(g_memcpy_d_to_d_async(  //
                 dst_ptr,
                 src_ptr,
                 copy_description.element_size,
                 *stream
             ));
         } else {
-            KMM_GPU_CHECK(gpuMemcpyDtoD(  //
+            KMM_GPU_CHECK(g_memcpy_d_to_d(  //
                 dst_ptr,
                 src_ptr,
                 copy_description.element_size
             ));
         }
     } else if (dim == 1) {
-        GPU_MEMCPY2D info;
-        ::memset(&info, 0, sizeof(GPU_MEMCPY2D));
+        gpu_memcpy2d_t info;
+        ::memset(&info, 0, sizeof(gpu_memcpy2d_t));
 
-        info.srcMemoryType = GPUmemorytype::GPU_MEMORYTYPE_DEVICE;
+        info.srcMemoryType = g_memory_type_t::G_MEMORYTYPE_DEVICE;
         info.srcDevice = src_ptr;
         info.srcPitch = checked_cast<unsigned int>(copy_description.src_strides[0]);
-        info.dstMemoryType = GPUmemorytype ::GPU_MEMORYTYPE_DEVICE;
+        info.dstMemoryType = g_memory_type_t::G_MEMORYTYPE_DEVICE;
         info.dstDevice = dst_ptr;
         info.dstPitch = checked_cast<unsigned int>(copy_description.dst_strides[0]);
         info.WidthInBytes = checked_cast<unsigned int>(copy_description.element_size);
         info.Height = checked_cast<unsigned int>(copy_description.counts[0]);
 
         if (stream) {
-            KMM_GPU_CHECK(gpuMemcpy2DAsync(&info, *stream));
+            KMM_GPU_CHECK(g_memcpy_2d_async(&info, *stream));
         } else {
-            KMM_GPU_CHECK(gpuMemcpy2D(&info));
+            KMM_GPU_CHECK(g_memcpy_2d(&info));
         }
     } else {
         throw_unsupported_dimension_exception(dim);
@@ -170,28 +170,28 @@ void execute_gpu_d2d_copy_impl(
 
 void execute_gpu_h2d_copy(
     const void* src_buffer,
-    GPUdeviceptr dst_buffer,
+    g_device_ptr_t dst_buffer,
     CopyDef copy_description
 ) {
     execute_gpu_h2d_copy_impl(std::nullopt, src_buffer, dst_buffer, copy_description);
 }
 
 void execute_gpu_h2d_copy_async(
-    GPUstream_t stream,
+    g_stream_t stream,
     const void* src_buffer,
-    GPUdeviceptr dst_buffer,
+    g_device_ptr_t dst_buffer,
     CopyDef copy_description
 ) {
     execute_gpu_h2d_copy_impl(stream, src_buffer, dst_buffer, copy_description);
 }
 
-void execute_gpu_d2h_copy(GPUdeviceptr src_buffer, void* dst_buffer, CopyDef copy_description) {
+void execute_gpu_d2h_copy(g_device_ptr_t src_buffer, void* dst_buffer, CopyDef copy_description) {
     execute_gpu_d2h_copy_impl(std::nullopt, src_buffer, dst_buffer, copy_description);
 }
 
 void execute_gpu_d2h_copy_async(
-    GPUstream_t stream,
-    GPUdeviceptr src_buffer,
+    g_stream_t stream,
+    g_device_ptr_t src_buffer,
     void* dst_buffer,
     CopyDef copy_description
 ) {
@@ -199,17 +199,17 @@ void execute_gpu_d2h_copy_async(
 }
 
 void execute_gpu_d2d_copy(
-    GPUdeviceptr src_buffer,
-    GPUdeviceptr dst_buffer,
+    g_device_ptr_t src_buffer,
+    g_device_ptr_t dst_buffer,
     CopyDef copy_description
 ) {
     execute_gpu_d2d_copy_impl(std::nullopt, src_buffer, dst_buffer, copy_description);
 }
 
 void execute_gpu_d2d_copy_async(
-    GPUstream_t stream,
-    GPUdeviceptr src_buffer,
-    GPUdeviceptr dst_buffer,
+    g_stream_t stream,
+    g_device_ptr_t src_buffer,
+    g_device_ptr_t dst_buffer,
     CopyDef copy_description
 ) {
     execute_gpu_d2d_copy_impl(stream, src_buffer, dst_buffer, copy_description);

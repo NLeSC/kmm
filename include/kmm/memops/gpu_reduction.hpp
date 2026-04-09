@@ -10,9 +10,9 @@ namespace kmm {
  *
  */
 void execute_gpu_reduction_async(
-    GPUstream_t stream,
-    GPUdeviceptr src_buffer,
-    GPUdeviceptr dst_buffer,
+    g_stream_t stream,
+    g_device_ptr_t src_buffer,
+    g_device_ptr_t dst_buffer,
     ReductionDef reduction
 );
 

@@ -81,7 +81,7 @@ class DeviceResource: public DeviceInfo, public Resource {
     KMM_NOT_COPYABLE_OR_MOVABLE(DeviceResource);
 
   public:
-    DeviceResource(DeviceInfo info, GPUContextHandle context, GPUstream_t stream);
+    DeviceResource(DeviceInfo info, GPUContextHandle context, g_stream_t stream);
     ~DeviceResource();
 
     /**
@@ -94,28 +94,28 @@ class DeviceResource: public DeviceInfo, public Resource {
     /**
      * Returns a handle to the context associated with this device.
      */
-    GPUcontext context() const {
+    g_context_t context() const {
         return m_context;
     }
 
     /**
      * Returns a handle to the stream associated with this device.
      */
-    GPUstream_t stream() const {
+    g_stream_t stream() const {
         return m_stream;
     }
 
     /**
      * Shorthand for `stream()`.
      */
-    operator GPUstream_t() const {
+    operator g_stream_t() const {
         return m_stream;
     }
 
     /**
      * Returns a handle to the BLAS instance associated with this device.
      */
-    blasHandle_t blas() const {
+    blas_handle_t blas() const {
         return m_blas_handle;
     }
 
@@ -144,7 +144,7 @@ class DeviceResource: public DeviceInfo, public Resource {
         // Launch the kernel!
         // NOTE: This must be in the header file since `gpuLaunchKernel` seems to no find the
         // kernel function if it is called from within a C++ file.
-        KMM_GPU_CHECK(GPUrtLaunchKernel(
+        KMM_GPU_CHECK(gpu_launch_kernel(
             reinterpret_cast<const void*>(kernel_function),
             grid_dim,
             block_dim,
@@ -247,8 +247,8 @@ class DeviceResource: public DeviceInfo, public Resource {
 
   private:
     GPUContextHandle m_context;
-    GPUstream_t m_stream;
-    blasHandle_t m_blas_handle;
+    g_stream_t m_stream;
+    blas_handle_t m_blas_handle;
 };
 
 }  // namespace kmm

@@ -106,7 +106,7 @@ void MemorySystemImpl::trim_device(size_t bytes_remaining) {
 AllocationResult MemorySystemImpl::allocate_device(
     DeviceId device_id,
     size_t nbytes,
-    GPUdeviceptr* ptr_out,
+    g_device_ptr_t* ptr_out,
     DeviceEventSet& deps_out
 ) {
     KMM_ASSERT(m_devices[device_id]);
@@ -121,13 +121,13 @@ AllocationResult MemorySystemImpl::allocate_device(
     }
 
     deps_out.remove_ready(*m_streams);
-    *ptr_out = (GPUdeviceptr)addr;
+    *ptr_out = (g_device_ptr_t)addr;
     return AllocationResult::Success;
 }
 
 void MemorySystemImpl::deallocate_device(
     DeviceId device_id,
-    GPUdeviceptr ptr,
+    g_device_ptr_t ptr,
     size_t nbytes,
     DeviceEventSet deps
 ) {
@@ -148,7 +148,7 @@ static constexpr size_t HIGH_PRIORITY_THRESHOLD = 1024L * 1024;
 DeviceEvent MemorySystemImpl::copy_host_to_device(
     DeviceId device_id,
     const void* src_addr,
-    GPUdeviceptr dst_addr,
+    g_device_ptr_t dst_addr,
     size_t nbytes,
     DeviceEventSet deps
 ) {
@@ -158,13 +158,13 @@ DeviceEvent MemorySystemImpl::copy_host_to_device(
 
     GPUContextGuard guard {device.context};
     return m_streams->with_stream(stream, deps, [&](auto stream) {
-        KMM_GPU_CHECK(gpuMemcpyHtoDAsync(dst_addr, src_addr, nbytes, stream));
+        KMM_GPU_CHECK(g_memcpy_h_to_d_async(dst_addr, src_addr, nbytes, stream));
     });
 }
 
 DeviceEvent MemorySystemImpl::copy_device_to_host(
     DeviceId device_id,
-    GPUdeviceptr src_addr,
+    g_device_ptr_t src_addr,
     void* dst_addr,
     size_t nbytes,
     DeviceEventSet deps
@@ -175,15 +175,15 @@ DeviceEvent MemorySystemImpl::copy_device_to_host(
 
     GPUContextGuard guard {device.context};
     return m_streams->with_stream(stream, deps, [&](auto stream) {
-        KMM_GPU_CHECK(gpuMemcpyDtoHAsync(dst_addr, src_addr, nbytes, stream));
+        KMM_GPU_CHECK(g_memcpy_d_to_h_async(dst_addr, src_addr, nbytes, stream));
     });
 }
 
 DeviceEvent MemorySystemImpl::copy_device_to_device(
     DeviceId src_device_id,
     DeviceId dst_device_id,
-    GPUdeviceptr src_addr,
-    GPUdeviceptr dst_addr,
+    g_device_ptr_t src_addr,
+    g_device_ptr_t dst_addr,
     size_t nbytes,
     DeviceEventSet deps
 ) {
@@ -195,7 +195,7 @@ DeviceEvent MemorySystemImpl::copy_device_to_device(
 
     GPUContextGuard guard {dst_device.context};
     return m_streams->with_stream(stream, deps, [&](auto stream) {
-        KMM_GPU_CHECK(gpuMemcpyPeerAsync(
+        KMM_GPU_CHECK(g_memcpy_peer_async(
             dst_addr,
             dst_device.context,
             dst_device_id,

@@ -11,12 +11,12 @@ namespace kmm {
 
 class DeviceInfo {
   public:
-    static constexpr size_t NUM_ATTRIBUTES = GPU_DEVICE_ATTRIBUTE_MAX;
+    static constexpr size_t NUM_ATTRIBUTES = G_DEVICE_ATTRIBUTE_MAX;
 
     DeviceInfo(DeviceId id, GPUContextHandle context, size_t num_concurrent_streams = 1);
 
     /**
-     * Returns the name of the device as provided by `gpuDeviceGetName`.
+     * Returns the name of the device as provided by `g_device_get_name`.
      */
     std::string name() const {
         return m_name;
@@ -37,9 +37,9 @@ class DeviceInfo {
     }
 
     /**
-     * Return this device as a `GPUdevice`.
+     * Return this device as a `g_device_t`.
      */
-    GPUdevice device_ordinal() const {
+    g_device_t device_ordinal() const {
         return m_device_id;
     }
 
@@ -74,7 +74,7 @@ class DeviceInfo {
     /**
      * Returns the value of the provided attribute.
      */
-    int attribute(GPUdevice_attribute attrib) const;
+    int attribute(g_device_attribute_t attrib) const;
 
     size_t num_compute_streams() const {
         return m_concurrent_stream;
@@ -83,7 +83,7 @@ class DeviceInfo {
   private:
     DeviceId m_id;
     std::string m_name;
-    GPUdevice m_device_id;
+    g_device_t m_device_id;
     size_t m_memory_capacity;
     size_t m_concurrent_stream = 1;
     std::array<int, NUM_ATTRIBUTES> m_attributes;
@@ -108,7 +108,7 @@ class SystemInfo {
     /**
      * Find the device that has the given device ordinal.
      */
-    const DeviceInfo& device_by_ordinal(GPUdevice ordinal) const;
+    const DeviceInfo& device_by_ordinal(g_device_t device_ordinal) const;
 
     /**
      * Return a list of the available processors in the system.

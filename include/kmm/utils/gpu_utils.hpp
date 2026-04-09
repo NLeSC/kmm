@@ -18,9 +18,9 @@
 
 namespace kmm {
 
-void gpu_throw_exception(GPUresult result, const char* file, int line, const char* expression);
-void gpu_throw_exception(gpuError_t result, const char* file, int line, const char* expression);
-void gpu_throw_exception(blasStatus_t result, const char* file, int line, const char* expression);
+void gpu_throw_exception(g_result_t result, const char* file, int line, const char* expression);
+void gpu_throw_exception(gpu_error_t result, const char* file, int line, const char* expression);
+void gpu_throw_exception(blas_status_t result, const char* file, int line, const char* expression);
 
 class GPUException: public std::exception {
   public:
@@ -36,55 +36,55 @@ class GPUException: public std::exception {
 
 class GPUDriverException: public GPUException {
   public:
-    GPUDriverException(const std::string& message, GPUresult result);
-    GPUDriverException(const char* message, GPUresult result) :
+    GPUDriverException(const std::string& message, g_result_t result);
+    GPUDriverException(const char* message, g_result_t result) :
         GPUDriverException(std::string(message), result) {}
-    GPUresult status;
+    g_result_t status;
 };
 
 class GPURuntimeException: public GPUException {
   public:
-    GPURuntimeException(const std::string& message, gpuError_t result);
-    gpuError_t status;
+    GPURuntimeException(const std::string& message, gpu_error_t result);
+    gpu_error_t status;
 };
 
 class BlasException: public GPUException {
   public:
-    BlasException(const std::string& message, blasStatus_t result);
-    blasStatus_t status;
+    BlasException(const std::string& message, blas_status_t result);
+    blas_status_t status;
 };
 
 /**
  * Returns the available devices as a list of `device`s.
  */
-std::vector<GPUdevice> get_gpu_devices();
+std::vector<g_device_t> get_gpu_devices();
 
 /**
  * If the given address points to memory allocation that has been allocated on a GPU, then
  * this function returns the device ordinal as a `device`. If the address points ot an invalid
  * memory location or a non-GPU buffer, then it returns `std::nullopt`.
  */
-std::optional<GPUdevice> get_gpu_device_by_address(const void* address);
+std::optional<g_device_t> get_gpu_device_by_address(const void* address);
 
 class GPUContextHandle {
     GPUContextHandle() = delete;
-    GPUContextHandle(GPUcontext context, std::shared_ptr<void> lifetime);
+    GPUContextHandle(g_context_t context, std::shared_ptr<void> lifetime);
 
   public:
-    static GPUContextHandle create_context_for_device(GPUdevice device);
-    static GPUContextHandle retain_primary_context_for_device(GPUdevice device);
+    static GPUContextHandle create_context_for_device(g_device_t device);
+    static GPUContextHandle retain_primary_context_for_device(g_device_t device);
 
-    operator GPUcontext() const {
+    operator g_context_t() const {
         return m_context;
     }
 
   private:
-    GPUcontext m_context;
+    g_context_t m_context;
     std::shared_ptr<void> m_lifetime;
 };
 
 inline bool operator==(const GPUContextHandle& lhs, const GPUContextHandle& rhs) {
-    return GPUcontext(lhs) == GPUcontext(rhs);
+    return g_context_t(lhs) == g_context_t(rhs);
 }
 
 inline bool operator!=(const GPUContextHandle& lhs, const GPUContextHandle& rhs) {
@@ -102,8 +102,8 @@ class GPUContextGuard {
     GPUContextHandle m_context;
 };
 
-inline GPUdeviceptr gpu_deviceptr_offset(GPUdeviceptr ptr, size_t size) {
-    return reinterpret_cast<GPUdeviceptr>(reinterpret_cast<unsigned long long>(ptr) + size);
+inline g_device_ptr_t gpu_deviceptr_offset(g_device_ptr_t ptr, size_t size) {
+    return reinterpret_cast<g_device_ptr_t>(reinterpret_cast<unsigned long long>(ptr) + size);
 }
 
 }  // namespace kmm

@@ -60,7 +60,7 @@ class DevicePoolAllocator: public AsyncAllocator {
 
   private:
     GPUContextHandle m_context;
-    GPUmemoryPool m_pool;
+    g_memory_pool_t m_pool;
     std::shared_ptr<DeviceStreamManager> m_streams;
     DeviceStream m_alloc_stream;
     DeviceStream m_dealloc_stream;

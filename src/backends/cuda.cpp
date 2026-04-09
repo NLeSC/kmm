@@ -3,15 +3,15 @@
 
 namespace kmm {
 
-GPUresult gpuMemcpyPeerAsync(
-    GPUdeviceptr dstDevicePtr,
-    GPUcontext dstContext,
-    GPUdevice dstDevice,
-    GPUdeviceptr srcDevicePtr,
-    GPUcontext srcContext,
-    GPUdevice srcDevice,
+g_result_t g_memcpy_peer_async(
+    g_device_ptr_t dstDevicePtr,
+    g_context_t dstContext,
+    g_device_t dstDevice,
+    g_device_ptr_t srcDevicePtr,
+    g_context_t srcContext,
+    g_device_t srcDevice,
     size_t ByteCount,
-    GPUstream_t hStream
+    g_stream_t hStream
 ) {
     return cuMemcpyPeerAsync(
         dstDevicePtr,

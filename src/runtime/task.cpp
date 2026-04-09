@@ -233,8 +233,8 @@ void CopyDeviceTask::execute(DeviceResource& device, std::vector<BufferAccessor>
 
     execute_gpu_d2d_copy_async(
         device,
-        reinterpret_cast<GPUdeviceptr>(accessors[0].address),
-        reinterpret_cast<GPUdeviceptr>(accessors[1].address),
+        reinterpret_cast<g_device_ptr_t>(accessors[0].address),
+        reinterpret_cast<g_device_ptr_t>(accessors[1].address),
         m_copy
     );
 }
@@ -242,14 +242,14 @@ void CopyDeviceTask::execute(DeviceResource& device, std::vector<BufferAccessor>
 void ReductionDeviceTask::execute(DeviceResource& device, std::vector<BufferAccessor> accessors) {
     execute_gpu_reduction_async(
         device,
-        reinterpret_cast<GPUdeviceptr>(accessors[0].address),
-        reinterpret_cast<GPUdeviceptr>(accessors[1].address),
+        reinterpret_cast<g_device_ptr_t>(accessors[0].address),
+        reinterpret_cast<g_device_ptr_t>(accessors[1].address),
         m_reduction
     );
 }
 
 void FillDeviceTask::execute(DeviceResource& device, std::vector<BufferAccessor> accessors) {
-    execute_gpu_fill_async(device, reinterpret_cast<GPUdeviceptr>(accessors[0].address), m_fill);
+    execute_gpu_fill_async(device, reinterpret_cast<g_device_ptr_t>(accessors[0].address), m_fill);
 }
 
 void PrefetchTask::start(const DeviceEventSet& input_events) {

@@ -184,7 +184,7 @@ static size_t compute_device_memory_limit(
     GPUContextGuard guard {context};
 
     size_t memory_capacity, memory_available;
-    KMM_GPU_CHECK(gpuMemGetInfo(&memory_available, &memory_capacity));
+    KMM_GPU_CHECK(g_mem_get_info(&memory_available, &memory_capacity));
 
     // Insufficient memory capacity
     if (memory_capacity < config.device_memory_keep_free) {

@@ -26,7 +26,7 @@ class DeviceStreamManager {
     bool make_progress_for_stream(DeviceStream stream_index);
 
     DeviceStream create_stream(GPUContextHandle context, bool high_priority = false);
-    DeviceStream get_or_add_stream(GPUContextHandle context, GPUstream_t stream);
+    DeviceStream get_or_add_stream(GPUContextHandle context, g_stream_t stream);
 
     void wait_until_idle() const;
     void wait_until_ready(DeviceStream stream) const;
@@ -61,7 +61,7 @@ class DeviceStreamManager {
     static bool event_happens_before(DeviceEvent source, DeviceEvent target);
 
     GPUContextHandle context(DeviceStream stream) const;
-    GPUstream_t get(DeviceStream stream) const;
+    g_stream_t get(DeviceStream stream) const;
 
     template<typename F>
     DeviceEvent with_stream(DeviceStream stream, const DeviceEventSet& deps, F fun);

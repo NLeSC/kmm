@@ -11,47 +11,47 @@ DeviceInfo::DeviceInfo(DeviceId id, GPUContextHandle context, size_t num_concurr
     m_concurrent_stream(num_concurrent_streams) {
     GPUContextGuard guard {context};
 
-    KMM_GPU_CHECK(gpuCtxGetDevice(&m_device_id));
+    KMM_GPU_CHECK(g_ctx_get_device(&m_device_id));
 
     char name[1024];
-    KMM_GPU_CHECK(gpuDeviceGetName(name, 1024, m_device_id));
+    KMM_GPU_CHECK(g_device_get_name(name, 1024, m_device_id));
     m_name = std::string(name);
 
     for (size_t i = 1; i < NUM_ATTRIBUTES; i++) {
-        auto attr = GPUdevice_attribute(i);
-        KMM_GPU_CHECK(gpuDeviceGetAttribute(&m_attributes[i], attr, m_device_id));
+        auto attr = g_device_attribute_t(i);
+        KMM_GPU_CHECK(g_device_get_attribute(&m_attributes[i], attr, m_device_id));
     }
 
     size_t ignore_free_memory;
-    KMM_GPU_CHECK(gpuMemGetInfo(&ignore_free_memory, &m_memory_capacity));
+    KMM_GPU_CHECK(g_mem_get_info(&ignore_free_memory, &m_memory_capacity));
 }
 
 dim3 DeviceInfo::max_block_dim() const {
     return dim3(
-        checked_cast<unsigned int>(attribute(GPU_DEVICE_ATTRIBUTE_MAX_BLOCK_DIM_X)),
-        checked_cast<unsigned int>(attribute(GPU_DEVICE_ATTRIBUTE_MAX_BLOCK_DIM_Y)),
-        checked_cast<unsigned int>(attribute(GPU_DEVICE_ATTRIBUTE_MAX_BLOCK_DIM_Z))
+        checked_cast<unsigned int>(attribute(G_DEVICE_ATTRIBUTE_MAX_BLOCK_DIM_X)),
+        checked_cast<unsigned int>(attribute(G_DEVICE_ATTRIBUTE_MAX_BLOCK_DIM_Y)),
+        checked_cast<unsigned int>(attribute(G_DEVICE_ATTRIBUTE_MAX_BLOCK_DIM_Z))
     );
 }
 
 dim3 DeviceInfo::max_grid_dim() const {
     return dim3(
-        checked_cast<unsigned int>(attribute(GPU_DEVICE_ATTRIBUTE_MAX_GRID_DIM_X)),
-        checked_cast<unsigned int>(attribute(GPU_DEVICE_ATTRIBUTE_MAX_GRID_DIM_Y)),
-        checked_cast<unsigned int>(attribute(GPU_DEVICE_ATTRIBUTE_MAX_GRID_DIM_Z))
+        checked_cast<unsigned int>(attribute(G_DEVICE_ATTRIBUTE_MAX_GRID_DIM_X)),
+        checked_cast<unsigned int>(attribute(G_DEVICE_ATTRIBUTE_MAX_GRID_DIM_Y)),
+        checked_cast<unsigned int>(attribute(G_DEVICE_ATTRIBUTE_MAX_GRID_DIM_Z))
     );
 }
 
 int DeviceInfo::compute_capability() const {
-    return (attribute(GPU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MAJOR) * 10)
-        + attribute(GPU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MINOR);
+    return (attribute(G_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MAJOR) * 10)
+        + attribute(G_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MINOR);
 }
 
 int DeviceInfo::max_threads_per_block() const {
-    return attribute(GPU_DEVICE_ATTRIBUTE_MAX_THREADS_PER_BLOCK);
+    return attribute(G_DEVICE_ATTRIBUTE_MAX_THREADS_PER_BLOCK);
 }
 
-int DeviceInfo::attribute(GPUdevice_attribute attrib) const {
+int DeviceInfo::attribute(g_device_attribute_t attrib) const {
     if (attrib < NUM_ATTRIBUTES) {
         return m_attributes[attrib];
     }
@@ -89,7 +89,7 @@ const DeviceInfo& SystemInfo::device(DeviceId id) const {
     return m_devices.at(id.get());
 }
 
-const DeviceInfo& SystemInfo::device_by_ordinal(GPUdevice ordinal) const {
+const DeviceInfo& SystemInfo::device_by_ordinal(g_device_t ordinal) const {
     for (const auto& device : m_devices) {
         if (device.device_ordinal() == ordinal) {
             return device;

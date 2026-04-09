@@ -25,7 +25,7 @@ struct DeviceResources::Stream {
         DeviceId device_id,
         DeviceStream stream,
         GPUContextHandle context,
-        GPUstream_t gpu_stream
+        g_stream_t gpu_stream
     ) :
         context(context),
         resource(DeviceInfo(device_id, context), context, gpu_stream),

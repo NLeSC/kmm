@@ -24,25 +24,25 @@ const char* InvalidResourceException::what() const noexcept {
     return m_message.c_str();
 }
 
-DeviceResource::DeviceResource(DeviceInfo info, GPUContextHandle context, GPUstream_t stream) :
+DeviceResource::DeviceResource(DeviceInfo info, GPUContextHandle context, g_stream_t stream) :
     DeviceInfo(info),
     m_context(context),
     m_stream(stream) {
     GPUContextGuard guard {m_context};
 
-    KMM_GPU_CHECK(blasCreate(&m_blas_handle));
-    KMM_GPU_CHECK(blasSetStream(m_blas_handle, m_stream));
+    KMM_GPU_CHECK(blas_create(&m_blas_handle));
+    KMM_GPU_CHECK(blas_set_stream(m_blas_handle, m_stream));
 }
 
 DeviceResource::~DeviceResource() {
     GPUContextGuard guard {m_context};
-    KMM_GPU_CHECK(blasDestroy(m_blas_handle));
+    KMM_GPU_CHECK(blas_destroy(m_blas_handle));
 }
 
 void DeviceResource::synchronize() const {
     GPUContextGuard guard {m_context};
-    KMM_GPU_CHECK(gpuStreamSynchronize(nullptr));
-    KMM_GPU_CHECK(gpuStreamSynchronize(m_stream));
+    KMM_GPU_CHECK(g_stream_synchronize(nullptr));
+    KMM_GPU_CHECK(g_stream_synchronize(m_stream));
 }
 
 void DeviceResource::fill_bytes(
@@ -54,16 +54,16 @@ void DeviceResource::fill_bytes(
     GPUContextGuard guard {m_context};
     execute_gpu_fill_async(
         m_stream,
-        reinterpret_cast<GPUdeviceptr>(dest_buffer),
+        reinterpret_cast<g_device_ptr_t>(dest_buffer),
         FillDef(fill_pattern_size, nbytes / fill_pattern_size, fill_pattern)
     );
 }
 
 void DeviceResource::copy_bytes(const void* source_buffer, void* dest_buffer, size_t nbytes) const {
     GPUContextGuard guard {m_context};
-    KMM_GPU_CHECK(gpuMemcpyAsync(
-        reinterpret_cast<GPUdeviceptr>(dest_buffer),
-        reinterpret_cast<GPUdeviceptr>(const_cast<void*>(source_buffer)),
+    KMM_GPU_CHECK(g_memcpy_async(
+        reinterpret_cast<g_device_ptr_t>(dest_buffer),
+        reinterpret_cast<g_device_ptr_t>(const_cast<void*>(source_buffer)),
         nbytes,
         m_stream
     ));

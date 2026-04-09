@@ -26,13 +26,13 @@ class MemorySystem {
     virtual AllocationResult allocate_device(
         DeviceId device_id,
         size_t nbytes,
-        GPUdeviceptr* ptr_out,
+        g_device_ptr_t* ptr_out,
         DeviceEventSet& deps_out
     ) = 0;
 
     virtual void deallocate_device(
         DeviceId device_id,
-        GPUdeviceptr ptr,
+        g_device_ptr_t ptr,
         size_t nbytes,
         DeviceEventSet deps
     ) = 0;
@@ -40,14 +40,14 @@ class MemorySystem {
     virtual DeviceEvent copy_host_to_device(
         DeviceId device_id,
         const void* src_addr,
-        GPUdeviceptr dst_addr,
+        g_device_ptr_t dst_addr,
         size_t nbytes,
         DeviceEventSet deps
     ) = 0;
 
     virtual DeviceEvent copy_device_to_host(
         DeviceId device_id,
-        GPUdeviceptr src_addr,
+        g_device_ptr_t src_addr,
         void* dst_addr,
         size_t nbytes,
         DeviceEventSet deps
@@ -56,8 +56,8 @@ class MemorySystem {
     virtual DeviceEvent copy_device_to_device(
         DeviceId src_device,
         DeviceId dst_device,
-        GPUdeviceptr src_addr,
-        GPUdeviceptr dst_addr,
+        g_device_ptr_t src_addr,
+        g_device_ptr_t dst_addr,
         size_t nbytes,
         DeviceEventSet deps
     ) = 0;
@@ -95,13 +95,13 @@ class MemorySystemImpl: public MemorySystem {
     AllocationResult allocate_device(
         DeviceId device_id,
         size_t nbytes,
-        GPUdeviceptr* ptr_out,
+        g_device_ptr_t* ptr_out,
         DeviceEventSet& deps_out
     ) final;
 
     void deallocate_device(
         DeviceId device_id,
-        GPUdeviceptr ptr,
+        g_device_ptr_t ptr,
         size_t nbytes,
         DeviceEventSet deps
     ) final;
@@ -109,14 +109,14 @@ class MemorySystemImpl: public MemorySystem {
     DeviceEvent copy_host_to_device(
         DeviceId device_id,
         const void* src_addr,
-        GPUdeviceptr dst_addr,
+        g_device_ptr_t dst_addr,
         size_t nbytes,
         DeviceEventSet deps
     ) final;
 
     DeviceEvent copy_device_to_host(
         DeviceId device_id,
-        GPUdeviceptr src_addr,
+        g_device_ptr_t src_addr,
         void* dst_addr,
         size_t nbytes,
         DeviceEventSet deps
@@ -125,8 +125,8 @@ class MemorySystemImpl: public MemorySystem {
     DeviceEvent copy_device_to_device(
         DeviceId src_device_id,
         DeviceId dst_device_id,
-        GPUdeviceptr src_addr,
-        GPUdeviceptr dst_addr,
+        g_device_ptr_t src_addr,
+        g_device_ptr_t dst_addr,
         size_t nbytes,
         DeviceEventSet deps
     ) final;

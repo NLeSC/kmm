@@ -12,8 +12,8 @@ PinnedMemoryAllocator::PinnedMemoryAllocator(
 
 AllocationResult PinnedMemoryAllocator::allocate(size_t nbytes, void** addr_out) {
     GPUContextGuard guard {m_context};
-    GPUresult result =
-        gpuMemHostAlloc(addr_out, nbytes, GPU_MEMHOSTALLOC_PORTABLE | GPU_MEMHOSTALLOC_DEVICEMAP);
+    g_result_t result =
+        g_mem_host_alloc(addr_out, nbytes, G_MEMHOSTALLOC_PORTABLE | G_MEMHOSTALLOC_DEVICEMAP);
 
     if (result == GPU_SUCCESS) {
         return AllocationResult::Success;
@@ -26,7 +26,7 @@ AllocationResult PinnedMemoryAllocator::allocate(size_t nbytes, void** addr_out)
 
 void PinnedMemoryAllocator::deallocate(void* addr, size_t nbytes) {
     GPUContextGuard guard {m_context};
-    KMM_GPU_CHECK(gpuMemFreeHost(addr));
+    KMM_GPU_CHECK(g_mem_free_host(addr));
 }
 
 DeviceMemoryAllocator::DeviceMemoryAllocator(
@@ -39,8 +39,8 @@ DeviceMemoryAllocator::DeviceMemoryAllocator(
 
 AllocationResult DeviceMemoryAllocator::allocate(size_t nbytes, void** addr_out) {
     GPUContextGuard guard {m_context};
-    GPUdeviceptr ptr;
-    GPUresult result = gpuMemAlloc(&ptr, nbytes);
+    g_device_ptr_t ptr;
+    g_result_t result = g_mem_alloc(&ptr, nbytes);
 
     if (result == GPU_SUCCESS) {
         *addr_out = (void*)ptr;
@@ -48,13 +48,13 @@ AllocationResult DeviceMemoryAllocator::allocate(size_t nbytes, void** addr_out)
     } else if (result == GPU_ERROR_OUT_OF_MEMORY) {
         return AllocationResult::ErrorOutOfMemory;
     } else {
-        throw GPUDriverException("error when calling `cuMemAlloc`", result);
+        throw GPUDriverException("error when calling `g_mem_alloc`", result);
     }
 }
 
 void DeviceMemoryAllocator::deallocate(void* addr, size_t nbytes) {
     GPUContextGuard guard {m_context};
-    KMM_GPU_CHECK(gpuMemFree(GPUdeviceptr(addr)));
+    KMM_GPU_CHECK(g_mem_free((g_device_ptr_t)addr));
 }
 
 DevicePoolAllocator::DevicePoolAllocator(
@@ -71,24 +71,24 @@ DevicePoolAllocator::DevicePoolAllocator(
     m_bytes_limit(max_bytes) {
     GPUContextGuard guard {m_context};
 
-    GPUdevice device;
-    KMM_GPU_CHECK(gpuCtxGetDevice(&device));
+    g_device_t device;
+    KMM_GPU_CHECK(g_ctx_get_device(&device));
 
     switch (m_kind) {
         case DevicePoolKind::Default:
-            KMM_GPU_CHECK(gpuDeviceGetDefaultMemPool(&m_pool, device));
+            KMM_GPU_CHECK(g_device_get_default_mem_pool(&m_pool, device));
             break;
 
         case DevicePoolKind::Create:
-            GPUmemPoolProps props;
-            ::memset(&props, 0, sizeof(GPUmemPoolProps));
+            g_mem_pool_props_t props;
+            ::memset(&props, 0, sizeof(g_mem_pool_props_t));
 
-            props.allocType = GPUmemAllocationType::GPU_MEM_ALLOCATION_TYPE_PINNED;
-            props.handleTypes = GPUmemAllocationHandleType::GPU_MEM_HANDLE_TYPE_NONE;
-            props.location.type = GPUmemLocationType::GPU_MEM_LOCATION_TYPE_DEVICE;
+            props.allocType = G_MEM_ALLOCATION_TYPE_PINNED;
+            props.handleTypes = G_MEM_HANDLE_TYPE_NONE;
+            props.location.type = G_MEM_LOCATION_TYPE_DEVICE;
             props.location.id = device;
 
-            KMM_GPU_CHECK(gpuMemPoolCreate(&m_pool, &props));
+            KMM_GPU_CHECK(g_mem_pool_create(&m_pool, &props));
             break;
     }
 }
@@ -108,7 +108,7 @@ DevicePoolAllocator::~DevicePoolAllocator() {
             // No need to destroy the default pool
             break;
         case DevicePoolKind::Create:
-            KMM_GPU_CHECK(gpuMemPoolDestroy(m_pool));
+            KMM_GPU_CHECK(g_mem_pool_destroy(m_pool));
             break;
     }
 }
@@ -131,12 +131,12 @@ AllocationResult DevicePoolAllocator::allocate_async(
         m_pending_deallocs.pop_front();
     }
 
-    GPUdeviceptr device_ptr;
-    GPUresult result = GPUresult(GPU_ERROR_UNKNOWN);
+    g_device_ptr_t device_ptr;
+    g_result_t result = g_result_t(GPU_ERROR_UNKNOWN);
 
     auto event = m_streams->with_stream(m_alloc_stream, [&](auto stream) {
         GPUContextGuard guard {m_context};
-        result = gpuMemAllocFromPoolAsync(&device_ptr, nbytes, m_pool, stream);
+        result = g_mem_alloc_from_pool_async(&device_ptr, nbytes, m_pool, stream);
     });
 
     if (result == GPU_SUCCESS) {
@@ -147,15 +147,15 @@ AllocationResult DevicePoolAllocator::allocate_async(
     } else if (result == GPU_ERROR_OUT_OF_MEMORY) {
         return AllocationResult::ErrorOutOfMemory;
     } else {
-        throw GPUDriverException("error while calling `cuMemAllocFromPoolAsync`", result);
+        throw GPUDriverException("error while calling `g_mem_alloc_from_pool_async`", result);
     }
 }
 
 void DevicePoolAllocator::deallocate_async(void* addr, size_t nbytes, DeviceEventSet deps) {
-    GPUdeviceptr device_ptr = (GPUdeviceptr)addr;
+    g_device_ptr_t device_ptr = (g_device_ptr_t)addr;
 
     auto event = m_streams->with_stream(m_dealloc_stream, deps, [&](auto stream) {
-        KMM_GPU_CHECK(gpuMemFreeAsync(device_ptr, stream));
+        KMM_GPU_CHECK(g_mem_free_async(device_ptr, stream));
     });
 
     m_pending_deallocs.push_back({.addr = addr, .nbytes = nbytes, .event = event});
@@ -191,6 +191,6 @@ void DevicePoolAllocator::trim(size_t nbytes_remaining) {
         m_pending_deallocs.pop_front();
     }
 
-    KMM_GPU_CHECK(gpuMemPoolTrimTo(m_pool, nbytes_remaining));
+    KMM_GPU_CHECK(g_mem_pool_trim_to(m_pool, nbytes_remaining));
 }
 }  // namespace kmm
