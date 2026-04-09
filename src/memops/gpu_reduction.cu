@@ -234,30 +234,30 @@ void execute_gpu_reduction_async(
     g_device_ptr_t dst_buffer,
     ReductionDef reduction
 ) {
-#define KMM_CALL_REDUCTION_FOR_TYPE(T)                                  \
-    execute_reduction_for_type<T>(                                      \
-        stream,                                                         \
-        reduction.operation,                                            \
+#define KMM_CALL_REDUCTION_FOR_TYPE(T)                                    \
+    execute_reduction_for_type<T>(                                        \
+        stream,                                                           \
+        reduction.operation,                                              \
         (g_device_ptr_t)((unsigned long long)(src_buffer)                 \
-                       + reduction.input_offset_elements * sizeof(T)),  \
+                         + reduction.input_offset_elements * sizeof(T)),  \
         (g_device_ptr_t)((unsigned long long)(dst_buffer)                 \
-                       + reduction.output_offset_elements * sizeof(T)), \
-        reduction.num_outputs,                                          \
-        reduction.num_inputs_per_output,                                \
-        reduction.input_stride_elements                                 \
+                         + reduction.output_offset_elements * sizeof(T)), \
+        reduction.num_outputs,                                            \
+        reduction.num_inputs_per_output,                                  \
+        reduction.input_stride_elements                                   \
     );
 
-#define KMM_CALL_REDUCTION_FOR_COMPLEX(T)                                   \
-    execute_reduction_for_type<T>(                                          \
-        stream,                                                             \
-        reduction.operation,                                                \
+#define KMM_CALL_REDUCTION_FOR_COMPLEX(T)                                     \
+    execute_reduction_for_type<T>(                                            \
+        stream,                                                               \
+        reduction.operation,                                                  \
         (g_device_ptr_t)((unsigned long long)(src_buffer)                     \
-                       + reduction.input_offset_elements * 2 * sizeof(T)),  \
+                         + reduction.input_offset_elements * 2 * sizeof(T)),  \
         (g_device_ptr_t)((unsigned long long)(dst_buffer)                     \
-                       + reduction.output_offset_elements * 2 * sizeof(T)), \
-        2 * reduction.num_outputs,                                          \
-        reduction.num_inputs_per_output,                                    \
-        2 * reduction.input_stride_elements                                 \
+                         + reduction.output_offset_elements * 2 * sizeof(T)), \
+        2 * reduction.num_outputs,                                            \
+        reduction.num_inputs_per_output,                                      \
+        2 * reduction.input_stride_elements                                   \
     );
 
     switch (reduction.data_type.as_scalar()) {
