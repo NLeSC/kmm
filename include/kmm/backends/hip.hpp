@@ -106,13 +106,26 @@ using gpu_mem_pool_attr_t = hipMemPoolAttr;
 #define gpu_memcpy_device_to_device hipMemcpyDeviceToDevice
 #define gpu_memcpy_default          hipMemcpyDefault
 
-#define g_memcpy_h_to_d       hipMemcpyHtoD
-#define g_memcpy_h_to_d_async hipMemcpyHtoDAsync
 #define g_memcpy_d_to_h       hipMemcpyDtoH
 #define g_memcpy_d_to_h_async hipMemcpyDtoHAsync
 #define g_memcpy_d_to_d       hipMemcpyDtoD
 #define g_memcpy_d_to_d_async hipMemcpyDtoDAsync
-#define g_memcpy_async        hipMemcpyAsync
+
+g_result_t g_memcpy_async(
+    g_device_ptr_t dst,
+    g_device_ptr_t src,
+    size_t ByteCount,
+    g_stream_t hStream
+);
+
+g_result_t g_memcpy_h_to_d_async(
+    g_device_ptr_t dstDevice,
+    const void* srcHost,
+    size_t ByteCount,
+    g_stream_t hStream
+);
+
+g_result_t g_memcpy_h_to_d(g_device_ptr_t dstDevice, const void* srcHost, size_t ByteCount);
 
 g_result_t g_memcpy_peer_async(
     g_device_ptr_t,
