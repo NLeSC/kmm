@@ -1,10 +1,10 @@
-![KMM: Kernel Memory Manager](https://raw.githubusercontent.com/NLeSC-COMPAS/kmm/refs/heads/main/docs/_static/kmm-logo.png)
+![KMM: Kernel Memory Manager](https://raw.githubusercontent.com/NLeSC/kmm/refs/heads/main/docs/_static/kmm-logo.png)
 
 
 #
-[![CPU Build Status](https://github.com/NLeSC-COMPAS/kmm/actions/workflows/cmake-multi-compiler.yml/badge.svg)](https://github.com/NLeSC-COMPAS/kmm/actions/workflows/cmake-multi-compiler.yml)
-[![CUDA Build Status](https://github.com/NLeSC-COMPAS/kmm/actions/workflows/cmake-cuda-multi-compiler.yml/badge.svg)](https://github.com/NLeSC-COMPAS/kmm/actions/workflows/cmake-cuda-multi-compiler.yml)
-[![HIP Build Status](https://github.com/NLeSC-COMPAS/kmm/actions/workflows/cmake-hip.yml/badge.svg)](https://github.com/NLeSC-COMPAS/kmm/actions/workflows/cmake-hip.yml)
+[![CPU Build Status](https://github.com/NLeSC/kmm/actions/workflows/cmake-multi-compiler.yml/badge.svg)](https://github.com/NLeSC-COMPAS/kmm/actions/workflows/cmake-multi-compiler.yml)
+[![CUDA Build Status](https://github.com/NLeSC/kmm/actions/workflows/cmake-cuda-multi-compiler.yml/badge.svg)](https://github.com/NLeSC-COMPAS/kmm/actions/workflows/cmake-cuda-multi-compiler.yml)
+[![HIP Build Status](https://github.com/NLeSC/kmm/actions/workflows/cmake-hip.yml/badge.svg)](https://github.com/NLeSC-COMPAS/kmm/actions/workflows/cmake-hip.yml)
 
 The **Kernel Memory Manager** (KMM) is a lightweight, high-performance framework designed for parallel dataflow execution and efficient memory management on multi-GPU platforms.
 
@@ -25,7 +25,7 @@ Unlike frameworks that require a specific programming model, KMM integrates exis
 
 ## Resources
 
-* [Full documentation](https://nlesc-compas.github.io/kmm)
+* [Full documentation](https://nlesc.github.io/kmm)
 
 
 ## Example
