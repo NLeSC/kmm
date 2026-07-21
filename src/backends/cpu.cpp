@@ -125,6 +125,10 @@ gpu_error_t gpu_free(g_device_ptr_t) {
     return gpu_error_t(GPU_ERROR_UNKNOWN);
 }
 
+gpu_error_t gpu_malloc_async(void**, size_t, g_stream_t) {
+    return gpu_error_t(GPU_ERROR_UNKNOWN);
+}
+
 g_result_t g_mem_pool_create(g_memory_pool_t* pool, const g_mem_pool_props_t* props) {
     return g_result_t(GPU_ERROR_UNKNOWN);
 }

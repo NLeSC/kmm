@@ -190,6 +190,7 @@ g_result_t g_memcpy_2d_async(const gpu_memcpy2d_t*, g_stream_t);
 #define G_CTX_MAP_HOST                    0x08
 #define g_mem_pool_attr_release_threshold gpu_mem_pool_attr_t(3)
 
+gpu_error_t gpu_malloc_async(void**, size_t, g_stream_t);
 g_result_t g_mem_pool_create(g_memory_pool_t*, const g_mem_pool_props_t*);
 g_result_t g_mem_pool_destroy(g_memory_pool_t);
 g_result_t g_mem_alloc_from_pool_async(g_device_ptr_t*, size_t, g_memory_pool_t, g_stream_t);

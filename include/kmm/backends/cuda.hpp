@@ -147,6 +147,7 @@ g_result_t g_memcpy_peer_async(
 #define G_CTX_MAP_HOST                    CU_CTX_MAP_HOST
 #define g_mem_pool_attr_release_threshold cuMemPoolAttrReleaseThreshold
 
+#define gpu_malloc_async              cudaMallocAsync
 #define g_mem_pool_create             cuMemPoolCreate
 #define g_mem_pool_destroy            cuMemPoolDestroy
 #define g_mem_alloc_from_pool_async   cuMemAllocFromPoolAsync

@@ -159,6 +159,7 @@ g_result_t g_memcpy_peer_async(
 #define G_CTX_MAP_HOST                    0
 #define g_mem_pool_attr_release_threshold hipMemPoolAttrReleaseThreshold
 
+#define gpu_malloc_async              hipMallocAsync
 #define g_mem_pool_create             hipMemPoolCreate
 #define g_mem_pool_destroy            hipMemPoolDestroy
 #define g_mem_alloc_from_pool_async   hipMallocFromPoolAsync
