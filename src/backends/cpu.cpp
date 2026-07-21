@@ -19,6 +19,10 @@ g_result_t g_mem_get_info(size_t* free, size_t* total) {
     return g_result_t(GPU_ERROR_UNKNOWN);
 }
 
+g_result_t gpu_mem_get_info(size_t* free, size_t* total) {
+    return g_result_t(GPU_ERROR_UNKNOWN);
+}
+
 g_result_t g_memcpy_h_to_d_async(
     g_device_ptr_t dev,
     const void* host,

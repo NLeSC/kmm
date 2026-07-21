@@ -134,6 +134,7 @@ gpu_error_t gpu_event_elapsed_time(float* ms, g_event_t start, g_event_t stop);
 #define G_POINTER_ATTRIBUTE_DEVICE_ORDINAL g_pointer_attribute_t(9)
 
 g_result_t g_mem_get_info(size_t*, size_t*);
+g_result_t gpu_mem_get_info(size_t*, size_t*);
 g_result_t g_mem_alloc(g_device_ptr_t*, size_t);
 g_result_t g_mem_free(g_device_ptr_t);
 gpu_error_t gpu_malloc(g_device_ptr_t*, size_t);

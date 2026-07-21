@@ -89,6 +89,7 @@ using gpu_mem_pool_attr_t = hipMemPoolAttr;
 #define G_POINTER_ATTRIBUTE_MEMORY_TYPE    HIP_POINTER_ATTRIBUTE_MEMORY_TYPE
 
 #define g_mem_get_info          hipMemGetInfo
+#define gpu_mem_get_info        hipMemGetInfo
 #define g_mem_alloc             hipMalloc
 #define g_mem_free              hipFree
 #define gpu_malloc              hipMalloc

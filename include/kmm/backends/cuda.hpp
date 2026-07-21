@@ -90,6 +90,7 @@ using gpu_mem_pool_attr_t = cudaMemPoolAttr;
 #define G_POINTER_ATTRIBUTE_DEVICE_ORDINAL CU_POINTER_ATTRIBUTE_DEVICE_ORDINAL
 
 #define g_mem_get_info          cuMemGetInfo
+#define gpu_mem_get_info        gpuMemGetInfo
 #define g_mem_alloc             cuMemAlloc
 #define g_mem_free              cuMemFree
 #define gpu_malloc              cudaMalloc
