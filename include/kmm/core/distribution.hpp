@@ -61,13 +61,11 @@ Distribution<N> map_domain_to_distribution(
     for (const auto& chunk : domain.chunks) {
         Bounds<N> bounds = mapper(chunk, Bounds<N>(array_size));
 
-        chunks.push_back(
-            ArrayChunk<N> {
-                .owner_id = chunk.owner_id.as_memory(),
-                .offset = bounds.begin(),
-                .size = bounds.size()
-            }
-        );
+        chunks.push_back(ArrayChunk<N> {
+            .owner_id = chunk.owner_id.as_memory(),
+            .offset = bounds.begin(),
+            .size = bounds.size()
+        });
     }
 
     return Distribution<N>::from_chunks(array_size, chunks, allow_duplicates);

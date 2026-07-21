@@ -34,23 +34,19 @@ IndexMap::IndexMap(Axis variable, int64_t scale, int64_t offset, int64_t length,
 
 IndexMap IndexMap::range(IndexMap begin, IndexMap end) {
     if (begin.m_scale != end.m_scale || begin.m_divisor != end.m_divisor) {
-        throw std::runtime_error(
-            fmt::format(
-                "`range` requires two expressions having the same scaling factor, given: `{}` and `{}`",
-                begin,
-                end
-            )
-        );
+        throw std::runtime_error(fmt::format(
+            "`range` requires two expressions having the same scaling factor, given: `{}` and `{}`",
+            begin,
+            end
+        ));
     }
 
     if (begin.m_axis.get() != end.m_axis.get() && begin.m_scale != 0) {
-        throw std::runtime_error(
-            fmt::format(
-                "`range` requires two expression operating on the same axis, given: `{}` and `{}`",
-                begin,
-                end
-            )
-        );
+        throw std::runtime_error(fmt::format(
+            "`range` requires two expression operating on the same axis, given: `{}` and `{}`",
+            begin,
+            end
+        ));
     }
 
     return {

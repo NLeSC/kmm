@@ -64,11 +64,8 @@ struct StructArgumentUnpack {
 
   private:
     template<size_t... Is>
-    static View call_impl(
-        TaskContext& context,
-        StructArgument<Type, Fields...>& data,
-        std::index_sequence<Is...>
-    ) {
+    static View
+    call_impl(TaskContext& context, StructArgument<Type, Fields...>& data, std::index_sequence<Is...>) {
         return {ArgumentUnpack<Space, Fields>::call(context, std::get<Is>(data.fields))...};
     }
 };

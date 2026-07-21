@@ -32,8 +32,8 @@ __global__ void cn_pnpoly(
             float slope = (vk.x - vj.x) / (vk.y - vj.y);
 
             if (((vj.y > p.y) != (vk.y > p.y)) &&  //if p is between vj and vk vertically
-                (p.x < slope * (p.y - vj.y)
-                     + vj.x)) {  //if p.x crosses the line vj-vk when moved in positive x-direction
+                (p.x < slope * (p.y - vj.y) + vj.x
+                )) {  //if p.x crosses the line vj-vk when moved in positive x-direction
                 c = !c;
             }
         }

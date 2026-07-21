@@ -85,9 +85,9 @@ KMM_NOINLINE void execute_reduction_impl(
 }
 
 void execute_reduction(const void* src_buffer, void* dst_buffer, ReductionDef reduction) {
-#define KMM_CALL_REDUCTION_FOR_TYPE_AND_OP(T, OP)                                                \
-    if constexpr (IsReductionSupported<T, Reduction::OP>()) {                                    \
-        if (reduction.operation == Reduction::OP) {                                              \
+#define KMM_CALL_REDUCTION_FOR_TYPE_AND_OP(T, OP)                                              \
+    if constexpr (IsReductionSupported<T, Reduction::OP>()) {                                  \
+        if (reduction.operation == Reduction::OP) {                                            \
             execute_reduction_impl<                                                            \
                 T,                                                                             \
                 Reduction::OP>(/* NOLINTNEXTLINE */                                            \
@@ -97,9 +97,9 @@ void execute_reduction(const void* src_buffer, void* dst_buffer, ReductionDef re
                                reduction.num_outputs,                                          \
                                reduction.num_inputs_per_output,                                \
                                reduction.input_stride_elements                                 \
-            ); \
-            return;                                                                              \
-        }                                                                                        \
+            );                                                                                 \
+            return;                                                                            \
+        }                                                                                      \
     }
 
 #define KMM_CALL_REDUCTION_FOR_TYPE(T)             \

@@ -37,23 +37,19 @@ size_t region2index(
         auto k = div_floor(region.begin(i), chunk_size[i]);
 
         if (!in_range(k, chunks_count[i])) {
-            throw std::out_of_range(
-                fmt::format(
-                    "invalid read pattern, the region {} exceeds the array dimensions {}",
-                    region,
-                    array_size
-                )
-            );
+            throw std::out_of_range(fmt::format(
+                "invalid read pattern, the region {} exceeds the array dimensions {}",
+                region,
+                array_size
+            ));
         }
 
         if (region.end(i) > (k + 1) * chunk_size[i]) {
-            throw std::out_of_range(
-                fmt::format(
-                    "invalid read pattern, the region {} does not align to the chunk size of {}",
-                    region,
-                    chunk_size
-                )
-            );
+            throw std::out_of_range(fmt::format(
+                "invalid read pattern, the region {} does not align to the chunk size of {}",
+                region,
+                chunk_size
+            ));
         }
 
         index = index * chunks_count[i] + static_cast<size_t>(k);
@@ -91,13 +87,11 @@ Distribution<N>::Distribution(
     }
 
     if (total_chunk_count != m_memories.size()) {
-        throw std::runtime_error(
-            fmt::format(
-                "data distribution contains {} chunk(s), only {} memory location(s) provided",
-                total_chunk_count,
-                m_memories.size()
-            )
-        );
+        throw std::runtime_error(fmt::format(
+            "data distribution contains {} chunk(s), only {} memory location(s) provided",
+            total_chunk_count,
+            m_memories.size()
+        ));
     }
 }
 
@@ -145,23 +139,19 @@ Distribution<N> Distribution<N>::from_chunks(
         }
 
         if (chunk.offset != expected_offset || chunk.size != expected_size) {
-            throw std::runtime_error(
-                fmt::format(
-                    "invalid write access pattern, region {} is not aligned to the chunk size of {}",
-                    Bounds<N>::from_offset_size(chunk.offset, chunk.size),
-                    chunk_size
-                )
-            );
+            throw std::runtime_error(fmt::format(
+                "invalid write access pattern, region {} is not aligned to the chunk size of {}",
+                Bounds<N>::from_offset_size(chunk.offset, chunk.size),
+                chunk_size
+            ));
         }
 
         if (visited[linear_index]) {
             if (!allow_duplicates) {
-                throw std::runtime_error(
-                    fmt::format(
-                        "invalid write access pattern, region {} is written to by more than one task",
-                        Bounds<N>::from_offset_size(expected_offset, expected_size)
-                    )
-                );
+                throw std::runtime_error(fmt::format(
+                    "invalid write access pattern, region {} is written to by more than one task",
+                    Bounds<N>::from_offset_size(expected_offset, expected_size)
+                ));
             }
 
             if (memories[linear_index] != chunk.owner_id) {
@@ -194,13 +184,11 @@ size_t Distribution<N>::region_to_chunk_index(Bounds<N> region) const {
 template<size_t N>
 ArrayChunk<N> Distribution<N>::chunk(size_t index) const {
     if (index >= m_memories.size()) {
-        throw std::runtime_error(
-            fmt::format(
-                "chunk {} is out of range, there are only {} chunk(s)",
-                index,
-                m_memories.size()
-            )
-        );
+        throw std::runtime_error(fmt::format(
+            "chunk {} is out of range, there are only {} chunk(s)",
+            index,
+            m_memories.size()
+        ));
     }
 
     auto region = index2region(index, m_chunks_count, m_chunk_size, m_array_size);

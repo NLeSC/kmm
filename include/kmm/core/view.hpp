@@ -266,8 +266,7 @@ struct strided_mapping {
     }
 
     template<size_t ContAxis>
-    KMM_HOST_DEVICE constexpr strided_mapping(
-        contiguous_axis_mapping<N, ContAxis, stride_type> m
+    KMM_HOST_DEVICE constexpr strided_mapping(contiguous_axis_mapping<N, ContAxis, stride_type> m
     ) noexcept :
         strided_mapping(from_mapping(m)) {}
 

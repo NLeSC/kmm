@@ -43,28 +43,24 @@ BufferRequirement ArrayReductionPlanner<N>::prepare_access(
 
     auto buffer_id = stage.create_buffer(layout);
 
-    auto fill_event = stage.insert_node(
-        CommandFill {
-            .dst_buffer = buffer_id,
-            .memory_id = memory_id,
-            .definition = FillDef(
-                dtype.size_in_bytes(),
-                num_elements,
-                reduction_identity_value(dtype, m_reduction).data()
-            )
-        }
-    );
+    auto fill_event = stage.insert_node(CommandFill {
+        .dst_buffer = buffer_id,
+        .memory_id = memory_id,
+        .definition = FillDef(
+            dtype.size_in_bytes(),
+            num_elements,
+            reduction_identity_value(dtype, m_reduction).data()
+        )
+    });
 
-    m_partial_buffers.push_back(
-        PartialReductionBuffer {
-            .chunk_index = chunk_index,
-            .buffer_id = buffer_id,
-            .memory_id = memory_id,
-            .replication_factor = replication_factor,
-            .creation_event = fill_event,
-            .write_events = {}
-        }
-    );
+    m_partial_buffers.push_back(PartialReductionBuffer {
+        .chunk_index = chunk_index,
+        .buffer_id = buffer_id,
+        .memory_id = memory_id,
+        .replication_factor = replication_factor,
+        .creation_event = fill_event,
+        .write_events = {}
+    });
 
     deps_out.push_back(fill_event);
 

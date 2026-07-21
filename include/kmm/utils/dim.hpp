@@ -157,8 +157,7 @@ Dim(Ts&&...) -> Dim<sizeof...(Ts)>;
 
 template<typename T, size_t N, size_t M>
 KMM_HOST_DEVICE Dim<N + M, T> concat(const Dim<N, T>& lhs, const Dim<M, T>& rhs) {
-    return Dim<N + M, T> {
-        concat((const fixed_vector<T, N>&)(lhs), (const fixed_vector<T, M>&)(rhs))
+    return Dim<N + M, T> {concat((const fixed_vector<T, N>&)(lhs), (const fixed_vector<T, M>&)(rhs))
     };
 }
 

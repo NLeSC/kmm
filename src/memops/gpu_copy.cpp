@@ -10,12 +10,10 @@
 namespace kmm {
 
 void throw_unsupported_dimension_exception(size_t dim) {
-    throw std::runtime_error(
-        fmt::format(
-            "copy operation is {} dimensional, only 1D or 2D copy operations are supported",
-            dim + 1
-        )
-    );
+    throw std::runtime_error(fmt::format(
+        "copy operation is {} dimensional, only 1D or 2D copy operations are supported",
+        dim + 1
+    ));
 }
 
 void execute_gpu_h2d_copy_impl(

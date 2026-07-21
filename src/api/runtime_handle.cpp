@@ -42,17 +42,13 @@ void RuntimeHandle::wait(EventId id) const {
     worker().query_event(id, std::chrono::system_clock::time_point::max());
 }
 
-bool RuntimeHandle::wait_until(
-    EventId id,
-    typename std::chrono::system_clock::time_point deadline
-) const {
+bool RuntimeHandle::wait_until(EventId id, typename std::chrono::system_clock::time_point deadline)
+    const {
     return worker().query_event(id, deadline);
 }
 
-bool RuntimeHandle::wait_for(
-    EventId id,
-    typename std::chrono::system_clock::duration duration
-) const {
+bool RuntimeHandle::wait_for(EventId id, typename std::chrono::system_clock::duration duration)
+    const {
     return worker().query_event(id, std::chrono::system_clock::now() + duration);
 }
 

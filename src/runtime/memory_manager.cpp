@@ -763,13 +763,11 @@ bool MemoryManager::try_lock_allocation_device(DeviceId device_id, Buffer& buffe
             return false;
         }
 
-        throw std::runtime_error(
-            fmt::format(
-                "cannot allocate {} bytes on GPU {}, out of memory",
-                buffer.layout.size_in_bytes,
-                device_id
-            )
-        );
+        throw std::runtime_error(fmt::format(
+            "cannot allocate {} bytes on GPU {}, out of memory",
+            buffer.layout.size_in_bytes,
+            device_id
+        ));
     }
 
     spdlog::trace(

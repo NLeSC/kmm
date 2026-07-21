@@ -39,13 +39,11 @@ Runtime::Runtime(
     m_memory_manager(std::make_shared<MemoryManager>(memory_system)),
     m_buffer_registry(std::make_shared<BufferRegistry>(m_memory_manager)),
     m_stream_manager(stream_manager),
-    m_devices(
-        std::make_shared<DeviceResources>(
-            contexts,
-            config.device_concurrent_streams,
-            m_stream_manager
-        )
-    ),
+    m_devices(std::make_shared<DeviceResources>(
+        contexts,
+        config.device_concurrent_streams,
+        m_stream_manager
+    )),
     m_info(make_system_info(contexts, config)),
     m_scheduler(m_devices, stream_manager, m_buffer_registry, config.debug_mode) {}
 

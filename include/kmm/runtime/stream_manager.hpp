@@ -47,11 +47,8 @@ class DeviceStreamManager {
 
     void wait_for_event(DeviceStream stream, DeviceEvent event) const;
     void wait_for_events(DeviceStream stream, const DeviceEventSet& events) const;
-    void wait_for_events(
-        DeviceStream stream,
-        const DeviceEvent* begin,
-        const DeviceEvent* end
-    ) const;
+    void wait_for_events(DeviceStream stream, const DeviceEvent* begin, const DeviceEvent* end)
+        const;
     void wait_for_events(DeviceStream stream, const std::vector<DeviceEvent>& events) const;
 
     /**

@@ -79,7 +79,7 @@ class HostTask: public Task {
 
 class ExecuteHostTask: public HostTask {
   public:
-    ExecuteHostTask( //
+    ExecuteHostTask(  //
         std::unique_ptr<ComputeTask> compute_task,
         std::vector<BufferRequirement> buffers
     ) :
