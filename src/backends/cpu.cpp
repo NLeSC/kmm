@@ -298,8 +298,20 @@ g_result_t g_mem_pool_trim_to(g_memory_pool_t pool, size_t size) {
     return g_result_t(GPU_ERROR_UNKNOWN);
 }
 
-g_result_t g_device_get_default_mem_pool(g_memory_pool_t* pool, g_device_t dev) {
+gpu_error_t gpu_device_get_default_mem_pool(g_memory_pool_t*, int) {
+    return gpu_error_t(GPU_ERROR_UNKNOWN);
+}
+
+g_result_t g_mem_get_default_mem_pool(
+    g_memory_pool_t*,
+    g_mem_location_t*,
+    g_mem_allocation_type_t
+) {
     return g_result_t(GPU_ERROR_UNKNOWN);
+}
+
+gpu_error_t gpu_mem_pool_set_attribute(gpu_memory_pool_t, gpu_mem_pool_attr_t, void*) {
+    return gpu_error_t(GPU_ERROR_UNKNOWN);
 }
 
 g_result_t g_mem_pool_set_attribute(

@@ -30,6 +30,7 @@ using g_mem_allocation_handle_type_t = CUmemAllocationHandleType;
 using g_mem_location_type_t = CUmemLocationType;
 using g_event_t = CUevent;
 using gpu_memcpy2d_t = CUDA_MEMCPY2D;
+using gpu_mem_pool_t = cudaMemPool_t;
 using gpu_mem_pool_attr_t = cudaMemPoolAttr;
 
 // Device Management Constants & Functions
@@ -147,16 +148,18 @@ g_result_t g_memcpy_peer_async(
 #define G_CTX_MAP_HOST                    CU_CTX_MAP_HOST
 #define g_mem_pool_attr_release_threshold cuMemPoolAttrReleaseThreshold
 
-#define gpu_malloc_async              cudaMallocAsync
-#define g_mem_pool_create             cuMemPoolCreate
-#define g_mem_pool_destroy            cuMemPoolDestroy
-#define g_mem_alloc_from_pool_async   cuMemAllocFromPoolAsync
-#define g_mem_alloc_async             cuMemAllocAsync
-#define g_mem_free_async              cuMemFreeAsync
-#define gpu_free_async                cudaFreeAsync
-#define g_mem_pool_trim_to            cuMemPoolTrimTo
-#define g_device_get_default_mem_pool cuDeviceGetDefaultMemPool
-#define g_mem_pool_set_attribute      cuMemPoolSetAttribute
+#define gpu_malloc_async                cudaMallocAsync
+#define g_mem_pool_create               cuMemPoolCreate
+#define g_mem_pool_destroy              cuMemPoolDestroy
+#define g_mem_alloc_from_pool_async     cuMemAllocFromPoolAsync
+#define g_mem_alloc_async               cuMemAllocAsync
+#define g_mem_free_async                cuMemFreeAsync
+#define gpu_free_async                  cudaFreeAsync
+#define g_mem_pool_trim_to              cuMemPoolTrimTo
+#define gpu_device_get_default_mem_pool cudaDeviceGetDefaultMemPool
+#define g_device_get_default_mem_pool   cuDeviceGetDefaultMemPool
+#define gpu_mem_pool_set_attribute      cudaMemPoolSetAttribute
+#define g_mem_pool_set_attribute        cuMemPoolSetAttribute
 
 // Error Handling Constants & Functions
 

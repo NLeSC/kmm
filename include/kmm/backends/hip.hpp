@@ -29,6 +29,7 @@ using g_mem_allocation_handle_type_t = hipMemAllocationHandleType;
 using g_mem_location_type_t = hipMemLocationType;
 using g_event_t = hipEvent_t;
 using gpu_memcpy2d_t = hip_Memcpy2D;
+using gpu_mem_pool_t = hipMemPool_t;
 using gpu_mem_pool_attr_t = hipMemPoolAttr;
 
 // Device Management Constants & Functions
@@ -159,16 +160,18 @@ g_result_t g_memcpy_peer_async(
 #define G_CTX_MAP_HOST                    0
 #define g_mem_pool_attr_release_threshold hipMemPoolAttrReleaseThreshold
 
-#define gpu_malloc_async              hipMallocAsync
-#define g_mem_pool_create             hipMemPoolCreate
-#define g_mem_pool_destroy            hipMemPoolDestroy
-#define g_mem_alloc_from_pool_async   hipMallocFromPoolAsync
-#define g_mem_alloc_async             hipMallocAsync
-#define g_mem_free_async              hipFreeAsync
-#define gpu_free_async                hipFreeAsync
-#define g_mem_pool_trim_to            hipMemPoolTrimTo
-#define g_device_get_default_mem_pool hipDeviceGetDefaultMemPool
-#define g_mem_pool_set_attribute      hipMemPoolSetAttribute
+#define gpu_malloc_async                hipMallocAsync
+#define g_mem_pool_create               hipMemPoolCreate
+#define g_mem_pool_destroy              hipMemPoolDestroy
+#define g_mem_alloc_from_pool_async     hipMallocFromPoolAsync
+#define g_mem_alloc_async               hipMallocAsync
+#define g_mem_free_async                hipFreeAsync
+#define gpu_free_async                  hipFreeAsync
+#define g_mem_pool_trim_to              hipMemPoolTrimTo
+#define gpu_device_get_default_mem_pool hipDeviceGetDefaultMemPool
+#define g_device_get_default_mem_pool   hipDeviceGetDefaultMemPool
+#define gpu_mem_pool_set_attribute      hipMemPoolSetAttribute
+#define g_mem_pool_set_attribute        hipMemPoolSetAttribute
 
 // Error Handling Constants & Functions
 

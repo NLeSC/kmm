@@ -43,6 +43,7 @@ struct g_mem_pool_props_t {
 using g_context_t = int*;
 using g_stream_t = int*;
 using g_device_ptr_t = unsigned long long;
+using gpu_memory_pool_t = int*;
 using g_memory_pool_t = int*;
 using g_event_t = void*;
 
@@ -64,6 +65,8 @@ struct gpu_memcpy2d_t {
     size_t srcXInBytes;
     size_t srcY;
 };
+
+struct gpu_mem_pool_t {};
 
 enum g_result_t {};
 enum gpu_error_t {};
@@ -198,7 +201,9 @@ g_result_t g_mem_alloc_async(g_device_ptr_t*, size_t, g_stream_t);
 g_result_t g_mem_free_async(g_device_ptr_t, g_stream_t);
 gpu_error_t gpu_free_async(g_device_ptr_t, g_stream_t);
 g_result_t g_mem_pool_trim_to(g_memory_pool_t, size_t);
-g_result_t g_device_get_default_mem_pool(g_memory_pool_t*, g_device_t);
+gpu_error_t gpu_device_get_default_mem_pool(g_memory_pool_t*, int);
+g_result_t g_mem_get_default_mem_pool(g_memory_pool_t*, g_mem_location_t*, g_mem_allocation_type_t);
+gpu_error_t gpu_mem_pool_set_attribute(gpu_memory_pool_t, gpu_mem_pool_attr_t, void*);
 g_result_t g_mem_pool_set_attribute(g_memory_pool_t, gpu_mem_pool_attr_t, void*);
 
 // Error Handling Constants & Functions
