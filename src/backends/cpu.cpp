@@ -302,11 +302,7 @@ gpu_error_t gpu_device_get_default_mem_pool(g_memory_pool_t*, int) {
     return gpu_error_t(GPU_ERROR_UNKNOWN);
 }
 
-g_result_t g_mem_get_default_mem_pool(
-    g_memory_pool_t*,
-    g_mem_location_t*,
-    g_mem_allocation_type_t
-) {
+g_result_t g_device_get_default_mem_pool(g_memory_pool_t*, int) {
     return g_result_t(GPU_ERROR_UNKNOWN);
 }
 

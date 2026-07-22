@@ -202,7 +202,7 @@ g_result_t g_mem_free_async(g_device_ptr_t, g_stream_t);
 gpu_error_t gpu_free_async(g_device_ptr_t, g_stream_t);
 g_result_t g_mem_pool_trim_to(g_memory_pool_t, size_t);
 gpu_error_t gpu_device_get_default_mem_pool(g_memory_pool_t*, int);
-g_result_t g_mem_get_default_mem_pool(g_memory_pool_t*, g_mem_location_t*, g_mem_allocation_type_t);
+g_result_t g_device_get_default_mem_pool(g_memory_pool_t*, int);
 gpu_error_t gpu_mem_pool_set_attribute(gpu_memory_pool_t, gpu_mem_pool_attr_t, void*);
 g_result_t g_mem_pool_set_attribute(g_memory_pool_t, gpu_mem_pool_attr_t, void*);
 
