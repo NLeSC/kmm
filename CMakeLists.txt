@@ -128,6 +128,18 @@ elseif(KMM_USE_HIP)
       set(HIP_PATH $ENV{HIP_PATH} CACHE PATH "Path to which HIP has been installed")
     endif()
   endif()
+  if(NOT DEFINED ROCM_PATH)
+    if(NOT DEFINED ENV{ROCM_PATH})
+      set(ROCM_PATH "/opt/rocm" CACHE PATH "Path to which ROCm has been installed")
+    else()
+      set(ROCM_PATH $ENV{ROCM_PATH} CACHE PATH "Path to which ROCm has been installed")
+    endif()
+  endif()
+  # Modern ROCm (>=5.x) ships HIP/ROCBLAS as CMake package configs under
+  # ${ROCM_PATH}/lib/cmake/<pkg>, discovered via CMAKE_PREFIX_PATH.
+  list(APPEND CMAKE_PREFIX_PATH "${ROCM_PATH}")
+  # Older ROCm shipped an old-style FindHIP.cmake module under ${HIP_PATH}/cmake instead;
+  # keep this for backward compatibility.
   set(CMAKE_MODULE_PATH "${HIP_PATH}/cmake" ${CMAKE_MODULE_PATH})
   find_package(HIP REQUIRED)
   find_package(ROCBLAS REQUIRED)
