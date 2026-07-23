@@ -41,10 +41,12 @@ struct g_mem_pool_props_t {
 };
 
 using g_context_t = int*;
+using gpu_stream_t = int*;
 using g_stream_t = int*;
 using g_device_ptr_t = unsigned long long;
 using gpu_memory_pool_t = int*;
 using g_memory_pool_t = int*;
+using gpu_event_t = void*;
 using g_event_t = void*;
 
 enum g_memory_type_t { G_MEMORYTYPE_HOST, G_MEMORYTYPE_DEVICE };
@@ -120,10 +122,14 @@ g_result_t g_stream_wait_event(g_stream_t, g_event_t, unsigned int);
 
 #define G_EVENT_DISABLE_TIMING 2
 
+gpu_error_t gpu_event_create(gpu_event_t);
 g_result_t g_event_create(g_event_t, unsigned int);
+gpu_error_t gpu_event_record(gpu_event_t, gpu_stream_t = 0);
 g_result_t g_event_record(g_event_t, g_stream_t);
 g_result_t g_event_query(g_event_t);
+gpu_error_t gpu_event_synchronize(gpu_event_t);
 g_result_t g_event_synchronize(g_event_t);
+gpu_error_t gpu_event_destroy(gpu_event_t);
 g_result_t g_event_destroy(g_event_t);
 gpu_error_t gpu_event_elapsed_time(float* ms, g_event_t start, g_event_t stop);
 

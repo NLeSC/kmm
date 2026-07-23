@@ -28,6 +28,7 @@ using g_mem_pool_props_t = CUmemPoolProps;
 using g_mem_allocation_type_t = CUmemAllocationType;
 using g_mem_allocation_handle_type_t = CUmemAllocationHandleType;
 using g_mem_location_type_t = CUmemLocationType;
+using gpu_event_t = cudaEvent_t;
 using g_event_t = CUevent;
 using gpu_memcpy2d_t = CUDA_MEMCPY2D;
 using gpu_mem_pool_t = cudaMemPool_t;
@@ -74,10 +75,14 @@ using gpu_mem_pool_attr_t = cudaMemPoolAttr;
 #define G_EVENT_WAIT_DEFAULT   CU_EVENT_WAIT_DEFAULT
 #define G_EVENT_DISABLE_TIMING CU_EVENT_DISABLE_TIMING
 
+#define gpu_event_create       cudaEventCreate
 #define g_event_create         cuEventCreate
+#define gpu_event_record       cudaEventRecord
 #define g_event_record         cuEventRecord
 #define g_event_query          cuEventQuery
+#define gpu_event_synchronize  cudaEventSynchronize
 #define g_event_synchronize    cuEventSynchronize
+#define gpu_event_destroy      cudaEventDestroy
 #define g_event_destroy        cuEventDestroy
 #define gpu_event_elapsed_time cudaEventElapsedTime
 

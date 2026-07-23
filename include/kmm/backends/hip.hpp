@@ -27,6 +27,7 @@ using g_mem_pool_props_t = hipMemPoolProps;
 using g_mem_allocation_type_t = hipMemAllocationType;
 using g_mem_allocation_handle_type_t = hipMemAllocationHandleType;
 using g_mem_location_type_t = hipMemLocationType;
+using gpu_event_t = hipEvent_t;
 using g_event_t = hipEvent_t;
 using gpu_memcpy2d_t = hip_Memcpy2D;
 using gpu_mem_pool_t = hipMemPool_t;
@@ -73,10 +74,14 @@ using gpu_mem_pool_attr_t = hipMemPoolAttr;
 #define G_EVENT_WAIT_DEFAULT   0
 #define G_EVENT_DISABLE_TIMING hipEventDisableTiming
 
+#define gpu_event_create       hipEventCreate
 #define g_event_create         hipEventCreateWithFlags
+#define gpu_event_record       hipEventRecord
 #define g_event_record         hipEventRecord
 #define g_event_query          hipEventQuery
+#define gpu_event_synchronize  hipEventSynchronize
 #define g_event_synchronize    hipEventSynchronize
+#define gpu_event_destroy      hipEventDestroy
 #define g_event_destroy        hipEventDestroy
 #define gpu_event_elapsed_time hipEventElapsedTime
 

@@ -170,8 +170,16 @@ g_result_t g_stream_destroy(g_stream_t stream) {
     return g_result_t(GPU_ERROR_UNKNOWN);
 }
 
+gpu_error_t gpu_event_synchronize(gpu_event_t) {
+    return gpu_error_t(GPU_ERROR_UNKNOWN);
+}
+
 g_result_t g_event_synchronize(g_event_t event) {
     return g_result_t(GPU_ERROR_UNKNOWN);
+}
+
+gpu_error_t gpu_event_record(gpu_event_t, gpu_stream_t = 0) {
+    return gpu_error_t(GPU_ERROR_UNKNOWN);
 }
 
 g_result_t g_event_record(g_event_t event, g_stream_t stream) {
@@ -186,8 +194,16 @@ g_result_t g_event_query(g_event_t event) {
     return g_result_t(GPU_ERROR_UNKNOWN);
 }
 
+gpu_error_t gpu_event_destroy(gpu_event_t) {
+    return gpu_error_t(GPU_ERROR_UNKNOWN);
+}
+
 g_result_t g_event_destroy(g_event_t event) {
     return g_result_t(GPU_ERROR_UNKNOWN);
+}
+
+gpu_error_t gpu_event_create(gpu_event_t) {
+    return gpu_error_t(GPU_ERROR_UNKNOWN);
 }
 
 g_result_t g_event_create(g_event_t event, unsigned int flags) {
