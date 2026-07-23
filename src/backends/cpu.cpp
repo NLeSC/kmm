@@ -178,7 +178,7 @@ g_result_t g_event_synchronize(g_event_t event) {
     return g_result_t(GPU_ERROR_UNKNOWN);
 }
 
-gpu_error_t gpu_event_record(gpu_event_t, gpu_stream_t = 0) {
+gpu_error_t gpu_event_record(gpu_event_t, gpu_stream_t) {
     return gpu_error_t(GPU_ERROR_UNKNOWN);
 }
 
