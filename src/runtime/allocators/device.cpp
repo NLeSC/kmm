@@ -15,9 +15,9 @@ AllocationResult PinnedMemoryAllocator::allocate(size_t nbytes, void** addr_out)
     g_result_t result =
         g_mem_host_alloc(addr_out, nbytes, G_MEMHOSTALLOC_PORTABLE | G_MEMHOSTALLOC_DEVICEMAP);
 
-    if (result == GPU_SUCCESS) {
+    if (result == G_SUCCESS) {
         return AllocationResult::Success;
-    } else if (result == GPU_ERROR_OUT_OF_MEMORY) {
+    } else if (result == G_ERROR_OUT_OF_MEMORY) {
         return AllocationResult::ErrorOutOfMemory;
     } else {
         throw GPUDriverException("error when calling `cuMemHostAlloc`", result);
@@ -42,10 +42,10 @@ AllocationResult DeviceMemoryAllocator::allocate(size_t nbytes, void** addr_out)
     g_device_ptr_t ptr;
     g_result_t result = g_mem_alloc(&ptr, nbytes);
 
-    if (result == GPU_SUCCESS) {
+    if (result == G_SUCCESS) {
         *addr_out = (void*)ptr;
         return AllocationResult::Success;
-    } else if (result == GPU_ERROR_OUT_OF_MEMORY) {
+    } else if (result == G_ERROR_OUT_OF_MEMORY) {
         return AllocationResult::ErrorOutOfMemory;
     } else {
         throw GPUDriverException("error when calling `g_mem_alloc`", result);
@@ -132,19 +132,19 @@ AllocationResult DevicePoolAllocator::allocate_async(
     }
 
     g_device_ptr_t device_ptr;
-    g_result_t result = g_result_t(GPU_ERROR_UNKNOWN);
+    g_result_t result = g_result_t(G_ERROR_UNKNOWN);
 
     auto event = m_streams->with_stream(m_alloc_stream, [&](auto stream) {
         GPUContextGuard guard {m_context};
         result = g_mem_alloc_from_pool_async(&device_ptr, nbytes, m_pool, stream);
     });
 
-    if (result == GPU_SUCCESS) {
+    if (result == G_SUCCESS) {
         m_bytes_in_use += nbytes;
         deps_out.insert(event);
         *addr_out = (void*)device_ptr;
         return AllocationResult::Success;
-    } else if (result == GPU_ERROR_OUT_OF_MEMORY) {
+    } else if (result == G_ERROR_OUT_OF_MEMORY) {
         return AllocationResult::ErrorOutOfMemory;
     } else {
         throw GPUDriverException("error while calling `g_mem_alloc_from_pool_async`", result);

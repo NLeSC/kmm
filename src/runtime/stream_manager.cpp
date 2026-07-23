@@ -61,14 +61,14 @@ DeviceStreamManager::~DeviceStreamManager() {
 
         for (const auto& gpu_event : stream.pending_events) {
             KMM_GPU_CHECK(g_event_synchronize(gpu_event));
-            KMM_ASSERT(g_event_synchronize(gpu_event) == GPU_SUCCESS);
+            KMM_ASSERT(g_event_synchronize(gpu_event) == G_SUCCESS);
 
             stream.first_pending_index += 1;
             m_event_pools[stream.pool_index].push(gpu_event);
         }
 
         KMM_GPU_CHECK(g_stream_synchronize(stream.gpu_stream));
-        KMM_ASSERT(g_stream_query(stream.gpu_stream) == GPU_SUCCESS);
+        KMM_ASSERT(g_stream_query(stream.gpu_stream) == G_SUCCESS);
 
         if (stream.delete_stream_on_exit) {
             KMM_GPU_CHECK(g_stream_destroy(stream.gpu_stream));
@@ -330,11 +330,11 @@ bool DeviceStreamManager::make_progress_for_stream(DeviceStream stream_index) {
             g_event_t gpu_event = stream.pending_events[0];
             g_result_t result = g_event_query(gpu_event);
 
-            if (result == GPU_ERROR_NOT_READY) {
+            if (result == G_ERROR_NOT_READY) {
                 break;
             }
 
-            if (result != GPU_SUCCESS) {
+            if (result != G_SUCCESS) {
                 throw GPUDriverException("`gpuEventQuery` failed", result);
             }
 

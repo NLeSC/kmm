@@ -214,6 +214,12 @@ g_result_t g_mem_pool_set_attribute(g_memory_pool_t, gpu_mem_pool_attr_t, void*)
 
 // Error Handling Constants & Functions
 
+#define G_SUCCESS             0
+#define G_ERROR_OUT_OF_MEMORY 0
+#define G_ERROR_UNKNOWN       0
+#define G_ERROR_NOT_READY     0
+#define G_ERROR_NO_DEVICE     100
+
 #define GPU_SUCCESS             0
 #define GPU_ERROR_OUT_OF_MEMORY 0
 #define GPU_ERROR_UNKNOWN       0

@@ -180,6 +180,13 @@ g_result_t g_memcpy_peer_async(
 
 // Error Handling Constants & Functions
 
+// HIP has no separate driver/runtime API split, so G_* and GPU_* map to the same symbols.
+#define G_SUCCESS             hipSuccess
+#define G_ERROR_OUT_OF_MEMORY hipErrorOutOfMemory
+#define G_ERROR_UNKNOWN       hipErrorUnknown
+#define G_ERROR_NOT_READY     hipErrorNotReady
+#define G_ERROR_NO_DEVICE     hipErrorNoDevice
+
 #define GPU_SUCCESS             hipSuccess
 #define GPU_ERROR_OUT_OF_MEMORY hipErrorOutOfMemory
 #define GPU_ERROR_UNKNOWN       hipErrorUnknown

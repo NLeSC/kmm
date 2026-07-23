@@ -58,11 +58,11 @@ GPUContextHandle::GPUContextHandle(g_context_t context, std::shared_ptr<void> li
 std::vector<g_device_t> get_gpu_devices() {
     try {
         auto result = g_init(0);
-        if (result == GPU_ERROR_NO_DEVICE) {
+        if (result == G_ERROR_NO_DEVICE) {
             return {};
         }
 
-        if (result != GPU_SUCCESS) {
+        if (result != G_SUCCESS) {
             throw GPUDriverException("gpuInit failed", result);
         }
 
@@ -92,14 +92,14 @@ std::optional<g_device_t> get_gpu_device_by_address(const void* address) {
         g_device_ptr_t(address)
     );
 
-    if (result == GPU_SUCCESS && memory_type == G_MEMORYTYPE_DEVICE) {
+    if (result == G_SUCCESS && memory_type == G_MEMORYTYPE_DEVICE) {
         result = g_pointer_get_attribute(
             &ordinal,
             G_POINTER_ATTRIBUTE_DEVICE_ORDINAL,
             g_device_ptr_t(address)
         );
 
-        if (result == GPU_SUCCESS) {
+        if (result == G_SUCCESS) {
             return g_device_t {ordinal};
         }
     }
@@ -113,7 +113,7 @@ GPUContextHandle GPUContextHandle::create_context_for_device(g_device_t device) 
     KMM_GPU_CHECK(g_ctx_create(&context, flags, device));
 
     auto lifetime = std::shared_ptr<void>(nullptr, [=](const void* ignore) {
-        KMM_ASSERT(g_ctx_destroy(context) == GPU_SUCCESS);
+        KMM_ASSERT(g_ctx_destroy(context) == G_SUCCESS);
     });
 
     return {context, lifetime};
@@ -124,7 +124,7 @@ GPUContextHandle GPUContextHandle::retain_primary_context_for_device(g_device_t 
     KMM_GPU_CHECK(g_device_primary_ctx_retain(&context, device));
 
     auto lifetime = std::shared_ptr<void>(nullptr, [=](const void* ignore) {
-        KMM_ASSERT(g_device_primary_ctx_release(device) == GPU_SUCCESS);
+        KMM_ASSERT(g_device_primary_ctx_release(device) == G_SUCCESS);
     });
 
     return {context, lifetime};
@@ -136,7 +136,7 @@ GPUContextGuard::GPUContextGuard(GPUContextHandle context) : m_context(std::move
 
 GPUContextGuard::~GPUContextGuard() {
     g_context_t previous;
-    KMM_ASSERT(g_ctx_pop_current(&previous) == GPU_SUCCESS);
+    KMM_ASSERT(g_ctx_pop_current(&previous) == G_SUCCESS);
 }
 
 }  // namespace kmm

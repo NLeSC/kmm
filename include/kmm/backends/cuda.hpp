@@ -168,11 +168,17 @@ g_result_t g_memcpy_peer_async(
 
 // Error Handling Constants & Functions
 
-#define GPU_SUCCESS             CUDA_SUCCESS
-#define GPU_ERROR_OUT_OF_MEMORY CUDA_ERROR_OUT_OF_MEMORY
-#define GPU_ERROR_UNKNOWN       CUDA_ERROR_UNKNOWN
-#define GPU_ERROR_NOT_READY     CUDA_ERROR_NOT_READY
-#define GPU_ERROR_NO_DEVICE     CUDA_ERROR_NO_DEVICE
+#define G_SUCCESS             CUDA_SUCCESS
+#define G_ERROR_OUT_OF_MEMORY CUDA_ERROR_OUT_OF_MEMORY
+#define G_ERROR_UNKNOWN       CUDA_ERROR_UNKNOWN
+#define G_ERROR_NOT_READY     CUDA_ERROR_NOT_READY
+#define G_ERROR_NO_DEVICE     CUDA_ERROR_NO_DEVICE
+
+#define GPU_SUCCESS             cudaSuccess
+#define GPU_ERROR_OUT_OF_MEMORY cudaErrorMemoryAllocation
+#define GPU_ERROR_UNKNOWN       cudaErrorUnknown
+#define GPU_ERROR_NOT_READY     cudaErrorNotReady
+#define GPU_ERROR_NO_DEVICE     cudaErrorNoDevice
 
 #define g_get_error_name     cuGetErrorName
 #define g_get_error_string   cuGetErrorString
