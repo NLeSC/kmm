@@ -1,495 +1,317 @@
 #pragma once
 
-#include <memory>
-#include <stdexcept>
-#include <typeinfo>
+#include <cstddef>
+#include <optional>
+#include <string>
+#include <type_traits>
+#include <utility>
 #include <vector>
 
-#include "spdlog/spdlog.h"
-
-#include "kmm/api/access.hpp"
-#include "kmm/api/argument.hpp"
-#include "kmm/api/array_instance.hpp"
-#include "kmm/api/view_argument.hpp"
-#include "kmm/planner/read_planner.hpp"
-#include "kmm/planner/reduction_planner.hpp"
-#include "kmm/planner/write_planner.hpp"
+#include "kmm/api/array_base.hpp"
+#include "kmm/api/launch_arg.hpp"
+#include "kmm/core/layout.hpp"
+#include "kmm/core/view.hpp"
+#include "kmm/runtime/buffer.hpp"
+#include "kmm/runtime/device_event.hpp"
+#include "kmm/runtime/identifiers.hpp"
+#include "kmm/runtime/memops/fill.hpp"
+#include "kmm/runtime/requisition.hpp"
 
 namespace kmm {
 
-class ArrayBase {
+template<typename T, typename DomainT, typename PolicyT = RowMajor>
+class DomainArray: public ArrayBase {
+    // Grants every `DomainArray` instantiation access to every other's private constructor.
+    template<typename, typename, typename>
+    friend class DomainArray;
+
+    // Grants `Reduce<DomainArray<T, DomainT, PolicyT>>::finalize()` access to the private raw
+    // constructor, so it can hand back a `DomainArray` without going through a public constructor
+    // that would (re-)trigger `Runtime::begin_reduction`.
+    friend class Reduce<DomainArray<T, DomainT, PolicyT>>;
+
   public:
-    virtual ~ArrayBase() = default;
-    virtual const std::type_info& type_info() const = 0;
-    virtual size_t rank() const = 0;
-    virtual int64_t size(size_t axis) const = 0;
-    virtual const Runtime& runtime() const = 0;
-    virtual void synchronize() const = 0;
-    virtual void copy_bytes_to(void* output, size_t num_bytes) const = 0;
+    using self_type = DomainArray<T, DomainT, PolicyT>;
+    using element_type = T;
+    using domain_type = DomainT;
+    using policy_type = PolicyT;
+    using layout_type = Layout<DomainT, PolicyT>;
+    static constexpr size_t rank = layout_type::rank;
+    using mapping_type = typename layout_type::mapping_type;
+    using index_type = typename layout_type::index_type;
+    using ndindex_type = typename layout_type::ndindex_type;
+    using shape_type = typename layout_type::shape_type;
+    using range_type = typename layout_type::range_type;
+    using bounds_type = typename layout_type::bounds_type;
+    using stride_type = typename layout_type::stride_type;
+    using ndstrides_type = typename layout_type::ndstrides_type;
+
+    /// The `DomainArray` sharing this array's element type but over a different `Layout`,
+    template<typename NewLayoutT>
+    using rebind_layout = DomainArray<  //
+        T,
+        typename NewLayoutT::domain_type,
+        typename NewLayoutT::policy_type>;
+
+    using zero_origin_type = rebind_layout<typename layout_type::zero_origin_type>;
+    using move_origin_type = rebind_layout<typename layout_type::move_origin_type>;
+    using reverse_axes_type = rebind_layout<typename layout_type::reverse_axes_type>;
+
+    template<size_t Axis>
+    using drop_axis_type = rebind_layout<typename layout_type::template drop_axis_type<Axis>>;
+
+    template<size_t Axis>
+    using insert_axis_type = rebind_layout<typename layout_type::template insert_axis_type<Axis>>;
+
+    template<size_t Axis, typename SliceT>
+    using slice_axis_type =
+        rebind_layout<typename layout_type::template slice_axis_type<Axis, SliceT>>;
+
+    template<typename... Slices>
+    using slice_type = rebind_layout<typename layout_type::template slice_type<Slices...>>;
+
+    DomainArray() = default;
+
+    DomainArray(layout_type layout) : m_layout(layout) {}
+
+    DomainArray(domain_type domain, policy_type policy = {}) :
+        DomainArray(make_layout(domain, policy).normalize_offset()) {}
+
+    DomainArray(Runtime runtime, layout_type layout, std::optional<T> fill_value = std::nullopt) :
+        ArrayBase(Buffer(
+            runtime,
+            BufferLayout::for_type<T>(static_cast<size_t>(layout.offset_span().size())),
+            "array",
+            fill_value ? FillValue::from<T>(*fill_value) : FillValue {}
+        )),
+        m_layout(layout.normalize_offset()) {}
+
+    DomainArray(
+        Runtime runtime,
+        domain_type domain,
+        policy_type policy = {},
+        std::optional<T> fill_value = std::nullopt
+    ) :
+        DomainArray(runtime, make_layout(domain, policy), fill_value) {}
+
+    template<typename OtherDomainT, typename OtherPolicyT>
+    DomainArray(const DomainArray<T, OtherDomainT, OtherPolicyT>& that) :
+        ArrayBase(that),
+        m_layout(that.layout()) {}
+
+    const layout_type& layout() const noexcept {
+        return m_layout;
+    }
+
+    const domain_type& domain() const noexcept {
+        return m_layout.domain();
+    }
+
+    const mapping_type& mapping() const noexcept {
+        return m_layout.mapping();
+    }
+
+    shape_type shape() const noexcept {
+        return m_layout.shape();
+    }
+
+    /// The valid index range along the given axis.
+    range_type bounds(size_t axis) const noexcept {
+        return m_layout.bounds(axis);
+    }
+
+    /// The bounds (begin/end per axis) covered by this array.
+    bounds_type bounds() const noexcept {
+        return m_layout.bounds();
+    }
+
+    /// The first valid index along the given axis.
+    index_type origin(size_t axis) const noexcept {
+        return m_layout.origin(axis);
+    }
+
+    /// The first valid index along each axis.
+    ndindex_type origin() const noexcept {
+        return m_layout.origin();
+    }
+
+    stride_type stride(size_t axis) const noexcept {
+        return m_layout.stride(axis);
+    }
+
+    /// The stride along each axis.
+    ndstrides_type strides() const noexcept {
+        return m_layout.strides();
+    }
+
+    index_type extent(size_t axis) const noexcept {
+        return m_layout.extent(axis);
+    }
+
+    /// The start of the valid range along the given axis.
+    index_type begin(size_t axis) const noexcept {
+        return m_layout.begin(axis);
+    }
+
+    /// The end (exclusive) of the valid range along the given axis.
+    index_type end(size_t axis) const noexcept {
+        return m_layout.end(axis);
+    }
+
+    /// The start of the valid range along each axis.
+    ndindex_type begin() const noexcept {
+        return m_layout.begin();
+    }
+
+    /// The end (exclusive) of the valid range along each axis.
+    ndindex_type end() const noexcept {
+        return m_layout.end();
+    }
+
+    /// The total number of elements in this array.
+    index_type size() const noexcept {
+        return m_layout.size();
+    }
+
+    /// Whether this array covers zero elements.
+    bool is_empty() const noexcept {
+        return m_layout.is_empty();
+    }
+
+    /// Returns this array rebased so its domain starts at the zero index.
+    zero_origin_type zero_origin() const noexcept {
+        return {buffer(), m_layout.zero_origin()};
+    }
+
+    /// Returns this array shifted so it originates at the given index, keeping the same shape.
+    move_origin_type move_origin(ndindex_type new_origin) const noexcept {
+        return {buffer(), m_layout.move_origin(new_origin)};
+    }
+
+    /// Returns this array restricted to the intersection of its bounds and the given bounds.
+    move_origin_type restrict_bounds(bounds_type new_bounds) const noexcept {
+        return {buffer(), m_layout.restrict_bounds(new_bounds)};
+    }
+
+    /// Returns this array restricted along one axis to the intersection with [start, stop).
+    template<size_t Axis>
+    move_origin_type restrict_axis(index_type start, index_type stop) const noexcept {
+        return {buffer(), m_layout.template restrict_axis<Axis>(start, stop)};
+    }
+
+    /// Returns this array with the given axis dropped, fixed at the given index.
+    template<size_t Axis>
+    drop_axis_type<Axis> drop_axis(index_type index) const noexcept {
+        return {buffer(), m_layout.template drop_axis<Axis>(index)};
+    }
+
+    /// Returns this array with a new broadcast axis of the given extent inserted at the given
+    /// position.
+    template<size_t Axis>
+    insert_axis_type<Axis> insert_axis(index_type extent = static_cast<index_type>(1))
+        const noexcept {
+        return {buffer(), m_layout.template insert_axis<Axis>(extent)};
+    }
+
+    /// Returns this array with the order of all axes reversed.
+    reverse_axes_type reverse_axes() const noexcept {
+        return {buffer(), m_layout.reverse_axes()};
+    }
+
+    /// Returns this array with the given axis sliced according to the given slice token (e.g.
+    /// `all`, a `Range`, `new_axis`).
+    template<size_t Axis, typename SliceT>
+    slice_axis_type<Axis, SliceT> slice_axis(const SliceT& slice) const noexcept {
+        return {buffer(), m_layout.template slice_axis<Axis>(slice)};
+    }
+
+    /// Returns this array with the given axis narrowed to the range [start, end).
+    template<size_t Axis>
+    self_type slice_axis(index_type start, index_type end) const noexcept {
+        return self_type(buffer(), m_layout.template slice_axis<Axis>(start, end));
+    }
+
+    /// Returns this array sliced across all axes at once, one slice token per axis.
+    template<typename... Slices>
+    slice_type<Slices...> slice(const Slices&... slices) const noexcept {
+        return {buffer(), m_layout.slice(slices...)};
+    }
+
+    template<typename SliceT>
+    slice_axis_type<0, SliceT> operator[](const SliceT& slice) const noexcept {
+        return {buffer(), m_layout.template slice_axis<0>(slice)};
+    }
+
+  private:
+    DomainArray(Buffer buffer, layout_type layout) noexcept :
+        ArrayBase(std::move(buffer)),
+        m_layout(layout) {}
+
+    layout_type m_layout {};
 };
 
-template<typename T, size_t N = 1>
-class Array: public ArrayBase {
+template<typename T, size_t N = 1, typename PolicyT = RowMajor>
+using Array = DomainArray<T, Shape<N>, PolicyT>;
+
+template<typename T, size_t N = 1, typename PolicyT = RowMajor>
+using SubArray = DomainArray<T, Bounds<N>, PolicyT>;
+
+namespace detail {
+
+/// Shared implementation of `LaunchArg` for `DomainArray<T, DomainT, PolicyT>`, parameterized on the access
+/// mode granted to the resolved view: `AccessMode::Read` yields a `DomainView<const T, LayoutT>`,
+/// `AccessMode::ReadWrite` a `DomainView<T, LayoutT>`.
+template<typename T, typename DomainT, typename PolicyT, AccessMode Mode>
+class LaunchArgArray {
   public:
-    Array(Dim<N> shape = {}) : m_shape(shape) {}
+    using view_element_type = std::conditional_t<Mode == AccessMode::Read, const T, T>;
+    using resolve_type = DomainView<view_element_type, Layout<DomainT, PolicyT>>;
 
-    explicit Array(std::shared_ptr<ArrayInstance<N>> b) :
-        m_instance(b),
-        m_shape(m_instance->distribution().array_size()) {}
+    explicit LaunchArgArray(const DomainArray<T, DomainT, PolicyT>& array) : m_array(array) {}
 
-    const std::type_info& type_info() const final {
-        return typeid(T);
+    void acquire(Runtime& runtime, Requisition& req) {
+        m_index = req.add(m_array.buffer().id(), Mode);
     }
 
-    size_t rank() const final {
-        return N;
+    resolve_type resolve(Runtime& runtime, Requisition& req) {
+        auto accessor = req.accessor(runtime, m_index);
+        auto* data = static_cast<typename resolve_type::pointer>(accessor.address);
+        return resolve_type(data, m_array.layout());
     }
 
-    Dim<N> shape() const {
-        return m_shape;
-    }
-
-    int64_t size(size_t axis) const final {
-        return m_shape.get_or_default(axis);
-    }
-
-    int64_t size() const {
-        return m_shape.volume();
-    }
-
-    bool is_empty() const {
-        return m_shape.is_empty();
-    }
-
-    bool has_instance() const {
-        return m_instance != nullptr;
-    }
-
-    ArrayInstance<N>& instance() const {
-        if (m_instance == nullptr) {
-            throw_uninitialized_array_exception();
-        }
-
-        return *m_instance;
-    }
-
-    const Distribution<N>& distribution() const {
-        return instance().distribution();
-    }
-
-    Dim<N> chunk_size() const {
-        return distribution().chunk_size();
-    }
-
-    int64_t chunk_size(size_t axis) const {
-        return chunk_size().get_or_default(axis);
-    }
-
-    Runtime& runtime() const final {
-        return instance().runtime();
-    }
-
-    void synchronize() const final {
-        if (m_instance) {
-            m_instance->synchronize();
-        }
-    }
-
-    void reset() {
-        m_instance = nullptr;
-    }
-
-    template<typename M = All>
-    Read<Array<T, N>, M> access(M mapper = {}) {
-        return {*this, {std::move(mapper)}};
-    }
-
-    template<typename M = All>
-    Read<const Array<T, N>, M> access(M mapper = {}) const {
-        return {*this, {std::move(mapper)}};
-    }
-
-    template<typename M>
-    auto operator[](M first_index) {
-        return MultiIndexAccess<Array<T, N>, Read, N>(*this)[first_index];
-    }
-
-    template<typename M>
-    auto operator[](M first_index) const {
-        return MultiIndexAccess<const Array<T, N>, Read, N>(*this)[first_index];
-    }
-
-    template<typename... Is>
-    Read<Array<T, N>, MultiIndexMap<N>> operator()(const Is&... index) {
-        return access(bounds(index...));
-    }
-
-    template<typename... Is>
-    Read<const Array<T, N>, MultiIndexMap<N>> operator()(const Is&... index) const {
-        return access(bounds(index...));
-    }
-
-    void copy_bytes_to(void* output, size_t num_bytes) const {
-        KMM_ASSERT(num_bytes % sizeof(T) == 0);
-        KMM_ASSERT(checked_equals(num_bytes / sizeof(T), size()));
-        instance().copy_bytes_into(output);
-    }
-
-    void copy_to(T* output) const {
-        instance().copy_bytes_into(output);
-    }
-
-    template<typename I>
-    void copy_to(T* output, I num_elements) const {
-        KMM_ASSERT(checked_equals(num_elements, size()));
-        instance().copy_bytes_into(output);
-    }
-
-    void copy_to(std::vector<T>& output) const {
-        output.resize(checked_cast<size_t>(size()));
-        instance().copy_bytes_into(output.data());
-    }
-
-    std::vector<T> copy_to_vector() const {
-        std::vector<T> output(size());
-        copy_to(output);
-        return output;
-    }
-
-    void copy_bytes_from(const void* input, size_t num_bytes) const {
-        KMM_ASSERT(num_bytes % sizeof(T) == 0);
-        KMM_ASSERT(checked_equals(num_bytes / sizeof(T), size()));
-        instance().copy_bytes_from(input);
-    }
-
-    void copy_from(T* input) const {
-        instance().copy_bytes_from(input);
-    }
-
-    template<typename I>
-    void copy_from(T* input, I num_elements) const {
-        KMM_ASSERT(checked_equals(num_elements, size()));
-        instance().copy_bytes_from(input);
-    }
-
-    void copy_from(const std::vector<T>& input) const {
-        copy_from(input.data(), input.size());
-    }
+    void release(Runtime& runtime, Requisition& req) {}
 
   private:
-    std::shared_ptr<ArrayInstance<N>> m_instance;
-    Index<N> m_offset;  // Unused for now, always zero
-    Dim<N> m_shape;
+    DomainArray<T, DomainT, PolicyT> m_array;
+    size_t m_index = 0;
 };
 
-template<typename T>
-using Scalar = Array<T, 0>;
+}  // namespace detail
 
-template<typename T, size_t N>
-struct ArgumentHandler<Read<const Array<T, N>>> {
-    using type = ViewArgument<const T, views::dynamic_domain<N>>;
-
-    ArgumentHandler(Read<const Array<T, N>> access) :
-        m_planner(access.argument.instance().shared_from_this()),
-        m_array_shape(access.argument.shape()) {}
-
-    void initialize(const TaskGroupInit& init) {}
-
-    type before_submit(TaskInstance& task) {
-        auto region = Bounds<N>(m_array_shape);
-        size_t buffer_index = task.add_buffer_requirement(  //
-            m_planner.prepare_access(task.graph, task.memory_id, region, task.dependencies)
-        );
-
-        auto domain = views::dynamic_domain<N> {region.sizes()};
-        return {buffer_index, domain};
-    }
-
-    void after_submit(const TaskSubmissionResult& result) {
-        m_planner.finalize_access(result.graph, result.event_id);
-    }
-
-    void commit(const TaskGroupCommit& commit) {
-        m_planner.commit(commit.graph);
-    }
-
-  private:
-    ArrayReadPlanner<N> m_planner;
-    Dim<N> m_array_shape;
+/// Read-only access to a `DomainArray` (the default when passed to `Context::scope` unwrapped).
+template<typename T, typename DomainT, typename PolicyT>
+class LaunchArg<DomainArray<T, DomainT, PolicyT>>:
+    public detail::LaunchArgArray<T, DomainT, PolicyT, AccessMode::Read> {
+  public:
+    using detail::LaunchArgArray<T, DomainT, PolicyT, AccessMode::Read>::LaunchArgArray;
 };
 
-template<typename T, size_t N>
-struct ArgumentHandler<Array<T, N>>: ArgumentHandler<Read<const Array<T, N>>> {
-    ArgumentHandler(Array<T, N> array) : ArgumentHandler<Read<const Array<T, N>>>(read(array)) {}
+/// Read-only access to a `DomainArray` explicitly wrapped in `read(...)`.
+template<typename T, typename DomainT, typename PolicyT>
+class LaunchArg<Read<DomainArray<T, DomainT, PolicyT>>>:
+    public detail::LaunchArgArray<T, DomainT, PolicyT, AccessMode::Read> {
+  public:
+    explicit LaunchArg(Read<DomainArray<T, DomainT, PolicyT>> arg) :
+        detail::LaunchArgArray<T, DomainT, PolicyT, AccessMode::Read>(arg.value) {}
 };
 
-template<typename T, size_t N, typename M>
-struct ArgumentHandler<Read<const Array<T, N>, M>> {
-    using type = ViewArgument<const T, views::dynamic_subdomain<N>>;
-
-    static_assert(
-        is_dimensionality_accepted_by_mapper<M, N>,
-        "mapper of 'read' must return N-dimensional region"
-    );
-
-    ArgumentHandler(Read<const Array<T, N>, M> access) :
-        m_planner(access.argument.instance().shared_from_this()),
-        m_array_shape(access.argument.shape()),
-        m_access_mapper(access.access_mapper) {}
-
-    void initialize(const TaskGroupInit& init) {}
-
-    type before_submit(TaskInstance& task) {
-        Bounds<N> region = m_access_mapper(task.chunk, Bounds<N>(m_array_shape));
-        auto buffer_index = task.add_buffer_requirement(  //
-            m_planner.prepare_access(task.graph, task.memory_id, region, task.dependencies)
-        );
-
-        auto domain = views::dynamic_subdomain<N> {region.begin(), region.sizes()};
-        return {buffer_index, domain};
-    }
-
-    void after_submit(const TaskSubmissionResult& result) {
-        m_planner.finalize_access(result.graph, result.event_id);
-    }
-
-    void commit(const TaskGroupCommit& commit) {
-        m_planner.commit(commit.graph);
-    }
-
-  private:
-    ArrayReadPlanner<N> m_planner;
-    Dim<N> m_array_shape;
-    M m_access_mapper;
-};
-
-template<typename T, size_t N>
-struct ArgumentHandler<Write<Array<T, N>>> {
-    using type = ViewArgument<T, views::dynamic_domain<N>>;
-
-    ArgumentHandler(Write<Array<T, N>> access) : m_array(access.argument) {}
-
-    void initialize(const TaskGroupInit& init) {
-        if (!m_array.has_instance()) {
-            auto instance = ArrayInstance<N>::create(  //
-                init.runtime,
-                map_domain_to_distribution(m_array.shape(), init.domain, All()),
-                DataType::of<T>()
-            );
-
-            m_array = Array<T, N>(instance);
-        }
-
-        m_planner = std::make_unique<ArrayWritePlanner<N>>(m_array.instance().shared_from_this());
-    }
-
-    type before_submit(TaskInstance& task) {
-        auto access_region = Bounds<N>(m_array.shape());
-        auto buffer_index = task.add_buffer_requirement(
-            m_planner->prepare_access(task.graph, task.memory_id, access_region, task.dependencies)
-        );
-
-        auto domain = views::dynamic_domain<N> {access_region.sizes()};
-        return {buffer_index, domain};
-    }
-
-    void after_submit(const TaskSubmissionResult& result) {
-        m_planner->finalize_access(result.graph, result.event_id);
-    }
-
-    void commit(const TaskGroupCommit& commit) {
-        m_planner->commit(commit.graph);
-    }
-
-  private:
-    Array<T, N>& m_array;
-    std::unique_ptr<ArrayWritePlanner<N>> m_planner;
-};
-
-template<typename T, size_t N, typename M>
-struct ArgumentHandler<Write<Array<T, N>, M>> {
-    using type = ViewArgument<T, views::dynamic_subdomain<N>>;
-
-    static_assert(
-        is_dimensionality_accepted_by_mapper<M, N>,
-        "mapper of 'write' must return N-dimensional region"
-    );
-
-    ArgumentHandler(Write<Array<T, N>, M> access) :
-        m_array(access.argument),
-        m_shape(m_array.shape()),
-        m_access_mapper(access.access_mapper) {}
-
-    void initialize(const TaskGroupInit& init) {
-        if (!m_array.has_instance()) {
-            auto instance = ArrayInstance<N>::create(  //
-                init.runtime,
-                map_domain_to_distribution(m_array.shape(), init.domain, m_access_mapper),
-                DataType::of<T>()
-            );
-
-            m_array = Array<T, N>(instance);
-        }
-
-        m_planner = std::make_unique<ArrayWritePlanner<N>>(m_array.instance().shared_from_this());
-    }
-
-    type before_submit(TaskInstance& task) {
-        auto access_region = m_access_mapper(task.chunk, Bounds<N>(m_shape));
-        auto buffer_index = task.add_buffer_requirement(
-            m_planner->prepare_access(task.graph, task.memory_id, access_region, task.dependencies)
-        );
-
-        auto domain = views::dynamic_subdomain<N> {access_region.begin(), access_region.sizes()};
-        return {buffer_index, domain};
-    }
-
-    void after_submit(const TaskSubmissionResult& result) {
-        m_planner->finalize_access(result.graph, result.event_id);
-    }
-
-    void commit(const TaskGroupCommit& commit) {
-        m_planner->commit(commit.graph);
-    }
-
-  private:
-    Array<T, N>& m_array;
-    Dim<N> m_shape;
-    M m_access_mapper;
-    std::unique_ptr<ArrayWritePlanner<N>> m_planner;
-};
-
-template<typename T, size_t N>
-struct ArgumentHandler<Reduce<Array<T, N>>> {
-    using type = ViewArgument<T, views::dynamic_domain<N>>;
-
-    ArgumentHandler(Reduce<Array<T, N>> access) :
-        m_array(access.argument),
-        m_operation(access.op) {}
-
-    void initialize(const TaskGroupInit& init) {
-        if (!m_array.has_instance()) {
-            auto instance = ArrayInstance<N>::create(  //
-                init.runtime,
-                map_domain_to_distribution(  //
-                    m_array.shape(),
-                    init.domain,
-                    All(),
-                    true
-                ),
-                DataType::of<T>()
-            );
-
-            m_array = Array<T, N>(instance);
-        }
-
-        m_planner = std::make_unique<ArrayReductionPlanner<N>>(
-            m_array.instance().shared_from_this(),
-            m_operation
-        );
-    }
-
-    type before_submit(TaskInstance& task) {
-        auto access_region = Bounds<N>(m_array.shape());
-
-        size_t buffer_index = task.add_buffer_requirement(
-            m_planner
-                ->prepare_access(task.graph, task.memory_id, access_region, 1, task.dependencies)
-        );
-
-        views::dynamic_domain<N> domain = {access_region.sizes()};
-
-        return {buffer_index, domain};
-    }
-
-    void after_submit(const TaskSubmissionResult& result) {
-        m_planner->finalize_access(result.graph, result.event_id);
-    }
-
-    void commit(const TaskGroupCommit& commit) {
-        m_planner->commit(commit.graph);
-    }
-
-  private:
-    Array<T, N>& m_array;
-    Reduction m_operation;
-    std::unique_ptr<ArrayReductionPlanner<N>> m_planner;
-};
-
-template<typename T, size_t N, typename M, typename P>
-struct ArgumentHandler<Reduce<Array<T, N>, M, P>> {
-    static constexpr size_t K = mapper_dimensionality<P>;
-    using type = ViewArgument<T, views::dynamic_subdomain<K + N>>;
-
-    static_assert(
-        is_dimensionality_accepted_by_mapper<M, N>,
-        "mapper of 'reduce' must return N-dimensional region"
-    );
-
-    static_assert(
-        is_dimensionality_accepted_by_mapper<P, K>,
-        "private mapper of 'reduce' must return K-dimensional region"
-    );
-
-    ArgumentHandler(Reduce<Array<T, N>, M, P> access) :
-        m_array(access.argument),
-        m_operation(access.op),
-        m_access_mapper(access.access_mapper),
-        m_private_mapper(access.private_mapper) {}
-
-    void initialize(const TaskGroupInit& init) {
-        if (!m_array.has_instance()) {
-            auto instance = ArrayInstance<N>::create(  //
-                init.runtime,
-                map_domain_to_distribution(  //
-                    m_array.shape(),
-                    init.domain,
-                    m_access_mapper,
-                    true
-                ),
-                DataType::of<T>()
-            );
-
-            m_array = Array<T, N>(instance);
-        }
-
-        m_planner = std::make_unique<ArrayReductionPlanner<N>>(
-            m_array.instance().shared_from_this(),
-            m_operation
-        );
-    }
-
-    type before_submit(TaskInstance& task) {
-        auto access_region = m_access_mapper(task.chunk, Bounds<N>(m_array.shape()));
-        auto private_region = m_private_mapper(task.chunk);
-
-        auto rep = checked_cast<size_t>(private_region.size());
-        size_t buffer_index = task.add_buffer_requirement(
-            m_planner
-                ->prepare_access(task.graph, task.memory_id, access_region, rep, task.dependencies)
-        );
-
-        views::dynamic_subdomain<K + N> domain = {
-            concat(private_region, access_region).begin(),
-            concat(private_region, access_region).sizes()};
-
-        return {buffer_index, domain};
-    }
-
-    void after_submit(const TaskSubmissionResult& result) {
-        m_planner->finalize_access(result.graph, result.event_id);
-    }
-
-    void commit(const TaskGroupCommit& commit) {
-        m_planner->commit(commit.graph);
-    }
-
-  private:
-    Array<T, N>& m_array;
-    Reduction m_operation;
-    std::unique_ptr<ArrayReductionPlanner<N>> m_planner;
-    M m_access_mapper;
-    P m_private_mapper;
+/// Read-write access to a `DomainArray` wrapped in `write(...)`.
+template<typename T, typename DomainT, typename PolicyT>
+class LaunchArg<Write<DomainArray<T, DomainT, PolicyT>>>:
+    public detail::LaunchArgArray<T, DomainT, PolicyT, AccessMode::ReadWrite> {
+  public:
+    explicit LaunchArg(Write<DomainArray<T, DomainT, PolicyT>> arg) :
+        detail::LaunchArgArray<T, DomainT, PolicyT, AccessMode::ReadWrite>(arg.value) {}
 };
 
 }  // namespace kmm

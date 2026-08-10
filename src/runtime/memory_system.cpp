@@ -1,211 +1,227 @@
-#include <unordered_map>
+#include <utility>
 
-#include "spdlog/spdlog.h"
-
-#include "kmm/memops/gpu_fill.hpp"
-#include "kmm/memops/host_fill.hpp"
 #include "kmm/runtime/memory_system.hpp"
+#include "kmm/utils/gpu_utils.hpp"
 
 namespace kmm {
 
-struct MemorySystemImpl::Device {
-    KMM_NOT_COPYABLE(Device)
-
-  public:
-    GPUContextHandle context;
-    std::unique_ptr<AsyncAllocator> allocator;
-
-    DeviceStream h2d_stream;
-    DeviceStream d2h_stream;
-    DeviceStream h2d_hi_stream;  // high priority stream
-    DeviceStream d2h_hi_stream;  // high priority stream
-
-    Device(
-        GPUContextHandle context,
-        std::unique_ptr<AsyncAllocator> allocator,
-        DeviceStreamManager& streams
-    ) :
+struct MemorySystem::DeviceState {
+    DeviceState(CUcontext context, DeviceStreamRegistry* streams, size_t memory_limit) :
         context(context),
-        allocator(std::move(allocator)),
-        h2d_stream(streams.create_stream(context, false)),
-        d2h_stream(streams.create_stream(context, false)),
-        h2d_hi_stream(streams.create_stream(context, true)),
-        d2h_hi_stream(streams.create_stream(context, true)) {}
+        native_stream(context),
+        copy_stream(streams->lookup(native_stream.get())),
+        allocator(std::make_unique<DeviceMemoryAllocator>(context, memory_limit)) {}
+
+    CUcontext context;
+    CUDAStream native_stream;
+    DeviceStream copy_stream;
+    std::unique_ptr<AsyncAllocator> allocator;
 };
 
-MemorySystemImpl::MemorySystemImpl(
-    std::shared_ptr<DeviceStreamManager> stream_manager,
-    std::vector<GPUContextHandle> device_contexts,
-    std::unique_ptr<AsyncAllocator> host_mem,
-    std::vector<std::unique_ptr<AsyncAllocator>> device_mems
+MemorySystem::MemorySystem(
+    const SystemInfo& system_info,
+    DeviceStreamRegistry* streams,
+    size_t host_memory_limit,
+    size_t device_memory_limit
 ) :
-    m_streams(stream_manager),
-    m_host(std::move(host_mem))
+    m_num_devices(system_info.num_devices()) {
+    KMM_ASSERT(m_num_devices > 0);
+    KMM_ASSERT(m_num_devices <= MAX_DEVICES);
 
-{
-    KMM_ASSERT(device_contexts.size() == device_mems.size());
-    KMM_ASSERT(device_contexts.size() <= MAX_DEVICES);
+    // Portable pinned memory is visible to every context, so any device's context works here.
+    m_host_allocator = std::make_unique<PinnedMemoryAllocator>(
+        system_info.device(DeviceId(0)).context(),
+        host_memory_limit
+    );
 
-    for (size_t i = 0; i < device_contexts.size(); i++) {
-        m_devices[i] = std::make_unique<Device>(
-            device_contexts[i],
-            std::move(device_mems[i]),
-            *stream_manager
-        );
+    for (size_t i = 0; i < m_num_devices; i++) {
+        auto context = system_info.device(DeviceId(i)).context();
+        m_devices[i] = std::make_unique<DeviceState>(context, streams, device_memory_limit);
     }
-}
 
-MemorySystemImpl::~MemorySystemImpl() {}
+    // Determine, and where possible enable, peer-to-peer access between every device pair.
+    for (size_t i = 0; i < m_num_devices; i++) {
+        m_peer_access[i][i] = true;
 
-void MemorySystemImpl::make_progress() {
-    m_host->make_progress();
+        for (size_t j = i + 1; j < m_num_devices; j++) {
+            int i_can_access_j = 0;
+            int j_can_access_i = 0;
 
-    for (const auto& device : m_devices) {
-        if (device == nullptr) {
-            break;
+            KMM_CUDA_CHECK(cuDeviceCanAccessPeer(
+                &i_can_access_j,
+                system_info.device(DeviceId(i)).device_ordinal(),
+                system_info.device(DeviceId(j)).device_ordinal()
+            ));
+
+            KMM_CUDA_CHECK(cuDeviceCanAccessPeer(
+                &j_can_access_i,
+                system_info.device(DeviceId(j)).device_ordinal(),
+                system_info.device(DeviceId(i)).device_ordinal()
+            ));
+
+            m_peer_access[i][j] = i_can_access_j != 0;
+            m_peer_access[j][i] = j_can_access_i != 0;
+
+            if (i_can_access_j) {
+                CUDAContextGuard guard {m_devices[i]->context};
+                CUresult result = cuCtxEnablePeerAccess(m_devices[j]->context, 0);
+
+                if (result != CUDA_ERROR_PEER_ACCESS_ALREADY_ENABLED) {
+                    KMM_CUDA_CHECK(result);
+                }
+            }
+
+            if (j_can_access_i) {
+                CUDAContextGuard guard {m_devices[j]->context};
+                CUresult result = cuCtxEnablePeerAccess(m_devices[i]->context, 0);
+
+                if (result != CUDA_ERROR_PEER_ACCESS_ALREADY_ENABLED) {
+                    KMM_CUDA_CHECK(result);
+                }
+            }
         }
-
-        device->allocator->make_progress();
     }
 }
 
-void MemorySystemImpl::trim_host(size_t bytes_remaining) {
-    m_host->trim(bytes_remaining);
+MemorySystem::~MemorySystem() = default;
+
+MemorySystem::DeviceState& MemorySystem::device_state(DeviceId id) const {
+    KMM_ASSERT(id.get() < m_num_devices);
+    return *m_devices[id.get()];
 }
 
-AllocationResult MemorySystemImpl::allocate_host(
+DeviceStream MemorySystem::stream(DeviceId device) const {
+    return device_state(device).copy_stream;
+}
+
+void MemorySystem::make_progress() {
+    m_streams->make_progress();
+    m_host_allocator->poll();
+
+    for (size_t i = 0; i < m_num_devices; i++) {
+        m_devices[i]->allocator->poll();
+    }
+}
+
+void MemorySystem::trim_host(size_t bytes_remaining) {
+    m_host_allocator->trim(bytes_remaining);
+}
+
+void MemorySystem::trim_device(size_t bytes_remaining) {
+    for (size_t i = 0; i < m_num_devices; i++) {
+        m_devices[i]->allocator->trim(bytes_remaining);
+    }
+}
+
+AllocResult MemorySystem::allocate_host(
     size_t nbytes,
     DeviceId device_affinity,
     void** ptr_out,
     DeviceEventSet& deps_out
 ) {
-    // TODO: take into account device_affinity
-
-    auto result = m_host->allocate_async(nbytes, ptr_out, deps_out);
-    if (result != AllocationResult::Success) {
-        return result;
-    }
-
-    deps_out.remove_ready(*m_streams);
-    return AllocationResult::Success;
+    return m_host_allocator->allocate_async(  //
+        device_state(device_affinity).copy_stream,
+        BufferLayout {nbytes},
+        ptr_out,
+        deps_out
+    );
 }
 
-void MemorySystemImpl::deallocate_host(void* ptr, size_t nbytes, DeviceEventSet deps) {
-    deps.remove_ready(*m_streams);
-    m_host->deallocate_async(ptr, nbytes, std::move(deps));
+void MemorySystem::deallocate_host(void* ptr, size_t nbytes, DeviceEventSet deps) {
+    m_host_allocator
+        ->deallocate_async(DeviceStream {}, ptr, BufferLayout {nbytes}, std::move(deps));
 }
 
-void MemorySystemImpl::trim_device(size_t bytes_remaining) {
-    for (const auto& device : m_devices) {
-        if (device != nullptr) {
-            device->allocator->trim(bytes_remaining);
-        }
-    }
-}
-
-AllocationResult MemorySystemImpl::allocate_device(
+AllocResult MemorySystem::allocate_device(
     DeviceId device_id,
     size_t nbytes,
-    GPUdeviceptr* ptr_out,
+    CUdeviceptr* ptr_out,
     DeviceEventSet& deps_out
 ) {
-    KMM_ASSERT(m_devices[device_id]);
-    auto& device = *m_devices[device_id];
-    void* addr;
+    auto& dev = device_state(device_id);
+    void* addr = nullptr;
 
-    GPUContextGuard guard {device.context};
+    AllocResult result =
+        dev.allocator->allocate_async(dev.copy_stream, BufferLayout {nbytes}, &addr, deps_out);
 
-    auto result = device.allocator->allocate_async(nbytes, &addr, deps_out);
-    if (result != AllocationResult::Success) {
-        return result;
+    if (result == AllocResult::Success) {
+        *ptr_out = CUdeviceptr(addr);
     }
 
-    deps_out.remove_ready(*m_streams);
-    *ptr_out = (GPUdeviceptr)addr;
-    return AllocationResult::Success;
+    return result;
 }
 
-void MemorySystemImpl::deallocate_device(
+void MemorySystem::deallocate_device(
     DeviceId device_id,
-    GPUdeviceptr ptr,
+    CUdeviceptr ptr,
     size_t nbytes,
     DeviceEventSet deps
 ) {
-    deps.remove_ready(*m_streams);
-
-    KMM_ASSERT(m_devices[device_id]);
-    auto& device = *m_devices[device_id];
-
-    GPUContextGuard guard {device.context};
-    device.allocator->deallocate_async((void*)ptr, nbytes, std::move(deps));
+    KMM_TODO();
 }
 
-// Copies smaller than this threshold are put onto a high priority stream. This can improve
-// performance since small copy jobs (like copying a single number) are prioritized over large
-// slow copy jobs of several gigabytes.
-static constexpr size_t HIGH_PRIORITY_THRESHOLD = 1024L * 1024;
-
-DeviceEvent MemorySystemImpl::copy_host_to_device(
+DeviceEvent MemorySystem::copy_host_to_device(
     DeviceId device_id,
     const void* src_addr,
-    GPUdeviceptr dst_addr,
+    CUdeviceptr dst_addr,
     size_t nbytes,
     DeviceEventSet deps
 ) {
-    KMM_ASSERT(m_devices[device_id]);
-    auto& device = *m_devices[device_id];
-    auto stream = nbytes <= HIGH_PRIORITY_THRESHOLD ? device.h2d_hi_stream : device.h2d_stream;
+    auto& dev = device_state(device_id);
+    CUDAContextGuard guard {dev.context};
 
-    GPUContextGuard guard {device.context};
-    return m_streams->with_stream(stream, deps, [&](auto stream) {
-        KMM_GPU_CHECK(gpuMemcpyHtoDAsync(dst_addr, src_addr, nbytes, stream));
+    return dev.copy_stream.with_stream(deps, [&](CUstream stream) {
+        KMM_CUDA_CHECK(cuMemcpyHtoDAsync(dst_addr, src_addr, nbytes, stream));
     });
 }
 
-DeviceEvent MemorySystemImpl::copy_device_to_host(
+DeviceEvent MemorySystem::copy_device_to_host(
     DeviceId device_id,
-    GPUdeviceptr src_addr,
+    CUdeviceptr src_addr,
     void* dst_addr,
     size_t nbytes,
     DeviceEventSet deps
 ) {
-    KMM_ASSERT(m_devices[device_id]);
-    auto& device = *m_devices[device_id];
-    auto stream = nbytes <= HIGH_PRIORITY_THRESHOLD ? device.d2h_hi_stream : device.d2h_stream;
+    auto& dev = device_state(device_id);
+    CUDAContextGuard guard {dev.context};
 
-    GPUContextGuard guard {device.context};
-    return m_streams->with_stream(stream, deps, [&](auto stream) {
-        KMM_GPU_CHECK(gpuMemcpyDtoHAsync(dst_addr, src_addr, nbytes, stream));
+    return dev.copy_stream.with_stream(deps, [&](CUstream stream) {
+        KMM_CUDA_CHECK(cuMemcpyDtoHAsync(dst_addr, src_addr, nbytes, stream));
     });
 }
 
-DeviceEvent MemorySystemImpl::copy_device_to_device(
-    DeviceId src_device_id,
-    DeviceId dst_device_id,
-    GPUdeviceptr src_addr,
-    GPUdeviceptr dst_addr,
+DeviceEvent MemorySystem::copy_device_to_device(
+    DeviceId src_device,
+    DeviceId dst_device,
+    CUdeviceptr src_addr,
+    CUdeviceptr dst_addr,
     size_t nbytes,
     DeviceEventSet deps
 ) {
-    KMM_ASSERT(m_devices[dst_device_id] && m_devices[src_device_id]);
-    auto& src_device = *m_devices[src_device_id];
-    auto& dst_device = *m_devices[dst_device_id];
-    auto stream =
-        nbytes <= HIGH_PRIORITY_THRESHOLD ? dst_device.h2d_hi_stream : dst_device.h2d_stream;
+    auto& src = device_state(src_device);
+    auto& dst = device_state(dst_device);
+    CUDAContextGuard guard {dst.context};
 
-    GPUContextGuard guard {dst_device.context};
-    return m_streams->with_stream(stream, deps, [&](auto stream) {
-        KMM_GPU_CHECK(gpuMemcpyPeerAsync(
-            dst_addr,
-            dst_device.context,
-            dst_device_id,
-            src_addr,
-            src_device.context,
-            src_device_id,
-            nbytes,
-            stream
-        ));
+    return dst.copy_stream.with_stream(deps, [&](CUstream stream) {
+        KMM_CUDA_CHECK(
+            cuMemcpyPeerAsync(dst_addr, dst.context, src_addr, src.context, nbytes, stream)
+        );
     });
+}
+
+bool MemorySystem::is_copy_supported(MemoryId src, MemoryId dst) {
+    if (src.is_host() || dst.is_host()) {
+        return true;
+    }
+
+    auto src_id = src.as_device();
+    auto dst_id = dst.as_device();
+
+    if (src_id == dst_id) {
+        return true;
+    }
+
+    return m_peer_access[src_id.get()][dst_id.get()];
 }
 
 }  // namespace kmm

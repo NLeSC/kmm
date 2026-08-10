@@ -1,277 +1,396 @@
+#include <ankerl/unordered_dense.h>
+#include <mutex>
 #include <thread>
+#include <utility>
 
-#include "fmt/chrono.h"
-#include "fmt/std.h"
-#include "spdlog/spdlog.h"
-
-#include "kmm/runtime/allocators/block.hpp"
-#include "kmm/runtime/allocators/caching.hpp"
-#include "kmm/runtime/allocators/device.hpp"
-#include "kmm/runtime/allocators/system.hpp"
+#include "kmm/core/macros.hpp"
+#include "kmm/runtime/data_interface.hpp"
+#include "kmm/runtime/memory_buffer.hpp"
+#include "kmm/runtime/reduction_manager.hpp"
+#include "kmm/runtime/requisition.hpp"
 #include "kmm/runtime/runtime.hpp"
 
 namespace kmm {
 
-static SystemInfo make_system_info(
-    const std::vector<GPUContextHandle>& contexts,
-    const RuntimeConfig& config
-) {
-    spdlog::info("detected {} GPU device(s):", contexts.size());
-    std::vector<DeviceInfo> device_infos;
+struct BufferEntry {
+    MemoryBuffer buffer;
+    std::exception_ptr poison = nullptr;
+    ReductionState reduction;
+    DeviceEventSet last_accesses;
 
-    for (size_t i = 0; i < contexts.size(); i++) {
-        auto info = DeviceInfo(DeviceId(i), contexts[i], config.device_concurrent_streams);
-        auto memory_gb = static_cast<double>(info.total_memory_size()) / 1e9;
+    BufferEntry(MemoryBuffer&& buffer) : buffer(std::move(buffer)) {}
 
-        spdlog::info(" - {} ({:.2} GB)", info.name(), memory_gb);
-        device_infos.push_back(info);
+    void record_access(MemoryId memory_id, AccessMode mode, const DeviceEventSet& deps) {
+        last_accesses.insert(deps);
+    }
+};
+
+/// Owns everything a `Runtime` hands out: the machine topology, the stream registry, the
+/// physical-memory backend, and the `MemoryManager` built on top of it.
+class RuntimeImpl: public reference_count<RuntimeImpl> {
+    KMM_NOT_COPYABLE_OR_MOVABLE(RuntimeImpl)
+
+  public:
+    RuntimeImpl(size_t host_memory_limit, size_t device_memory_limit) :
+        memory_system(make_refcnt<MemorySystem>(
+            system_info,
+            &stream_registry,
+            host_memory_limit,
+            device_memory_limit
+        )),
+        reduction_manager(memory_manager, memory_system) {}
+
+    BufferEntry& find_entry(BufferId id) {
+        auto it = buffers.find(id);
+
+        if (it == buffers.end()) {
+            throw std::runtime_error(fmt::format("could not find buffer {}", id.get()));
+        }
+
+        if (it->second.poison) {
+            std::rethrow_exception(it->second.poison);
+        }
+
+        return it->second;
     }
 
-    return device_infos;
+    MemoryBuffer find_buffer(BufferId id) {
+        return find_entry(id).buffer;
+    }
+
+    void poison_buffer(BufferId id, std::exception_ptr reason) noexcept {
+        auto it = buffers.find(id);
+
+        if (it != buffers.end() && !it->second.poison) {
+            it->second.poison = std::move(reason);
+        }
+    }
+
+    std::chrono::system_clock::time_point poll_once() {
+        static constexpr auto poll_interval = std::chrono::milliseconds(5);
+        auto now = std::chrono::system_clock::now();
+
+        if (now >= next_poll_deadline) {
+            stream_registry.make_progress();
+            memory_system->make_progress();
+            memory_manager.make_progress();
+
+            next_poll_deadline = now + poll_interval;
+        }
+
+        return next_poll_deadline;
+    }
+
+    template<typename F>
+    void poll_until_completion(std::unique_lock<std::mutex>& guard, F callback) {
+        if (callback()) {
+            return;
+        }
+
+        auto deadline = poll_once();
+
+        while (!callback()) {
+            guard.unlock();
+            std::this_thread::sleep_until(deadline);
+            guard.lock();
+
+            deadline = poll_once();
+        }
+    }
+
+    SystemInfo system_info;
+
+    std::mutex mutex;
+    DeviceStreamRegistry stream_registry;
+    refcnt_ptr<MemorySystem> memory_system;
+    MemoryManager memory_manager;
+    ReductionManager reduction_manager;
+    ankerl::unordered_dense::map<BufferId, BufferEntry> buffers;
+    uint64_t next_buffer_id_counter = 0;
+    std::chrono::system_clock::time_point next_poll_deadline;
+};
+
+Runtime::Runtime(size_t host_memory_limit, size_t device_memory_limit) :
+    m_impl(make_refcnt<RuntimeImpl>(host_memory_limit, device_memory_limit)) {}
+
+MemorySystem& Runtime::memory_system() noexcept {
+    return *m_impl->memory_system;
 }
 
-Runtime::Runtime(
-    std::vector<GPUContextHandle> contexts,
-    std::shared_ptr<DeviceStreamManager> stream_manager,
-    std::shared_ptr<MemorySystem> memory_system,
-    const RuntimeConfig& config
-) :
-    m_memory_system(memory_system),
-    m_memory_manager(std::make_shared<MemoryManager>(memory_system)),
-    m_buffer_registry(std::make_shared<BufferRegistry>(m_memory_manager)),
-    m_stream_manager(stream_manager),
-    m_devices(std::make_shared<DeviceResources>(
-        contexts,
-        config.device_concurrent_streams,
-        m_stream_manager
-    )),
-    m_scheduler(std::make_shared<Scheduler>(contexts.size())),
-    m_info(make_system_info(contexts, config)),
-    m_executor(m_devices, stream_manager, m_buffer_registry, m_scheduler, config.debug_mode) {}
-
-Runtime::~Runtime() {
-    shutdown();
+DeviceStreamRegistry& Runtime::stream_registry() noexcept {
+    return m_impl->stream_registry;
 }
 
-BufferId Runtime::create_buffer(BufferLayout layout) {
-    return this->schedule([&](TaskGraph& g) {  //
-        return g.create_buffer(layout);
-    });
+const SystemInfo& Runtime::system_info() const noexcept {
+    return m_impl->system_info;
 }
 
-void Runtime::delete_buffer(BufferId id, EventList deps) {
-    this->schedule([&](TaskGraph& g) {  //
-        g.delete_buffer(id, std::move(deps));
-    });
+std::chrono::system_clock::time_point Runtime::poll_once() {
+    std::lock_guard guard {m_impl->mutex};
+    return m_impl->poll_once();
 }
 
-void Runtime::check_buffer(BufferId id) {
-    std::unique_lock guard {m_mutex};
-    m_buffer_registry->get(id);
-}
+bool Runtime::poll_until_completion(
+    function_ref<bool()> callback,
+    const std::chrono::system_clock::time_point deadline
+) {
+    auto next_poll_at = poll_once();
 
-bool Runtime::query_event(EventId event_id, std::chrono::system_clock::time_point deadline) {
-    std::unique_lock guard {m_mutex};
-    make_progress_impl();
-
-    while (!m_scheduler->is_completed(event_id)) {
-        KMM_ASSERT(!m_executor.is_idle());
-        auto next_update = m_next_updated_planned;
-
-        if (next_update > deadline) {
+    while (!callback()) {
+        // Next poll is after the deadline. Return false now instead waiting.
+        if (next_poll_at > deadline) {
             return false;
         }
 
-        guard.unlock();
-        std::this_thread::sleep_until(next_update);
-        guard.lock();
-
-        make_progress_impl();
+        std::this_thread::sleep_until(next_poll_at);
+        next_poll_at = poll_once();
     }
 
     return true;
 }
 
-bool Runtime::is_idle() {
-    std::lock_guard guard {m_mutex};
-    return is_idle_impl();
+void Runtime::synchronize(const DeviceEvent& e) {
+    poll_until_completion([&] { return e.is_ready(); });
 }
 
-void Runtime::trim_memory() {
-    std::lock_guard guard {m_mutex};
-    m_memory_system->trim_host();
-    m_memory_system->trim_device();
+void Runtime::synchronize(const DeviceEventSet& events) {
+    for (const auto& e : events) {
+        if (!e.is_ready()) {
+            synchronize(e);
+        }
+    }
 }
 
-void Runtime::make_progress() {
-    std::lock_guard guard {m_mutex};
-    make_progress_impl();
+BufferId Runtime::create_buffer(BufferLayout layout, std::string name, FillValue fill_value) {
+    std::lock_guard<std::mutex> guard(m_impl->mutex);
+
+    auto system = refcnt_ptr<MemorySystem>(m_impl->memory_system.get(), true);
+    auto data =
+        std::make_unique<FlatDataInterface>(layout, std::move(system), std::move(fill_value));
+    auto buffer = m_impl->memory_manager.create_buffer(std::move(data), std::move(name));
+
+    auto id = BufferId(m_impl->next_buffer_id_counter++);
+    m_impl->buffers.emplace(id, std::move(buffer));
+    return id;
 }
 
-void Runtime::shutdown() {
-    std::unique_lock guard {m_mutex};
-    if (m_has_shutdown) {
+void Runtime::prefetch_buffer(BufferId id, MemoryId memory_id, bool invalid_others) {
+    std::lock_guard<std::mutex> guard(m_impl->mutex);
+    Access a = invalid_others ? Access::Exclusive : Access::ReadOnly;
+    m_impl->memory_manager.prefetch_buffer(m_impl->find_buffer(id), memory_id, a);
+}
+
+void Runtime::poison_buffer(BufferId id, std::exception_ptr reason) noexcept {
+    std::lock_guard<std::mutex> guard(m_impl->mutex);
+    m_impl->poison_buffer(id, std::move(reason));
+}
+
+bool Runtime::is_valid(BufferId id, MemoryId memory_id) {
+    std::lock_guard<std::mutex> guard(m_impl->mutex);
+    return m_impl->find_buffer(id)->is_valid(memory_id);
+}
+
+std::optional<MemoryId> Runtime::find_valid_memory(BufferId id) const {
+    std::lock_guard<std::mutex> guard(m_impl->mutex);
+    const auto& buf = m_impl->find_buffer(id);
+
+    if (buf->is_valid(MemoryId::host())) {
+        return MemoryId::host();
+    }
+
+    for (size_t i = 0; i < MAX_DEVICES; i++) {
+        if (buf->is_valid(MemoryId::device(DeviceId(i)))) {
+            return MemoryId::device(DeviceId(i));
+        }
+    }
+
+    return std::nullopt;
+}
+
+bool Runtime::is_allocated(BufferId id, MemoryId memory_id) {
+    std::lock_guard<std::mutex> guard(m_impl->mutex);
+    return m_impl->find_buffer(id)->is_allocated(memory_id);
+}
+
+void Runtime::try_evict_buffer(BufferId id, MemoryId memory_id) {
+    std::lock_guard<std::mutex> guard(m_impl->mutex);
+    m_impl->memory_manager.try_evict_buffer(m_impl->find_buffer(id), memory_id);
+}
+
+void Runtime::invalidate_buffer(BufferId id) {
+    std::lock_guard<std::mutex> guard(m_impl->mutex);
+    m_impl->memory_manager.invalidate_buffer(m_impl->find_buffer(id));
+}
+
+void Runtime::begin_reduction(BufferId id, DataType dtype, ReductionOp op) {
+    std::lock_guard<std::mutex> guard(m_impl->mutex);
+    auto& entry = m_impl->find_entry(id);
+
+    if (entry.reduction) {
+        throw std::runtime_error(fmt::format("buffer {} is already in reduction mode", id.get()));
+    }
+
+    entry.reduction = m_impl->reduction_manager.initialize_reduction(entry.buffer, op, dtype, 0);
+}
+
+void Runtime::finalize_reduction(BufferId id, MemoryId memory_id) {
+    std::unique_lock<std::mutex> guard(m_impl->mutex);
+    auto& entry = m_impl->find_entry(id);
+    auto reduction = entry.reduction;
+
+    if (!reduction) {
+        throw std::runtime_error(fmt::format("buffer {} is not in reduction mode", id.get()));
+    }
+
+    m_impl->reduction_manager.submit_reduction(reduction, memory_id);
+
+    try {
+        m_impl->poll_until_completion(guard, [&] {
+            return m_impl->reduction_manager.poll_reduction(reduction) == Poll::Ready;
+        });
+    } catch (...) {
+        m_impl->reduction_manager.release_reduction(reduction);
+        entry.reduction = nullptr;
+        throw;
+    }
+
+    m_impl->reduction_manager.release_reduction(reduction);
+    entry.reduction = nullptr;
+}
+
+void Runtime::rollback_reduction(BufferId id) {
+    std::lock_guard<std::mutex> guard(m_impl->mutex);
+    auto& entry = m_impl->find_entry(id);
+
+    if (!entry.reduction) {
         return;
     }
 
-    m_has_shutdown = true;
-
-    while (!is_idle_impl()) {
-        make_progress_impl();
-
-        guard.unlock();
-        std::this_thread::sleep_for(std::chrono::milliseconds {10});
-        guard.lock();
-    }
-
-    m_stream_manager->wait_until_idle();
+    m_impl->reduction_manager.release_reduction(entry.reduction);
+    entry.reduction = nullptr;
 }
 
-EventId Runtime::commit_impl(TaskGraph& g) {
-    std::vector<TaskNode> nodes_out;
-    std::vector<std::pair<BufferId, BufferLayout>> buffers_out;
+void Runtime::release_buffer(BufferId id) {
+    std::lock_guard<std::mutex> guard(m_impl->mutex);
 
-    auto barrier_id = m_graph_state.commit(g, nodes_out, buffers_out);
+    auto it = m_impl->buffers.find(id);
+    auto entry = std::move(it->second);
+    m_impl->buffers.erase(it);
 
-    // Flush all staged buffers to the registry
-    for (auto&& [id, layout] : buffers_out) {
-        m_buffer_registry->add(id, layout);
+    if (entry.reduction) {
+        // If the reduction was submitted, we need to release it.
+        m_impl->reduction_manager.release_reduction(entry.reduction);
     }
 
-    // Flush all events from the DAG builder to the scheduler
-    for (auto&& e : nodes_out) {
-        m_scheduler->submit(e.id, std::move(e.command), std::move(e.dependencies));
-    }
-
-    // Plan an update to happen now since we have added new tasks to the scheduler.
-    m_next_updated_planned = std::chrono::system_clock::time_point::min();
-
-    return barrier_id;
+    m_impl->memory_manager.release_buffer(std::move(entry.buffer));
 }
 
-void Runtime::make_progress_impl() {
-    static constexpr auto TIMEOUT = std::chrono::microseconds {100};
-    auto now = std::chrono::system_clock::now();
+void Runtime::submit(Requisition& req) {
+    std::unique_lock<std::mutex> guard(m_impl->mutex);
+    KMM_ASSERT(req.m_state == RequisitionState::Building);
 
-    if (m_next_updated_planned > now) {
-        return;
-    }
+    auto transaction = m_impl->memory_manager.create_transaction(req.m_parent);
 
-    m_next_updated_planned = now + TIMEOUT;
-    m_stream_manager->make_progress();
-    m_memory_system->make_progress();
-    m_executor.make_progress();
+    DeviceStream stream_hint = {};
+    KMM_ASSERT(!stream_hint.is_null());
 
-    DeviceEventSet deps;
-    while (auto task = m_scheduler->pop_ready(&deps)) {
-        m_executor.execute_task(std::move(*task), std::move(deps));
-    }
-}
+    for (size_t i = 0; i < req.m_entries.size(); i++) {
+        auto& it = req.m_entries[i];
 
-bool Runtime::is_idle_impl() {
-    return m_stream_manager->is_idle() && m_executor.is_idle() && m_scheduler->is_idle()
-        && m_memory_manager->is_idle(*m_stream_manager);
-}
+        try {
+            auto& entry = m_impl->find_entry(it.buffer_id);
 
-std::unique_ptr<AsyncAllocator> create_device_allocator(
-    const RuntimeConfig& config,
-    GPUContextHandle context,
-    std::shared_ptr<DeviceStreamManager> stream_manager
-) {
-    std::unique_ptr<AsyncAllocator> alloc;
+            if (it.mode == AccessMode::Reduce) {
+                if (!entry.reduction) {
+                    throw std::runtime_error(fmt::format(
+                        "buffer {} is not in reduction mode, call `begin_reduction` before "
+                        "reducing into it",
+                        it.buffer_id.get()
+                    ));
+                }
 
-    switch (config.device_memory_kind) {
-        case DeviceMemoryKind::NoPool:
-            return std::make_unique<DeviceMemoryAllocator>(
-                context,
-                stream_manager,
-                config.device_memory_limit
-            );
-            ;
+                auto partial = m_impl->reduction_manager.acquire_partial(  //
+                    entry.reduction,
+                    it.memory_id,
+                    stream_hint
+                );
 
-        case DeviceMemoryKind::CachingPool:
-            alloc = std::make_unique<DeviceMemoryAllocator>(
-                context,
-                stream_manager,
-                config.device_memory_limit
-            );
+                it.request = m_impl->memory_manager.create_request(  //
+                    partial,
+                    it.memory_id,
+                    Access::Exclusive,
+                    transaction
+                );
+            } else {
+                if (entry.reduction) {
+                    throw std::runtime_error(fmt::format(
+                        "buffer {} is still in reduction mode, call `finalize_reduction` "
+                        "before reading or writing it",
+                        it.buffer_id.get()
+                    ));
+                }
 
-            return std::make_unique<CachingAllocator>(std::move(alloc));
+                auto access = it.mode == AccessMode::Read ? Access::ReadOnly : Access::Exclusive;
 
-        case DeviceMemoryKind::DefaultPool:
-            return std::make_unique<DevicePoolAllocator>(
-                context,
-                stream_manager,
-                DevicePoolKind::Default,
-                config.device_memory_limit
-            );
+                it.request = m_impl->memory_manager.create_request(  //
+                    entry.buffer,
+                    it.memory_id,
+                    access,
+                    transaction
+                );
+            }
+        } catch (...) {
+            for (auto& rollback : req.m_entries) {
+                if (rollback.request) {
+                    m_impl->memory_manager.release_request(std::move(rollback.request));
+                }
+            }
 
-        case DeviceMemoryKind::PrivatePool:
-            return std::make_unique<DevicePoolAllocator>(
-                context,
-                stream_manager,
-                DevicePoolKind::Create,
-                config.device_memory_limit
-            );
-
-        default:
-            KMM_PANIC("invalid memory kind");
-    }
-}
-
-std::shared_ptr<Runtime> make_worker(const RuntimeConfig& config) {
-    std::unique_ptr<AsyncAllocator> host_mem;
-    std::vector<std::unique_ptr<AsyncAllocator>> device_mems;
-
-    auto stream_manager = std::make_shared<DeviceStreamManager>();
-    auto contexts = std::vector<GPUContextHandle>();
-    auto devices = get_gpu_devices();
-
-    if (devices.empty()) {
-        host_mem = std::make_unique<SystemAllocator>(stream_manager, config.host_memory_limit);
-    } else if (devices.size() > MAX_DEVICES) {
-        throw std::runtime_error(fmt::format("cannot support more than {} GPU(s)", MAX_DEVICES));
-    } else {
-        for (const auto& device : devices) {
-            auto context = GPUContextHandle::retain_primary_context_for_device(device);
-            contexts.push_back(context);
-            device_mems.push_back(create_device_allocator(config, context, stream_manager));
-        }
-
-        host_mem = std::make_unique<PinnedMemoryAllocator>(
-            contexts.at(0),
-            stream_manager,
-            config.host_memory_limit
-        );
-
-        if (config.host_memory_kind == HostMemoryKind::CachingPool) {
-            host_mem = std::make_unique<CachingAllocator>(std::move(host_mem));
+            throw;
         }
     }
 
-    if (config.host_memory_block_size > 0) {
-        host_mem = std::make_unique<BlockAllocator>(  //
-            std::move(host_mem),
-            config.host_memory_block_size
-        );
-    }
+    req.m_state = RequisitionState::Submitted;
 
-    if (config.device_memory_block_size > 0) {
-        for (size_t i = 0; i < devices.size(); i++) {
-            device_mems[i] = std::make_unique<BlockAllocator>(
-                std::move(device_mems[i]),
-                config.device_memory_block_size
-            );
+    m_impl->poll_until_completion(guard, [&] {
+        bool is_ready = true;
+
+        for (auto& entry : req.m_entries) {
+            if (m_impl->memory_manager.poll_request(stream_hint, entry.request, req.m_deps)
+                == Poll::Pending) {
+                is_ready = false;
+            }
         }
+
+        return is_ready;
+    });
+
+    req.m_state = RequisitionState::Ready;
+}
+
+BufferAccessor Runtime::accessor(const kmm::RequisitionDep& dep) {
+    std::lock_guard<std::mutex> guard(m_impl->mutex);
+    return m_impl->memory_manager.access_request(dep.request);
+}
+
+void Runtime::release(Requisition& req, DeviceEventSet deps) {
+    std::lock_guard<std::mutex> guard(m_impl->mutex);
+    KMM_ASSERT(req.m_state != RequisitionState::Released);
+    req.m_state = RequisitionState::Released;
+
+    if (!req.m_stream.is_null()) {
+        req.m_stream.wait_on_default_stream();
+        deps.insert(req.m_stream.record_event());
     }
 
-    auto memory_system = std::make_shared<MemorySystemImpl>(
-        stream_manager,
-        contexts,
-        std::move(host_mem),
-        std::move(device_mems)
-    );
+    deps.insert(req.dependencies());
 
-    return std::make_shared<Runtime>(contexts, stream_manager, memory_system, config);
+    for (auto& entry : req.m_entries) {
+        m_impl->find_entry(entry.buffer_id).record_access(entry.memory_id, entry.mode, deps);
+        m_impl->memory_manager.release_request(std::move(entry.request), deps);
+    }
 }
+
+KMM_REFCNT_TRAITS_IMPL(RuntimeImpl)
+
 }  // namespace kmm

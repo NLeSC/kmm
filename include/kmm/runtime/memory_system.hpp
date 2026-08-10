@@ -1,136 +1,105 @@
 #pragma once
 
-#include "kmm/runtime/allocators/base.hpp"
-#include "kmm/runtime/stream_manager.hpp"
-#include "kmm/utils/macros.hpp"
+#include <array>
+#include <limits>
+#include <memory>
+
+#include "kmm/core/macros.hpp"
+#include "kmm/runtime/allocators/device.hpp"
+#include "kmm/runtime/allocators/pinned.hpp"
+#include "kmm/runtime/device_event.hpp"
+#include "kmm/runtime/device_stream_registry.hpp"
+#include "kmm/runtime/identifiers.hpp"
+#include "kmm/runtime/system_info.hpp"
+#include "kmm/utils/refcnt_ptr.hpp"
 
 namespace kmm {
 
-class MemorySystem {
-  public:
-    virtual ~MemorySystem() = default;
-
-    virtual void make_progress() {}
-    virtual void trim_host(size_t bytes_remaining = 0) {}
-    virtual void trim_device(size_t bytes_remaining = 0) {}
-
-    virtual AllocationResult allocate_host(
-        size_t nbytes,
-        DeviceId device_affinity,
-        void** ptr_out,
-        DeviceEventSet& deps_out
-    ) = 0;
-
-    virtual void deallocate_host(void* ptr, size_t nbytes, DeviceEventSet deps) = 0;
-
-    virtual AllocationResult allocate_device(
-        DeviceId device_id,
-        size_t nbytes,
-        GPUdeviceptr* ptr_out,
-        DeviceEventSet& deps_out
-    ) = 0;
-
-    virtual void deallocate_device(
-        DeviceId device_id,
-        GPUdeviceptr ptr,
-        size_t nbytes,
-        DeviceEventSet deps
-    ) = 0;
-
-    virtual DeviceEvent copy_host_to_device(
-        DeviceId device_id,
-        const void* src_addr,
-        GPUdeviceptr dst_addr,
-        size_t nbytes,
-        DeviceEventSet deps
-    ) = 0;
-
-    virtual DeviceEvent copy_device_to_host(
-        DeviceId device_id,
-        GPUdeviceptr src_addr,
-        void* dst_addr,
-        size_t nbytes,
-        DeviceEventSet deps
-    ) = 0;
-
-    virtual DeviceEvent copy_device_to_device(
-        DeviceId src_device,
-        DeviceId dst_device,
-        GPUdeviceptr src_addr,
-        GPUdeviceptr dst_addr,
-        size_t nbytes,
-        DeviceEventSet deps
-    ) = 0;
-
-    virtual bool is_copy_supported(MemoryId src, MemoryId dst) {
-        return true;
-    }
-};
-
-class MemorySystemImpl: public MemorySystem {
-    KMM_NOT_COPYABLE_OR_MOVABLE(MemorySystemImpl)
+/// Owns the physical memory backing every buffer, and the means of moving bytes between host
+/// and device memory. Host allocations come from a single portable pinned-memory pool
+/// (`PinnedMemoryAllocator`), device allocations from one `cuMemAlloc`-backed pool per device
+/// (`DeviceMemoryAllocator`), and every copy is issued asynchronously on a dedicated per-device
+/// stream.
+class MemorySystem: public reference_count<MemorySystem> {
+    KMM_NOT_COPYABLE_OR_MOVABLE(MemorySystem)
 
   public:
-    MemorySystemImpl(
-        std::shared_ptr<DeviceStreamManager> stream_manager,
-        std::vector<GPUContextHandle> device_contexts,
-        std::unique_ptr<AsyncAllocator> host_mem,
-        std::vector<std::unique_ptr<AsyncAllocator>> device_mem
+    MemorySystem(
+        const SystemInfo& system_info,
+        DeviceStreamRegistry* streams,
+        size_t host_memory_limit = std::numeric_limits<size_t>::max(),
+        size_t device_memory_limit = std::numeric_limits<size_t>::max()
     );
 
-    ~MemorySystemImpl();
+    ~MemorySystem();
 
     void make_progress();
     void trim_host(size_t bytes_remaining = 0);
     void trim_device(size_t bytes_remaining = 0);
 
-    AllocationResult allocate_host(
+    AllocResult allocate_host(
         size_t nbytes,
         DeviceId device_affinity,
         void** ptr_out,
         DeviceEventSet& deps_out
-    ) final;
-    void deallocate_host(void* ptr, size_t nbytes, DeviceEventSet deps) final;
+    );
 
-    AllocationResult allocate_device(
+    void deallocate_host(void* ptr, size_t nbytes, DeviceEventSet deps);
+
+    AllocResult allocate_device(
         DeviceId device_id,
         size_t nbytes,
-        GPUdeviceptr* ptr_out,
+        CUdeviceptr* ptr_out,
         DeviceEventSet& deps_out
-    ) final;
+    );
 
-    void deallocate_device(DeviceId device_id, GPUdeviceptr ptr, size_t nbytes, DeviceEventSet deps)
-        final;
+    void deallocate_device(DeviceId device_id, CUdeviceptr ptr, size_t nbytes, DeviceEventSet deps);
 
     DeviceEvent copy_host_to_device(
         DeviceId device_id,
         const void* src_addr,
-        GPUdeviceptr dst_addr,
+        CUdeviceptr dst_addr,
         size_t nbytes,
         DeviceEventSet deps
-    ) final;
+    );
 
     DeviceEvent copy_device_to_host(
         DeviceId device_id,
-        GPUdeviceptr src_addr,
+        CUdeviceptr src_addr,
         void* dst_addr,
         size_t nbytes,
         DeviceEventSet deps
-    ) final;
+    );
 
     DeviceEvent copy_device_to_device(
-        DeviceId src_device_id,
-        DeviceId dst_device_id,
-        GPUdeviceptr src_addr,
-        GPUdeviceptr dst_addr,
+        DeviceId src_device,
+        DeviceId dst_device,
+        CUdeviceptr src_addr,
+        CUdeviceptr dst_addr,
         size_t nbytes,
         DeviceEventSet deps
-    ) final;
+    );
+
+    /// True if a direct copy between `src` and `dst` is possible: always true when either side
+    /// is host memory, and true between two devices only if peer access between them is
+    /// available (queried once at construction).
+    bool is_copy_supported(MemoryId src, MemoryId dst);
+
+    /// The stream used for every allocation/copy issued against `device` (see `DeviceState`).
+    /// Exposed so other device-side operations (e.g. `ReductionManager`'s `reduce_async` calls)
+    /// can be sequenced against the same stream instead of needing one of their own.
+    DeviceStream stream(DeviceId device) const;
 
   private:
-    struct Device;
-    std::shared_ptr<DeviceStreamManager> m_streams;
-    std::unique_ptr<AsyncAllocator> m_host;
-    std::unique_ptr<Device> m_devices[MAX_DEVICES];
+    struct DeviceState;
+
+    DeviceState& device_state(DeviceId id) const;
+
+    std::shared_ptr<DeviceStreamRegistry> m_streams;
+    std::unique_ptr<AsyncAllocator> m_host_allocator;
+    std::array<std::unique_ptr<DeviceState>, MAX_DEVICES> m_devices;
+    size_t m_num_devices = 0;
+    bool m_peer_access[MAX_DEVICES][MAX_DEVICES] {};
 };
+
 }  // namespace kmm

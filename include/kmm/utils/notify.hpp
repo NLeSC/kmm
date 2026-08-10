@@ -1,82 +1,84 @@
 #pragma once
 
 #include <memory>
-#include <type_traits>
-#include <utility>
+
+#include "kmm/utils/refcnt_ptr.hpp"
 
 namespace kmm {
 
+/// \addtogroup utility
+/// @{
+
 /**
- * Interface to notify when an event has occurred
+ * Simple interface having a `notify` method to be called when an event happens.
  */
-class Notify {
+class Notify: public reference_count<Notify> {
   public:
     virtual ~Notify() noexcept = default;
-
-    /**
-     * Called when an event is triggered.
-     */
     virtual void notify() const noexcept = 0;
 };
 
 /**
- * Implementation of `Notify` that forwards the notify call to a function `F`.
- */
-template<typename F>
-class NotifyImpl: public Notify {
-  public:
-    NotifyImpl(F fun = {}) : m_callback(std::move(fun)) {}
-
-    void notify() const noexcept final {
-        m_callback();
-    }
-
-  private:
-    F m_callback;
-};
-
-/**
- * Wrapper around a `shared_ptr<Notify>` handle.
+ * Wrapper around a `std::shared_ptr<Notify>`.
  */
 class NotifyHandle {
   public:
     NotifyHandle() = default;
-    NotifyHandle(std::shared_ptr<Notify> m);
-    NotifyHandle(std::unique_ptr<Notify> m);
-
-    template<typename T>
-    NotifyHandle(std::shared_ptr<T> m) : NotifyHandle(std::shared_ptr<Notify>(m)) {}
-
-    template<typename T>
-    NotifyHandle(std::unique_ptr<T> m) : NotifyHandle(std::shared_ptr<Notify>(std::move(m))) {}
-
-    template<typename F, typename std::enable_if<std::is_invocable<F>::value, int>::type = 0>
-    NotifyHandle(F&& callback) :
-        NotifyHandle(
-            std::make_shared<NotifyImpl<typename std::decay<F>>::type>(std::forward<F>(callback))
-        ) {}
-
     ~NotifyHandle();
 
-    /**
-     * If the underlying `Notify` object exists, this calls its `notify()` method.
-     */
+    /** Constructs an empty (null) handle. */
+    NotifyHandle(decltype(nullptr)) {};
+
+    /** Constructs a handle from a shared pointer to a `Notify` instance. */
+    NotifyHandle(refcnt_ptr<const Notify> m) : m_impl(std::move(m)) {}
+
+    /** Constructs a handle by taking ownership of a `Notify` via unique pointer. */
+    NotifyHandle(std::unique_ptr<const Notify> m) : m_impl(std::move(m)) {}
+
+    template<typename T>
+    NotifyHandle(refcnt_ptr<T> m) : m_impl(std::move(m)) {}
+
+    template<typename T>
+    NotifyHandle(std::unique_ptr<T> m) : m_impl(std::move(m)) {}
+
+    /// Constructs a handle from any callable (e.g. lambda, functor, function pointer).
+    /// The callable is wrapped in an internal `Notify` implementation and stored via shared pointer.
+    template<typename F, typename = std::enable_if_t<std::is_invocable_v<std::decay_t<F>>>>
+    NotifyHandle(F&& callback) :
+        m_impl(make_refcnt<Impl<std::decay_t<F>>>(std::forward<F>(callback))) {}
+
+    /// Calls `notify` on the inner notifier. Does nothing if the handle is empty.
     void notify() const noexcept;
 
-    /**
-     * Resets the managed `shared_ptr<Notify>` to null, effectively clearing the
-     * notification handler.
-     */
+    /// Resets the handle, releasing the reference to the inner notifier.
     void clear() noexcept;
 
-    /**
-     * This calls the `notify()` method on the underlying `Notify` object (if it exists),
-     * and then resets the managed `shared_ptr<Notify>` to null.
-     */
+    /// Notifies and then clears the handle. Equivalent to `notify(); clear();`.
     void notify_and_clear() noexcept;
 
+    /// Returns `true` if the handle holds a notifier, `false` if it is empty.
+    explicit operator bool() const noexcept {
+        return m_impl != nullptr;
+    }
+
   private:
-    std::shared_ptr<Notify> m_impl;
+    // Internal `Notify` implementation that wraps a callable `F`.
+    template<typename F>
+    class Impl: public Notify {
+      public:
+        explicit Impl(F fun) : m_callback(std::move(fun)) {}
+
+        void notify() const noexcept override {
+            m_callback();
+        }
+
+      private:
+        F m_callback;
+    };
+
+    refcnt_ptr<const Notify> m_impl;
 };
+
+/// @}
 
 }  // namespace kmm

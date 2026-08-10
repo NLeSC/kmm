@@ -1,0 +1,77 @@
+#pragma once
+
+#include "kmm/core/checked_math.hpp"
+#include "kmm/core/macros.hpp"
+
+namespace kmm {
+
+/// \addtogroup utility
+/// @{
+
+/// Divide `num` by `denom` and round the result down (towards negative infinity).
+template<typename T>
+KMM_HOST_DEVICE constexpr T div_floor(T a, T b) {
+    const T zero = static_cast<T>(0);
+    T quotient = a / b;
+
+    // Adjust the quotient if a and b have different signs
+    if (a % b != zero && ((a >= zero) ^ (b >= zero))) {
+        quotient -= 1;
+    }
+
+    return quotient;
+}
+
+/// Divide `num` by `denom` and round the result up (towards positive infinity).
+template<typename T>
+KMM_HOST_DEVICE constexpr T div_ceil(T a, T b) {
+    const T zero = static_cast<T>(0);
+    T quotient = a / b;
+
+    // Adjust the quotient if both a and b have the same sign
+    if (a % b != zero && !((a >= zero) ^ (b >= zero))) {
+        quotient += 1;
+    }
+
+    return quotient;
+}
+
+/// Round `input` to the next multiple of `multiple`.
+///
+/// This returns the smallest value greater than or equal to `input` that is divisible
+/// by `multiple`.
+template<typename T>
+KMM_HOST_DEVICE constexpr T round_up_to_multiple(T input, T multiple) {
+    const T zero = static_cast<T>(0);
+    T remainder = input % multiple;
+    T delta = 0;
+
+    if (remainder != zero) {
+        // There are two cases:
+        // - input >= 0: return input + abs(multiple) - remainder
+        // - input < 0:  return input - remainder
+        T abs_multiple = (multiple >= zero ? multiple : -multiple);
+        delta = abs_multiple * (input >= zero) - remainder;
+    }
+
+    return checked_add(input, delta);
+}
+
+/// Return the smallest integer that is a power of two and is not less than `input`.
+template<typename T>
+KMM_HOST_DEVICE constexpr T round_up_to_power_of_two(T input) {
+    if (input <= static_cast<T>(0)) {
+        return static_cast<T>(1);
+    }
+
+    input -= static_cast<T>(1);
+    for (decltype(sizeof(T)) i = 1; i < sizeof(T) * 8; i *= 2) {
+        input |= (input >> i);
+    }
+
+    return checked_add(input, static_cast<T>(1));
+}
+
+/// @}
+
+}  // namespace kmm

@@ -1,202 +1,241 @@
-#include <cmath>
+#include <iterator>
+#include <sstream>
 
 #include "catch2/catch_all.hpp"
 
 #include "kmm/utils/small_vector.hpp"
-#define CHECK_EQ(A, B) CHECK((A) == (B))
 
 using namespace kmm;
 
-TEST_CASE("small_vector, basics") {
-    small_vector<int, 2> x;
-    CHECK_EQ(x.size(), 0);
-    CHECK_EQ(x.capacity(), 2);
-    CHECK_EQ(x.is_empty(), true);
-    CHECK_EQ(x.is_heap_allocated(), false);
+TEST_CASE("small_vector construction") {
+    small_vector<int, 4> a;
+    CHECK(a.size() == 0);
+    CHECK(a.is_empty());
+    CHECK(a.capacity() == 4);
+    CHECK_FALSE(a.is_heap_allocated());
 
-    x.push_back(42);
-    CHECK_EQ(x.size(), 1);
-    CHECK_EQ(x.capacity(), 2);
-    CHECK_EQ(x.is_empty(), false);
-    CHECK_EQ(x.is_heap_allocated(), false);
-    CHECK_EQ(x[0], 42);
-
-    x.push_back(57);
-    CHECK_EQ(x.size(), 2);
-    CHECK_EQ(x.capacity(), 2);
-    CHECK_EQ(x.is_empty(), false);
-    CHECK_EQ(x.is_heap_allocated(), false);
-    CHECK_EQ(x[0], 42);
-    CHECK_EQ(x[1], 57);
-
-    x.push_back(64);
-    CHECK_EQ(x.size(), 3);
-    CHECK_EQ(x.capacity(), 16);
-    CHECK_EQ(x.is_empty(), false);
-    CHECK_EQ(x.is_heap_allocated(), true);
-    CHECK_EQ(x[0], 42);
-    CHECK_EQ(x[1], 57);
-    CHECK_EQ(x[2], 64);
-
-    x.clear();
-    CHECK_EQ(x.size(), 0);
-    CHECK_EQ(x.capacity(), 16);
-    CHECK_EQ(x.is_empty(), true);
-    CHECK_EQ(x.is_heap_allocated(), true);
+    small_vector<int, 4> b {1, 2, 3};
+    CHECK(b.size() == 3);
+    CHECK_FALSE(b.is_empty());
+    CHECK(b[0] == 1);
+    CHECK(b[1] == 2);
+    CHECK(b[2] == 3);
 }
 
-TEST_CASE("small_vector, list_initializer") {
-    SECTION("empty list") {
-        small_vector<int, 4> x = {};
-        CHECK_EQ(x.size(), 0);
-        CHECK_EQ(x.capacity(), 4);
-        CHECK_EQ(x.is_heap_allocated(), false);
+TEST_CASE("small_vector::push_back") {
+    SECTION("within capacity") {
+        small_vector<int, 4> a;
+
+        a.push_back(1);
+        a.push_back(2);
+        a.push_back(3);
+
+        CHECK(a.size() == 3);
+        CHECK(a.capacity() == 4);
+        CHECK_FALSE(a.is_heap_allocated());
+        CHECK(a[0] == 1);
+        CHECK(a[1] == 2);
+        CHECK(a[2] == 3);
     }
 
-    SECTION("stack allocated") {
-        small_vector<int, 4> y = {1, 2, 3};
-        CHECK_EQ(y.size(), 3);
-        CHECK_EQ(y.capacity(), 4);
-        CHECK_EQ(y.is_heap_allocated(), false);
-        CHECK_EQ(y[0], 1);
-        CHECK_EQ(y[1], 2);
-        CHECK_EQ(y[2], 3);
-    }
+    SECTION("beyond capacity") {
+        small_vector<int, 2> a;
 
-    SECTION("heap allocated") {
-        small_vector<int, 4> z = {1, 2, 3, 4, 5};
-        CHECK(z.size() == 5);
-        CHECK(z.capacity() == 16);
-        CHECK(z.is_heap_allocated());
-        CHECK(z[0] == 1);
-        CHECK(z[1] == 2);
-        CHECK(z[2] == 3);
-        CHECK(z[3] == 4);
-        CHECK(z[4] == 5);
+        a.push_back(1);
+        a.push_back(2);
+        CHECK_FALSE(a.is_heap_allocated());
+
+        a.push_back(3);
+        CHECK(a.is_heap_allocated());
+        CHECK(a.size() == 3);
+        CHECK(a.capacity() >= 3);
+
+        CHECK(a[0] == 1);
+        CHECK(a[1] == 2);
+        CHECK(a[2] == 3);
     }
 }
 
-TEST_CASE("small_vector, copy constructor") {
-    {
-        small_vector<int, 2> x = {1, 2, 3};
-        small_vector<int, 2> y = x;
+TEST_CASE("small_vector::try_push_back") {
+    small_vector<int, 2> a;
 
-        CHECK_EQ(x.size(), 3);
-        CHECK_EQ(y.size(), 3);
-        CHECK_EQ(x.is_heap_allocated(), true);
-        CHECK_EQ(y.is_heap_allocated(), true);
+    CHECK(a.try_push_back(1));
+    CHECK(a.try_push_back(2));
+    CHECK(a.try_push_back(3));
 
-        CHECK_EQ(x[0], 1);
-        CHECK_EQ(x[1], 2);
-        CHECK_EQ(x[2], 3);
+    CHECK(a.size() == 3);
+    CHECK(a[2] == 3);
+}
 
-        CHECK_EQ(y[0], 1);
-        CHECK_EQ(y[1], 2);
-        CHECK_EQ(y[2], 3);
+TEST_CASE("small_vector copy constructor") {
+    small_vector<int, 4> a {1, 2, 3};
+    small_vector<int, 4> b = a;
+
+    CHECK(b.size() == 3);
+    CHECK(b[0] == 1);
+    CHECK(b[1] == 2);
+    CHECK(b[2] == 3);
+
+    // modifying the copy should not affect the original
+    b[0] = 99;
+    CHECK(a[0] == 1);
+    CHECK(b[0] == 99);
+}
+
+TEST_CASE("small_vector copy constructor with different data type and inline size") {
+    small_vector<int, 4> a {1, 2, 3};
+    small_vector<long, 8> b = a;
+
+    CHECK(b.size() == 3);
+    CHECK(b[0] == 1);
+    CHECK(b[1] == 2);
+    CHECK(b[2] == 3);
+}
+
+TEST_CASE("small_vector copy assignment") {
+    small_vector<int, 4> a {1, 2, 3};
+    small_vector<int, 4> b {9, 9};
+
+    b = a;
+
+    CHECK(b.size() == 3);
+    CHECK(b[0] == 1);
+    CHECK(b[1] == 2);
+    CHECK(b[2] == 3);
+
+    // self-assignment should be a no-op
+    b = b;
+    CHECK(b.size() == 3);
+    CHECK(b[0] == 1);
+}
+
+TEST_CASE("small_vector move constructor") {
+    small_vector<int, 4> a {1, 2, 3};
+    small_vector<int, 4> b = std::move(a);
+
+    CHECK(b.size() == 3);
+    CHECK(b[0] == 1);
+    CHECK(b[1] == 2);
+    CHECK(b[2] == 3);
+}
+
+TEST_CASE("small_vector move constructor with heap allocation") {
+    small_vector<int, 2> a {1, 2, 3, 4};
+    CHECK(a.is_heap_allocated());
+
+    small_vector<int, 2> b = std::move(a);
+
+    CHECK(b.is_heap_allocated());
+    CHECK(b.size() == 4);
+    CHECK(b[0] == 1);
+    CHECK(b[1] == 2);
+    CHECK(b[2] == 3);
+    CHECK(b[3] == 4);
+}
+
+TEST_CASE("small_vector move assignment") {
+    small_vector<int, 4> a {1, 2, 3};
+    small_vector<int, 4> b {9};
+
+    b = std::move(a);
+
+    CHECK(b.size() == 3);
+    CHECK(b[0] == 1);
+    CHECK(b[1] == 2);
+    CHECK(b[2] == 3);
+}
+
+TEST_CASE("small_vector::resize") {
+    SECTION("within inline") {
+        small_vector<int, 4> a {1, 2};
+        a.resize(4);
+        CHECK(a.size() == 4);
+
+        a.resize(1);
+        CHECK(a.size() == 1);
+        CHECK(a[0] == 1);
     }
 
-    {
-        small_vector<int, 4> x = {1, 2, 3};
-        small_vector<int, 4> y = x;
+    SECTION("beyond inline") {
+        small_vector<int, 2> a {1, 2};
+        a.resize(10);
 
-        CHECK_EQ(x.size(), 3);
-        CHECK_EQ(y.size(), 3);
-        CHECK_EQ(x.is_heap_allocated(), false);
-        CHECK_EQ(y.is_heap_allocated(), false);
-
-        CHECK_EQ(x[0], 1);
-        CHECK_EQ(x[1], 2);
-        CHECK_EQ(x[2], 3);
-
-        CHECK_EQ(y[0], 1);
-        CHECK_EQ(y[1], 2);
-        CHECK_EQ(y[2], 3);
-    }
-
-    {
-        small_vector<int, 2> x = {1, 2, 3};
-        small_vector<int, 4> y = x;
-
-        CHECK_EQ(x.size(), 3);
-        CHECK_EQ(y.size(), 3);
-        CHECK_EQ(x.is_heap_allocated(), true);
-        CHECK_EQ(y.is_heap_allocated(), false);
-
-        CHECK_EQ(x[0], 1);
-        CHECK_EQ(x[1], 2);
-        CHECK_EQ(x[2], 3);
-
-        CHECK_EQ(y[0], 1);
-        CHECK_EQ(y[1], 2);
-        CHECK_EQ(y[2], 3);
-    }
-
-    {
-        small_vector<int, 4> x = {1, 2, 3};
-        small_vector<int, 2> y = x;
-
-        CHECK_EQ(x.size(), 3);
-        CHECK_EQ(y.size(), 3);
-        CHECK_EQ(x.is_heap_allocated(), false);
-        CHECK_EQ(y.is_heap_allocated(), true);
-
-        CHECK_EQ(x[0], 1);
-        CHECK_EQ(x[1], 2);
-        CHECK_EQ(x[2], 3);
-
-        CHECK_EQ(y[0], 1);
-        CHECK_EQ(y[1], 2);
-        CHECK_EQ(y[2], 3);
+        CHECK(a.size() == 10);
+        CHECK(a.is_heap_allocated());
+        CHECK(a[0] == 1);
+        CHECK(a[1] == 2);
     }
 }
 
-TEST_CASE("small_vector, move constructor") {
-    SECTION("heap allocated") {
-        small_vector<int, 2> x = {1, 2, 3};
-        small_vector<int, 2> y = std::move(x);
+TEST_CASE("small_vector::truncate") {
+    small_vector<int, 4> a {1, 2, 3, 4};
 
-        CHECK_EQ(x.size(), 0);
-        CHECK_EQ(y.size(), 3);
-        CHECK_EQ(x.is_heap_allocated(), false);
-        CHECK_EQ(y.is_heap_allocated(), true);
+    a.truncate(2);
+    CHECK(a.size() == 2);
+    CHECK(a[0] == 1);
+    CHECK(a[1] == 2);
 
-        CHECK_EQ(y[0], 1);
-        CHECK_EQ(y[1], 2);
-        CHECK_EQ(y[2], 3);
+    // truncating to a larger size than current size should be a no-op
+    a.truncate(10);
+    CHECK(a.size() == 2);
+}
+
+TEST_CASE("small_vector::clear") {
+    small_vector<int, 4> a {1, 2, 3};
+    a.clear();
+
+    CHECK(a.size() == 0);
+    CHECK(a.is_empty());
+    CHECK(a.capacity() == 4);
+}
+
+TEST_CASE("small_vector::insert_all") {
+    SECTION("iterator") {
+        small_vector<int, 4> a {1, 2};
+        int extra[] = {3, 4, 5};
+
+        a.insert_all(std::begin(extra), std::end(extra));
+
+        CHECK(a.size() == 5);
+        CHECK(a.is_heap_allocated());
+        for (size_t i = 0; i < 5; i++) {
+            CHECK(a[i] == static_cast<int>(i + 1));
+        }
     }
 
-    SECTION("stack allocated") {
-        small_vector<int, 4> x = {1, 2, 3};
-        small_vector<int, 4> y = std::move(x);
+    SECTION("from small_vector") {
+        small_vector<int, 4> a {1, 2};
+        small_vector<int, 8> b {3, 4};
 
-        CHECK_EQ(x.size(), 0);
-        CHECK_EQ(y.size(), 3);
-        CHECK_EQ(x.is_heap_allocated(), false);
-        CHECK_EQ(y.is_heap_allocated(), false);
+        a.insert_all(b);
 
-        CHECK_EQ(y[0], 1);
-        CHECK_EQ(y[1], 2);
-        CHECK_EQ(y[2], 3);
+        CHECK(a.size() == 4);
+        CHECK(a[0] == 1);
+        CHECK(a[1] == 2);
+        CHECK(a[2] == 3);
+        CHECK(a[3] == 4);
     }
 }
 
-TEST_CASE("small_vector, contains") {
-    small_vector<int, 4> x = {1, 2, 3};
-    CHECK_EQ(x.contains(2), true);
-    CHECK_EQ(x.contains(42), false);
+TEST_CASE("small_vector iterator") {
+    small_vector<int, 4> a {1, 2, 3};
 
-    CHECK_EQ(x.find_if([&](auto v) { return v == 2; }), &x[1]);
-    CHECK_EQ(x.find_if([&](auto v) { return v == 42; }), x.end());
-}
-
-TEST_CASE("small_vector, iterate") {
-    small_vector<int, 4> x = {0, 1, 2, 3, 4, 5, 6, 7, 8};
-
-    int index = 0;
-    for (const auto& v : x) {
-        CHECK_EQ(v, index);
-        index++;
+    int sum = 0;
+    for (int v : a) {
+        sum += v;
     }
 
-    CHECK_EQ(index, 9);
+    CHECK(sum == 6);
+
+    auto it = a.begin();
+    CHECK(*it == 1);
+    CHECK(a.end() - a.begin() == 3);
+}
+
+TEST_CASE("small_vector operator<<") {
+    small_vector<int, 4> a {1, 2, 3};
+    CHECK(fmt::to_string(a) == "{1, 2, 3}");
+
+    small_vector<int, 4> empty;
+    CHECK(fmt::to_string(empty) == "{}");
 }

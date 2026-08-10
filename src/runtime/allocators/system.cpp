@@ -2,12 +2,13 @@
 
 namespace kmm {
 
-AllocationResult SystemAllocator::allocate(size_t nbytes, void** addr_out) {
-    *addr_out = malloc(nbytes);
-    return *addr_out != nullptr ? AllocationResult::Success : AllocationResult::ErrorOutOfMemory;
+AllocResult SystemAllocator::allocate(BufferLayout layout, void** addr_out) {
+    *addr_out = malloc(layout.size_in_bytes);
+    return *addr_out != nullptr ? AllocResult::Success : AllocResult::ErrorOutOfMemory;
 }
 
-void SystemAllocator::deallocate(void* addr, size_t nbytes) {
+void SystemAllocator::deallocate(void* addr, BufferLayout layout) {
     free(addr);
 }
+
 }  // namespace kmm

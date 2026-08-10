@@ -1,59 +1,41 @@
-cmake_minimum_required(VERSION 3.10)
+cmake_minimum_required(VERSION 3.18)
 
-# Project setup
-set(PROJECT_NAME "kmm")
-project(${PROJECT_NAME} LANGUAGES CXX VERSION 0.3)
+project(kmm VERSION 0.1.0 LANGUAGES CXX)
 
-# User options (features)
-option(KMM_STATIC   "Build a static library" OFF)
-option(KMM_USE_CUDA "Build the CUDA backend" OFF)
-option(KMM_USE_HIP  "Build the HIP backend" OFF)
+option(KMM_BUILD_TESTS "Build kmm tests" ON)
+option(KMM_USE_CUDA "Enable CUDA support" OFF)
 
-# User options (development)
-option(KMM_ENABLE_LINTER  "Enable clang-tidy linter" OFF)
-option(KMM_BUILD_TESTS    "Build tests" OFF)
-option(KMM_BUILD_EXAMPLES "Build examples" OFF)
-option(KMM_BUILD_BENCHMARKS "Build benchmarks" OFF)
+file(GLOB_RECURSE sources src/*.cpp)
 
-# Check options
-if(KMM_USE_CUDA AND KMM_USE_HIP)
-  message(FATAL_ERROR "CUDA and HIP backend are mutually exclusive.")
-endif()
+add_library(kmm ${sources})
 
-# Enable C++17 support
+target_include_directories(kmm PUBLIC ${PROJECT_SOURCE_DIR}/include)
+
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-
-file(GLOB_RECURSE sources
-  "${PROJECT_SOURCE_DIR}/src/*.cpp"
-  "${PROJECT_SOURCE_DIR}/src/*.cu"
+set(CMAKE_CXX_EXTENSIONS OFF)
+target_compile_features(kmm PUBLIC cxx_std_17)
+target_compile_options(kmm PRIVATE
+    -Wall -Wextra -Wconversion -Wno-unused-parameter
+    $<$<COMPILE_LANGUAGE:CXX>:-Wpedantic>
 )
-
-# Create library
-if(KMM_STATIC)
-  add_library(${PROJECT_NAME} STATIC ${sources})
-else()
-  add_library(${PROJECT_NAME} SHARED ${sources})
-endif()
-
-target_include_directories(${PROJECT_NAME} PUBLIC "${PROJECT_SOURCE_DIR}/include")
 
 if(KMM_USE_CUDA)
-  enable_language(CUDA)
-  SET(CUDA_SEPARABLE_COMPILATION ON)
-  set(CMAKE_CUDA_SEPARABLE_COMPILATION ON)
-elseif(KMM_USE_HIP)
-  enable_language(HIP)
+    enable_language(CUDA)
+    find_package(CUDAToolkit REQUIRED)
+    set_target_properties(kmm PROPERTIES
+        CUDA_STANDARD 17
+        CUDA_STANDARD_REQUIRED ON
+        CUDA_EXTENSIONS OFF
+    )
+
+    file(GLOB_RECURSE cuda_sources src/*.cu)
+    target_sources(kmm PRIVATE ${cuda_sources})
+
+    target_link_libraries(kmm PUBLIC CUDA::cudart CUDA::cuda_driver)
+    target_compile_definitions(kmm PUBLIC KMM_USE_CUDA)
 endif()
 
-# CXX flags
-target_compile_options(${PROJECT_NAME}
-        PUBLIC
-        $<$<COMPILE_LANGUAGE:CUDA>:-forward-unknown-to-host-compiler>
-        -Wall -Wextra -Wconversion -Wno-unused-parameter
-        #$<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler=-Werror>
-)
-target_compile_options(${PROJECT_NAME} PUBLIC ${CXXFLAGS})
 
 # Enable PIC
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
@@ -70,89 +52,12 @@ set(SPDLOG_BUILD_PIC ON)
 add_subdirectory(external/spdlog)
 target_link_libraries(${PROJECT_NAME} PUBLIC spdlog)
 
-# Install
-include(GNUInstallDirs)
-set_target_properties(
-  ${PROJECT_NAME}
-  PROPERTIES
-  VERSION ${PROJECT_VERSION}
-  SOVERSION 1
-)
+# Dependencies: unordered_dense
+add_subdirectory(external/unordered_dense)
+target_link_libraries(${PROJECT_NAME} PUBLIC unordered_dense::unordered_dense)
 
-install(
-  TARGETS ${PROJECT_NAME}
-  LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
-  ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
-  RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
-)
-
-install(
-  DIRECTORY "${PROJECT_SOURCE_DIR}/include/kmm"
-  DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
-  FILES_MATCHING PATTERN "*.hpp"
-)
-
-if(KMM_ENABLE_LINTER)
-  set(PROJECT_CLANG_TIDY clang-tidy)
-  set_target_properties(${PROJECT_NAME} PROPERTIES CXX_CLANG_TIDY "${PROJECT_CLANG_TIDY}")
-endif()
-
-if(KMM_USE_CUDA)
-  find_package(CUDAToolkit REQUIRED)
-  target_link_libraries(${PROJECT_NAME}
-          PUBLIC
-          CUDA::cudart_static
-          CUDA::cuda_driver
-          CUDA::cublas
-          CUDA::nvrtc
-  )
-
-  set_target_properties(
-          ${PROJECT_NAME}
-          PROPERTIES
-          CUDA_ARCHITECTURES "80"
-          CUDA_SEPARABLE_COMPILATION ON
-          CUDA_RESOLVE_DEVICE_SYMBOLS ON
-  )
-
-  # Define `KMM_USE_CUDA` macro so that headers can detect CUDA usage
-  target_compile_definitions(${PROJECT_NAME} PUBLIC KMM_USE_CUDA=1)
-elseif(KMM_USE_HIP)
-  if(NOT DEFINED HIP_PATH)
-    if(NOT DEFINED ENV{HIP_PATH})
-      set(HIP_PATH "/opt/rocm/hip" CACHE PATH "Path to which HIP has been installed")
-    else()
-      set(HIP_PATH $ENV{HIP_PATH} CACHE PATH "Path to which HIP has been installed")
-    endif()
-  endif()
-  set(CMAKE_MODULE_PATH "${HIP_PATH}/cmake" ${CMAKE_MODULE_PATH})
-  find_package(HIP REQUIRED)
-  find_package(ROCBLAS REQUIRED)
-  set_source_files_properties(${sources} PROPERTIES LANGUAGE HIP)
-  target_link_libraries(${PROJECT_NAME}
-          PUBLIC
-          hip::host
-          hip::device
-          roc::rocblas
-  )
-
-  # Define `KMM_USE_HIP` macro so that headers can detect HIP usage
-  target_compile_definitions(${PROJECT_NAME} PUBLIC KMM_USE_HIP=1)
-endif()
-
-# Compile unit tests
 if(KMM_BUILD_TESTS)
-  include(CTest)
   add_subdirectory(external/Catch2)
   add_subdirectory(test)
 endif()
 
-# Compile examples
-if(KMM_BUILD_EXAMPLES)
-  add_subdirectory(examples)
-endif()
-
-# Compile benchmarks
-if(KMM_BUILD_BENCHMARKS)
-  add_subdirectory(benchmarks)
-endif()

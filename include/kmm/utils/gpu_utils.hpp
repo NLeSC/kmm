@@ -1,30 +1,32 @@
 #pragma once
 
+#include <cuda.h>
+#include <functional>
 #include <memory>
-#include <optional>
+#include <stdexcept>
 #include <string>
-#include <vector>
+#include <utility>
 
-#include "kmm/core/backends.hpp"
-#include "kmm/utils/macros.hpp"
+#include "kmm/core/macros.hpp"
 
-#define KMM_GPU_CHECK(...)                                                        \
-    do {                                                                          \
-        auto __code = (__VA_ARGS__);                                              \
-        if (__code != decltype(__code)(0)) {                                      \
-            ::kmm::gpu_throw_exception(__code, __FILE__, __LINE__, #__VA_ARGS__); \
-        }                                                                         \
-    } while (0);
+#define KMM_CUDA_CHECK(...)                                                        \
+    do {                                                                           \
+        auto __code = (__VA_ARGS__);                                               \
+        if (KMM_UNLIKELY(__code != decltype(__code)(0))) {                         \
+            ::kmm::cuda_throw_exception(__code, __FILE__, __LINE__, #__VA_ARGS__); \
+        }                                                                          \
+    } while (0)
 
 namespace kmm {
 
-void gpu_throw_exception(GPUresult result, const char* file, int line, const char* expression);
-void gpu_throw_exception(gpuError_t result, const char* file, int line, const char* expression);
-void gpu_throw_exception(blasStatus_t result, const char* file, int line, const char* expression);
+/// \addtogroup utility
+/// @{
 
-class GPUException: public std::exception {
+void cuda_throw_exception(CUresult result, const char* file, int line, const char* expression);
+
+class CUDAException: public std::exception {
   public:
-    GPUException(std::string message = {}) : m_message(std::move(message)) {}
+    CUDAException(std::string message = {}) : m_message(std::move(message)) {}
 
     const char* what() const noexcept override {
         return m_message.c_str();
@@ -34,76 +36,101 @@ class GPUException: public std::exception {
     std::string m_message;
 };
 
-class GPUDriverException: public GPUException {
+class CUDAContextGuard {
+    KMM_NOT_COPYABLE_OR_MOVABLE(CUDAContextGuard)
+
   public:
-    GPUDriverException(const std::string& message, GPUresult result);
-    GPUDriverException(const char* message, GPUresult result) :
-        GPUDriverException(std::string(message), result) {}
-    GPUresult status;
+    CUDAContextGuard(CUcontext context);
+    ~CUDAContextGuard();
+
+  private:
+    CUcontext m_context;
 };
 
-class GPURuntimeException: public GPUException {
-  public:
-    GPURuntimeException(const std::string& message, gpuError_t result);
-    gpuError_t status;
-};
+struct cuda_context_id {
+    cuda_context_id(CUcontext context);
 
-class BlasException: public GPUException {
-  public:
-    BlasException(const std::string& message, blasStatus_t result);
-    blasStatus_t status;
-};
+    bool operator==(const cuda_context_id& that) const noexcept {
+        return m_id == that.m_id;
+    }
 
-/**
- * Returns the available devices as a list of `device`s.
- */
-std::vector<GPUdevice> get_gpu_devices();
+    bool operator!=(const cuda_context_id& that) const noexcept {
+        return !(*this == that);
+    }
 
-/**
- * If the given address points to memory allocation that has been allocated on a GPU, then
- * this function returns the device ordinal as a `device`. If the address points ot an invalid
- * memory location or a non-GPU buffer, then it returns `std::nullopt`.
- */
-std::optional<GPUdevice> get_gpu_device_by_address(const void* address);
-
-class GPUContextHandle {
-    GPUContextHandle() = delete;
-    GPUContextHandle(GPUcontext context, std::shared_ptr<void> lifetime);
-
-  public:
-    static GPUContextHandle create_context_for_device(GPUdevice device);
-    static GPUContextHandle retain_primary_context_for_device(GPUdevice device);
-
-    operator GPUcontext() const {
-        return m_context;
+    unsigned long long get() const noexcept {
+        return m_id;
     }
 
   private:
-    GPUcontext m_context;
-    std::shared_ptr<void> m_lifetime;
+    unsigned long long m_id;
 };
 
-inline bool operator==(const GPUContextHandle& lhs, const GPUContextHandle& rhs) {
-    return GPUcontext(lhs) == GPUcontext(rhs);
-}
-
-inline bool operator!=(const GPUContextHandle& lhs, const GPUContextHandle& rhs) {
-    return !(lhs == rhs);
-}
-
-class GPUContextGuard {
-    KMM_NOT_COPYABLE_OR_MOVABLE(GPUContextGuard)
-
+class CUDAStream {
   public:
-    GPUContextGuard(GPUContextHandle context);
-    ~GPUContextGuard();
+    explicit CUDAStream(CUcontext context, unsigned int flags = CU_STREAM_NON_BLOCKING);
+    ~CUDAStream();
+
+    CUDAStream(const CUDAStream&) = delete;
+    CUDAStream& operator=(const CUDAStream&) = delete;
+
+    CUDAStream(CUDAStream&& that) noexcept : m_stream(std::exchange(that.m_stream, nullptr)) {}
+
+    CUDAStream& operator=(CUDAStream&& that) noexcept {
+        std::swap(m_stream, that.m_stream);
+        return *this;
+    }
+
+    CUstream get() const noexcept {
+        return m_stream;
+    }
+
+    operator CUstream() const noexcept {
+        return m_stream;
+    }
 
   private:
-    GPUContextHandle m_context;
+    CUstream m_stream = nullptr;
 };
 
-inline GPUdeviceptr gpu_deviceptr_offset(GPUdeviceptr ptr, size_t size) {
-    return reinterpret_cast<GPUdeviceptr>(reinterpret_cast<unsigned long long>(ptr) + size);
-}
+struct cuda_stream_id {
+    cuda_stream_id(CUstream stream);
+
+    bool operator==(const cuda_stream_id& that) const noexcept {
+        return m_id == that.m_id;
+    }
+
+    bool operator!=(const cuda_stream_id& that) const noexcept {
+        return !(*this == that);
+    }
+
+    unsigned long long get() const noexcept {
+        return m_id;
+    }
+
+    const cuda_context_id& context() const noexcept {
+        return m_context_id;
+    }
+
+  private:
+    cuda_context_id m_context_id;
+    unsigned long long m_id;
+};
+
+/// @}
 
 }  // namespace kmm
+
+template<>
+struct std::hash<kmm::cuda_context_id> {
+    size_t operator()(const kmm::cuda_context_id& id) const noexcept {
+        return std::hash<unsigned long long> {}(id.get());
+    }
+};
+
+template<>
+struct std::hash<kmm::cuda_stream_id> {
+    size_t operator()(const kmm::cuda_stream_id& id) const noexcept {
+        return std::hash<unsigned long long> {}(id.get());
+    }
+};
