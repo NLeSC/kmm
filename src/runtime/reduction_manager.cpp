@@ -9,6 +9,7 @@
 #include "kmm/core/panic.hpp"
 #include "kmm/runtime/data_interface.hpp"
 #include "kmm/runtime/memops/reduction.hpp"
+#include "kmm/runtime/memory_buffer.hpp"
 #include "kmm/runtime/memory_system.hpp"
 #include "kmm/runtime/reduction_manager.hpp"
 
@@ -20,7 +21,7 @@ namespace kmm {
 struct AcquiredPartial {
     MemoryBuffer buffer;
     MemoryId memory_id;
-    DeviceStream stream_hint;
+    DeviceStreamId stream_hint;
 };
 
 /// Backing state for a single reduction: the destination buffer, the op/type/count describing
@@ -70,20 +71,6 @@ static ReductionDescription describe_reduction(
     return description;
 }
 
-// Allocates a fresh, `count`-element partial buffer.
-static MemoryBuffer create_partial_buffer(
-    MemoryManager& memory_manager,
-    refcnt_ptr<MemorySystem> memory_system,
-    DataType dtype,
-    size_t count
-) {
-    size_t elem_size = data_type_size(dtype);
-    auto layout = BufferLayout {elem_size * count, elem_size};
-
-    auto data = std::make_unique<FlatDataInterface>(layout, std::move(memory_system));
-    return memory_manager.create_buffer(std::move(data), "reduction-partial");
-}
-
 ReductionManager::ReductionManager(
     MemoryManager& memory_manager,
     refcnt_ptr<MemorySystem> memory_system
@@ -105,7 +92,7 @@ ReductionState ReductionManager::initialize_reduction(
 MemoryBuffer ReductionManager::acquire_partial(
     ReductionState& reduction,
     MemoryId memory_id,
-    DeviceStream stream_hint
+    const DeviceStreamId& stream_hint
 ) {
     KMM_ASSERT(!is_submitted(reduction));
 
@@ -118,11 +105,13 @@ MemoryBuffer ReductionManager::acquire_partial(
         }
     }
 
-    auto buffer = create_partial_buffer(
-        m_memory_manager,
-        m_memory_system,
-        reduction->dtype,
-        reduction->count
+    size_t elem_size = data_type_size(reduction->dtype);
+    auto layout = BufferLayout {elem_size * reduction->count, elem_size};
+
+    auto data = std::make_unique<FlatDataInterface>(layout, std::move(m_memory_system));
+    auto buffer = m_memory_manager.create_buffer(
+        std::move(data),
+        "reduction-partial:" + reduction->home_buffer->name
     );
 
     reduction->partials.push_back({buffer, memory_id, stream_hint});
@@ -140,8 +129,7 @@ struct PartialFold {
             request = manager.create_request(buffer, memory_id, Access::ReadOnly, transaction);
         }
 
-        DeviceStream stream_hint = {};
-        return manager.poll_request(stream_hint, request, request_deps);
+        return manager.poll_request(DeviceStreamId::null(), request, request_deps);
     }
 
     void submit(
@@ -160,10 +148,14 @@ struct PartialFold {
                 reduce(peer_addr, home_addr, description);
             });
         } else {
-            auto stream = system.stream(memory_id.as_device());
-            auto event = stream.with_stream(request_deps, [&](auto stream) {
-                reduce_async(stream, local_addr, home_addr, description);
-            });
+            auto event = system.reduce_device(
+                memory_id.as_device(),
+                reinterpret_cast<CUdeviceptr>(local_addr),
+                reinterpret_cast<CUdeviceptr>(home_addr),
+                description,
+                DeviceStreamId::null(),
+                request_deps
+            );
 
             completion_deps.insert(event);
         }
@@ -250,7 +242,7 @@ struct ReductionMemoryJob {
         }
 
         DeviceStream stream_hint = {};
-        Poll home_ready = manager.poll_request(stream_hint, home_req, home_deps);
+        Poll home_ready = manager.poll_request(DeviceStreamId::null(), home_req, home_deps);
         bool work_remaining = active_index.has_value();
 
         for (size_t i = 0; i < partials.size(); i++) {

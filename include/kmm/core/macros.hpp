@@ -3,11 +3,6 @@
 #define KMM_INLINE   __attribute__((always_inline)) inline
 #define KMM_NOINLINE __attribute__((noinline))
 
-#define KMM_ASSUME(expr)             \
-    do {                             \
-        if (!(expr))                 \
-            __builtin_unreachable(); \
-    } while (0)
 #define KMM_LIKELY(expr)   (__builtin_expect(!!(expr), true))
 #define KMM_UNLIKELY(expr) (__builtin_expect(!!(expr), false))
 
@@ -20,6 +15,7 @@
     #define KMM_DEVICE               __device__ __forceinline__
     #define KMM_HOST_DEVICE_NOINLINE __host__ __device__
     #define KMM_DEVICE_NOINLINE      __device__
+    #define KMM_LAMBDA               [=] __device__
     #ifdef __CUDA_ARCH__
         #define KMM_IS_DEVICE (1)
 
@@ -34,6 +30,7 @@
     #define KMM_DEVICE               __device__ __forceinline__
     #define KMM_HOST_DEVICE_NOINLINE __host__ __device__
     #define KMM_DEVICE_NOINLINE      __device__
+    #define KMM_LAMBDA               [=] __device__
     #ifdef __HIP_DEVICE_COMPILE__
         #define KMM_IS_DEVICE (1)
 
@@ -47,6 +44,7 @@
     #define KMM_DEVICE      KMM_INLINE
     #define KMM_HOST_DEVICE_NOINLINE
     #define KMM_DEVICE_NOINLINE
+    #define KMM_LAMBDA    [=]
     #define KMM_IS_RTC    (0)
     #define KMM_IS_DEVICE (0)
 #endif

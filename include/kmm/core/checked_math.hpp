@@ -133,15 +133,16 @@ struct checked_rem_impl {
 
         // If both are signed, the result fits into int64_t, except for MIN/-1
         if constexpr (numeric_type_traits<L>::is_signed && numeric_type_traits<R>::is_signed) {
+            int64_t magnitude;
+
             if (left == numeric_type_traits<int64_t>::min_inclusive && right == -1) {
-                uint64_t magnitude = uint64_t(numeric_type_traits<int64_t>::max_inclusive) + 1;
-                *output = static_cast<O>(magnitude);
-                return is_convertible_impl<uint64_t, O>::apply(magnitude);
+                magnitude = static_cast<int64_t>(0);
             } else {
-                int64_t magnitude = static_cast<int64_t>(left) / static_cast<int64_t>(right);
-                *output = static_cast<O>(magnitude);
-                return is_convertible_impl<int64_t, O>::apply(magnitude);
+                magnitude = static_cast<int64_t>(left) % static_cast<int64_t>(right);
             }
+
+            *output = static_cast<O>(magnitude);
+            return is_convertible_impl<int64_t, O>::apply(magnitude);
         }
 
         uint64_t al = left < static_cast<L>(0)
@@ -162,14 +163,18 @@ struct checked_rem_impl {
     }
 };
 
-#define KMM_CHECKED_MATH_IMPL(OP, T, FUN)               \
-    template<>                                          \
-    struct OP<T, T, T> {                                \
-        KMM_HOST_DEVICE                                 \
-        static bool apply(T left, T right, T* output) { \
-            return FUN(left, right, output) == false;   \
-        }                                               \
-    };
+// These `__builtin_*_overflow` compiler builtins have no device-side implementation, so these
+// specializations are compiled for the host pass only; the device pass never sees them declared
+// and falls back to the generic, non-specialized `checked_*_impl<L, R, O>::apply` above instead.
+#if !KMM_IS_DEVICE
+    #define KMM_CHECKED_MATH_IMPL(OP, T, FUN)               \
+        template<>                                          \
+        struct OP<T, T, T> {                                \
+            KMM_HOST_DEVICE                                 \
+            static bool apply(T left, T right, T* output) { \
+                return FUN(left, right, output) == false;   \
+            }                                               \
+        };
 
 KMM_CHECKED_MATH_IMPL(checked_add_impl, int, __builtin_sadd_overflow)
 KMM_CHECKED_MATH_IMPL(checked_add_impl, long, __builtin_saddl_overflow)
@@ -191,6 +196,8 @@ KMM_CHECKED_MATH_IMPL(checked_mul_impl, long long, __builtin_smulll_overflow)
 KMM_CHECKED_MATH_IMPL(checked_mul_impl, unsigned int, __builtin_umul_overflow)
 KMM_CHECKED_MATH_IMPL(checked_mul_impl, unsigned long, __builtin_umull_overflow)
 KMM_CHECKED_MATH_IMPL(checked_mul_impl, unsigned long long, __builtin_umulll_overflow)
+    #undef KMM_CHECKED_MATH_IMPL
+#endif  // !KMM_IS_DEVICE
 
 }  // namespace detail
 
@@ -198,63 +205,88 @@ KMM_CHECKED_MATH_IMPL(checked_mul_impl, unsigned long long, __builtin_umulll_ove
 /// @{
 
 /// Returns `left + right`, throwing on overflow.
-template<typename T>
-KMM_HOST_DEVICE constexpr T checked_add(const T& left, const T& right) {
-    T output {};
+template<typename O, typename L, typename R>
+KMM_HOST_DEVICE constexpr O checked_add(L left, R right) {
+    O output {};
 
-    if (!detail::checked_add_impl<T, T, T>::apply(left, right, &output)) {
+    if (!detail::checked_add_impl<L, R, O>::apply(left, right, &output)) {
         throw_overflow_exception();
     }
 
     return output;
+}
+
+template<decltype(nullptr) = nullptr, typename T>
+KMM_HOST_DEVICE constexpr T checked_add(T left, T right) {
+    return checked_add<T, T, T>(left, right);
 }
 
 /// Returns `left - right`, throwing on overflow.
-template<typename T>
-KMM_HOST_DEVICE constexpr T checked_sub(const T& left, const T& right) {
-    T output {};
+template<typename O, typename L, typename R>
+KMM_HOST_DEVICE constexpr O checked_sub(L left, R right) {
+    O output {};
 
-    if (!detail::checked_sub_impl<T, T, T>::apply(left, right, &output)) {
+    if (!detail::checked_sub_impl<L, R, O>::apply(left, right, &output)) {
         throw_overflow_exception();
     }
 
     return output;
+}
+
+template<decltype(nullptr) = nullptr, typename T>
+KMM_HOST_DEVICE constexpr T checked_sub(T left, T right) {
+    return checked_sub<T, T, T>(left, right);
 }
 
 /// Returns `left * right`, throwing on overflow.
-template<typename T>
-KMM_HOST_DEVICE constexpr T checked_mul(const T& left, const T& right) {
-    T output {};
+template<typename O, typename L, typename R>
+KMM_HOST_DEVICE constexpr O checked_mul(L left, R right) {
+    O output {};
 
-    if (!detail::checked_mul_impl<T, T, T>::apply(left, right, &output)) {
+    if (!detail::checked_mul_impl<L, R, O>::apply(left, right, &output)) {
         throw_overflow_exception();
     }
 
     return output;
+}
+
+template<decltype(nullptr) = nullptr, typename T>
+KMM_HOST_DEVICE constexpr T checked_mul(T left, T right) {
+    return checked_mul<T, T, T>(left, right);
 }
 
 /// Returns `left / right`, throwing on division by zero or overflow.
-template<typename T>
-KMM_HOST_DEVICE constexpr T checked_div(const T& left, const T& right) {
-    T output {};
+template<typename O, typename L, typename R>
+KMM_HOST_DEVICE constexpr O checked_div(L left, R right) {
+    O output {};
 
-    if (!detail::checked_div_impl<T, T, T>::apply(left, right, &output)) {
+    if (!detail::checked_div_impl<L, R, O>::apply(left, right, &output)) {
         throw_overflow_exception();
     }
 
     return output;
 }
 
-/// Returns `left % right`, throwing on division by zero or overflow.
-template<typename T>
-KMM_HOST_DEVICE constexpr T checked_rem(const T& left, const T& right) {
-    T output {};
+template<decltype(nullptr) = nullptr, typename T>
+KMM_HOST_DEVICE constexpr T checked_div(T left, T right) {
+    return checked_div<T, T, T>(left, right);
+}
 
-    if (!detail::checked_rem_impl<T, T, T>::apply(left, right, &output)) {
+/// Returns `left % right`, throwing on division by zero or overflow.
+template<typename O, typename L, typename R>
+KMM_HOST_DEVICE constexpr O checked_rem(L left, R right) {
+    O output {};
+
+    if (!detail::checked_rem_impl<L, R, O>::apply(left, right, &output)) {
         throw_overflow_exception();
     }
 
     return output;
+}
+
+template<decltype(nullptr) = nullptr, typename T>
+KMM_HOST_DEVICE constexpr T checked_rem(T left, T right) {
+    return checked_rem<T, T, T>(left, right);
 }
 
 /// Returns `-input`, throwing on overflow.
@@ -270,7 +302,7 @@ KMM_HOST_DEVICE constexpr T checked_abs(const T& input) {
 }
 
 /// Returns `begin[0] + begin[1] + ... + begin[end - begin]`, throwing on overflow.
-template<typename It, typename U = decltype(+*It())>
+template<typename It, typename U = decltype(*It() + *It())>
 KMM_HOST_DEVICE U checked_sum(It begin, It end, U initial = U(0)) {
     using T = decltype(+*begin);
     U accum = initial;
@@ -290,7 +322,7 @@ KMM_HOST_DEVICE U checked_sum(It begin, It end, U initial = U(0)) {
 }
 
 /// Returns `begin[0] * begin[1] * ... * begin[end - begin]`, throwing on overflow.
-template<typename It, typename U = decltype(+*It())>
+template<typename It, typename U = decltype(*It() * *It())>
 KMM_HOST_DEVICE U checked_product(It begin, It end, U initial = U(1)) {
     using T = decltype(+*begin);
     bool is_valid = true;

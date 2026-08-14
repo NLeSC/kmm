@@ -22,12 +22,18 @@ class Buffer {
     /// `context`) once the last reference to it is dropped. If `fill_value` is non-empty, the
     /// buffer's contents are set to repeated copies of it the first time it is materialized in
     /// any memory.
-    Buffer(Runtime runtime, BufferLayout layout, std::string name, FillValue fill_value = {});
+    Buffer(
+        Runtime runtime,
+        BufferLayout layout,
+        std::string name,
+        FillValue fill_value = {},
+        std::optional<MemoryId> home = {}
+    );
 
     BufferId id() const;
     BufferLayout layout() const;
     Runtime runtime() const;
-    void prefetch(MemoryId memory_id, AccessMode mode = AccessMode::Read) const;
+    void prefetch(MemoryId memory_id, bool invalidate_others = false) const;
     void poison(std::exception_ptr reason) const;
     void invalidate() const;
     void copy_to(void* dest, size_t nbytes, size_t offset = 0) const;

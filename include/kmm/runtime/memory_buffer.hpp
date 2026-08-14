@@ -82,17 +82,17 @@ struct AccessControl {
         epoch_events = std::move(deps);
     }
 
-    void mark_valid(const DeviceEvent& event) noexcept {
-        epoch_events.insert(event);
-        write_events.insert(event);
-        read_events.insert(event);
+    void mark_valid(const DeviceEventSet& events) noexcept {
+        epoch_events.insert(events);
+        write_events.insert(events);
+        read_events.insert(events);
         is_valid = true;
     }
 
-    void mark_allocated_valid(const DeviceEvent& event) noexcept {
+    void mark_allocated_and_valid(const DeviceEventSet& events) noexcept {
         KMM_ASSERT(alloc_count == 0);
         KMM_ASSERT(!is_allocated);
-        mark_valid(event);
+        mark_valid(events);
         is_allocated = true;
     }
 
@@ -120,30 +120,8 @@ struct HostAccessControl: AccessControl {
     // when it started the future.
     std::future<void> pending_future;
 
-    Poll poll_pending_future() {
-        if (pending_future.valid()) {
-            if (pending_future.wait_for(std::chrono::seconds(0)) == std::future_status::timeout) {
-                return Poll::Pending;
-            }
-
-            // will not block but does clear the future and handle any exceptions
-            wait_pending_future();
-        }
-
-        return Poll::Ready;
-    }
-
-    void wait_pending_future() {
-        if (pending_future.valid()) {
-            try {
-                pending_future.get();
-            } catch (...) {
-                pending_future = {};
-                is_valid = false;
-                throw;
-            }
-        }
-    }
+    Poll poll_pending_future();
+    void wait_pending_future();
 };
 
 struct DeviceAccessControl: AccessControl {
@@ -205,11 +183,17 @@ struct MemoryBufferImpl: reference_count<MemoryBufferImpl> {
   public:
     const size_t size_in_bytes;
 
-    MemoryBufferImpl(std::string name, bool evictable, std::unique_ptr<DataInterface> data) :
+    MemoryBufferImpl(
+        std::string name,
+        bool evictable,
+        std::unique_ptr<DataInterface> data,
+        std::optional<MemoryId> home_memory_id = {}
+    ) :
         size_in_bytes(data->size_in_bytes()),
         name(std::move(name)),
         evictable(evictable),
-        data(std::move(data)) {}
+        data(std::move(data)),
+        home_memory_id(home_memory_id) {}
 
     bool is_compatible(MemoryId memory_id, Access mode) noexcept;
     bool try_register_request(BufferQueueNode* req) noexcept;
@@ -261,6 +245,22 @@ struct MemoryBufferImpl: reference_count<MemoryBufferImpl> {
         return false;
     }
 
+    MemoryId find_preferred_location(MemoryId fallback) {
+        if (is_valid(fallback)) {
+            return fallback;
+        }
+
+        if (find_valid_location(fallback, fallback)) {
+            return fallback;
+        }
+
+        if (home_memory_id.has_value()) {
+            return *home_memory_id;
+        }
+
+        return fallback;
+    }
+
     // Strict: `true` if the data has a producer (either data is available or will be available).
     bool is_valid(MemoryId id) {
         return location(id).is_valid;
@@ -270,27 +270,27 @@ struct MemoryBufferImpl: reference_count<MemoryBufferImpl> {
         return location(id).is_allocated;
     }
 
-    AllocResult try_allocate_location(DeviceStream stream_hint, MemoryId dst_id);
+    AllocResult try_allocate_location(const DeviceStreamId& stream_hint, MemoryId dst_id);
 
-    bool allocate_host(DeviceStream stream_hint);
-    bool deallocate_host(DeviceStream stream_hint);
+    bool allocate_host(const DeviceStreamId& stream_hint);
+    bool deallocate_host(const DeviceStreamId& stream_hint);
     void increment_host_users() noexcept;
     void decrement_host_users() noexcept;
 
-    bool try_allocate_device(DeviceStream stream_hint, DeviceId id);
-    bool deallocate_device(DeviceStream stream_hint, DeviceId id, DeviceLRU& lru);
+    AllocResult try_allocate_device(const DeviceStreamId& stream_hint, DeviceId id);
+    bool deallocate_device(const DeviceStreamId& stream_hint, DeviceId id, DeviceLRU& lru);
     void increment_device_users(DeviceId id, DeviceLRU& lru) noexcept;
     void decrement_device_users(DeviceId id, DeviceLRU& lru) noexcept;
 
-    void evict_device(DeviceStream stream_hint, DeviceId id, DeviceLRU& lru);
-    Poll ensure_alloc_valid(DeviceStream stream_hint, MemoryId memory_id);
+    void evict_device(const DeviceStreamId& stream_hint, DeviceId id, DeviceLRU& lru);
+    Poll ensure_alloc_valid(const DeviceStreamId& stream_hint, MemoryId memory_id);
     void invalidate_other_allocs(MemoryId memory_id);
     DeviceEventSet invalidate_all();
 
     // Called once a request's location has been granted, right before the
     // caller is allowed to actually read/write through it.
     Poll before_access(
-        DeviceStream stream_hint,
+        const DeviceStreamId& stream_hint,
         MemoryId memory_id,
         Access mode,
         DeviceEventSet& deps_out
@@ -302,8 +302,8 @@ struct MemoryBufferImpl: reference_count<MemoryBufferImpl> {
 
     // Returns `Pending` (without touching any state) if `src_id` is host and its data is
     // still being produced by an in-flight `pending_future`.
-    Poll poll_copy(DeviceStream stream_hint, MemoryId src_id, MemoryId dst_id);
-    void do_copy(DeviceStream stream_hint, MemoryId src_id, MemoryId dst_id);
+    Poll poll_copy(const DeviceStreamId& stream_hint, MemoryId src_id, MemoryId dst_id);
+    void do_copy(const DeviceStreamId& stream_hint, MemoryId src_id, MemoryId dst_id);
     BufferAccessor accessor(MemoryId memory_id, Access mode);
 
     const std::string name;

@@ -91,6 +91,7 @@ class Reduce<DomainArray<T, DomainT, PolicyT>> {
             }
         } catch (...) {
             buffer.runtime().rollback_reduction(buffer.id());
+            throw;
         }
     }
 

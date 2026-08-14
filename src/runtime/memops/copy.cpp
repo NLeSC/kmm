@@ -33,6 +33,49 @@ static void copy_dim(
     }
 }
 
+static Range<ptrdiff_t> dim_offset_range(
+    ptrdiff_t base_offset,
+    const CopyDim* dims,
+    size_t num_dims,
+    size_t element_size,
+    memops_stride_type CopyDim::*stride_member
+) {
+    ptrdiff_t lo = base_offset;
+    ptrdiff_t hi = base_offset;
+
+    for (size_t i = 0; i < num_dims; i++) {
+        if (dims[i].extent < 1) {
+            return {base_offset, base_offset};
+        }
+
+        ptrdiff_t span = checked_mul<ptrdiff_t>(dims[i].extent - 1, dims[i].*stride_member);
+        lo = checked_add(lo, span < 0 ? span : 0);
+        hi = checked_add(hi, span > 0 ? span : 0);
+    }
+
+    return {lo, checked_add<ptrdiff_t>(hi, element_size)};
+}
+
+Range<ptrdiff_t> CopyDescription::src_range() const {
+    return dim_offset_range(
+        static_cast<ptrdiff_t>(src_offset),
+        dims,
+        num_dims,
+        element_size,
+        &CopyDim::src_stride
+    );
+}
+
+Range<ptrdiff_t> CopyDescription::dst_range() const {
+    return dim_offset_range(
+        static_cast<ptrdiff_t>(dst_offset),
+        dims,
+        num_dims,
+        element_size,
+        &CopyDim::dst_stride
+    );
+}
+
 CopyDescription CopyDescription::simplify() const {
     CopyDescription result = *this;
 
@@ -73,8 +116,8 @@ CopyDescription CopyDescription::simplify() const {
 
 void copy(const void* src_addr, void* dst_addr, const CopyDescription& description) {
     copy_dim(
-        static_cast<const std::byte*>(src_addr),
-        static_cast<std::byte*>(dst_addr),
+        static_cast<const std::byte*>(src_addr) + description.src_offset,
+        static_cast<std::byte*>(dst_addr) + description.dst_offset,
         description.dims,
         description.num_dims,
         description.element_size
@@ -87,6 +130,9 @@ void copy_async(
     void* dst_addr,
     const CopyDescription& description
 ) {
+    src_addr = static_cast<const std::byte*>(src_addr) + description.src_offset;
+    dst_addr = static_cast<std::byte*>(dst_addr) + description.dst_offset;
+
     size_t n = description.num_dims;
     size_t element_size = description.element_size;
 

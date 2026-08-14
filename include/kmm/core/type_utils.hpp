@@ -26,7 +26,7 @@ template<bool Cond, typename TrueT, typename FalseT>
 using conditional_t = typename detail::conditional_type_impl<Cond, TrueT, FalseT>::type;
 
 namespace detail {
-template<bool Cond, typename T>
+template<bool Cond, typename T = void>
 struct enable_if_type_impl {};
 
 template<typename T>
@@ -39,10 +39,16 @@ template<bool Cond, typename T = void>
 using enable_if_t = typename detail::enable_if_type_impl<Cond, T>::type;
 
 template<size_t N, typename... ArgsT>
-using assert_arity_t = enable_if_t<N == sizeof...(ArgsT)>;
+using assert_arity_t = typename detail::enable_if_type_impl<N == sizeof...(ArgsT)>::type;
 
 template<typename T, auto...>
 using identity_t = T;
+
+namespace detail {
+// Usable only in unevaluated contexts (e.g. `decltype`); never defined/called.
+template<typename T>
+T&& declval() noexcept;
+}  // namespace detail
 
 template<auto...>
 using void_t = void;
@@ -130,6 +136,28 @@ template<size_t Axis, size_t... Indices>
 struct drop_index_sequence_helper<Axis, IndexSequence<0, Indices...>> {
     using type = IndexSequence<(Indices < Axis + 1 ? Indices - 1 : Indices)...>;
 };
+
+template<size_t I, size_t J, typename Seq>
+struct swap_index_sequence_helper;
+
+template<size_t I, size_t J, size_t... Indices>
+struct swap_index_sequence_helper<I, J, IndexSequence<Indices...>> {
+    using type = IndexSequence<(Indices == I ? J : (Indices == J ? I : Indices))...>;
+};
+
+constexpr size_t move_axis_to_position_index(size_t p, size_t axis, size_t pos) {
+    // At position p, we get the new axis.
+    // All other axes either shift right (if p in axis...pos) or shift left (p in pos...axis).
+    return p == pos ? axis : p + size_t(axis <= p && p <= pos) - size_t(pos <= p && p <= axis);
+}
+
+template<size_t Axis, size_t Pos, typename Seq>
+struct move_axis_to_position_index_sequence_helper;
+
+template<size_t Axis, size_t Pos, size_t... Ps>
+struct move_axis_to_position_index_sequence_helper<Axis, Pos, IndexSequence<Ps...>> {
+    using type = IndexSequence<move_axis_to_position_index(Ps, Axis, Pos)...>;
+};
 }  // namespace detail
 
 /// Alias for IndexSequence<0, 1, ..., N-1>
@@ -149,6 +177,17 @@ using reverse_index_sequence =
 template<size_t N, size_t Axis>
 using drop_index_sequence =
     typename detail::drop_index_sequence_helper<Axis, make_index_sequence<N>>::type;
+
+/// Alias for IndexSequence<0, 1, ..., N-1> with the values at positions `I` and `J` swapped.
+template<size_t N, size_t I, size_t J>
+using swap_index_sequence =
+    typename detail::swap_index_sequence_helper<I, J, make_index_sequence<N>>::type;
+
+/// Alias for IndexSequence<0, 1, ..., N-1> with axis `Axis` moved to position `Pos`, preserving
+/// the relative order of the other axes.
+template<size_t N, size_t Axis, size_t Pos>
+using move_axis_to_position_index_sequence = typename detail::
+    move_axis_to_position_index_sequence_helper<Axis, Pos, make_index_sequence<N>>::type;
 
 namespace detail {
 template<typename Seq, size_t N>

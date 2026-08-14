@@ -14,6 +14,7 @@
 #include "kmm/runtime/buffer.hpp"
 #include "kmm/runtime/device_event.hpp"
 #include "kmm/runtime/identifiers.hpp"
+#include "kmm/runtime/memops/copy.hpp"
 #include "kmm/runtime/memops/fill.hpp"
 #include "kmm/runtime/requisition.hpp"
 
@@ -57,6 +58,27 @@ class DomainArray: public ArrayBase {
     using move_origin_type = rebind_layout<typename layout_type::move_origin_type>;
     using reverse_axes_type = rebind_layout<typename layout_type::reverse_axes_type>;
 
+    template<size_t... Is>
+    using permute_axes_type =
+        rebind_layout<typename layout_type::template permute_axes_type<Is...>>;
+
+    template<size_t I, size_t J>
+    using swap_axes_type = rebind_layout<typename layout_type::template swap_axes_type<I, J>>;
+
+    using transpose_type = rebind_layout<typename layout_type::transpose_type>;
+
+    template<size_t Axis, size_t Pos>
+    using move_axis_to_position_type =
+        rebind_layout<typename layout_type::template move_axis_to_position_type<Axis, Pos>>;
+
+    template<size_t Axis>
+    using move_axis_to_front_type =
+        rebind_layout<typename layout_type::template move_axis_to_front_type<Axis>>;
+
+    template<size_t Axis>
+    using move_axis_to_back_type =
+        rebind_layout<typename layout_type::template move_axis_to_back_type<Axis>>;
+
     template<size_t Axis>
     using drop_axis_type = rebind_layout<typename layout_type::template drop_axis_type<Axis>>;
 
@@ -77,12 +99,18 @@ class DomainArray: public ArrayBase {
     DomainArray(domain_type domain, policy_type policy = {}) :
         DomainArray(make_layout(domain, policy).normalize_offset()) {}
 
-    DomainArray(Runtime runtime, layout_type layout, std::optional<T> fill_value = std::nullopt) :
+    DomainArray(
+        Runtime runtime,
+        layout_type layout,
+        std::optional<T> fill_value = std::nullopt,
+        std::optional<MemoryId> home = std::nullopt
+    ) :
         ArrayBase(Buffer(
             runtime,
             BufferLayout::for_type<T>(static_cast<size_t>(layout.offset_span().size())),
-            "array",
-            fill_value ? FillValue::from<T>(*fill_value) : FillValue {}
+            "",
+            fill_value ? FillValue::from<T>(*fill_value) : FillValue {},
+            home
         )),
         m_layout(layout.normalize_offset()) {}
 
@@ -90,9 +118,14 @@ class DomainArray: public ArrayBase {
         Runtime runtime,
         domain_type domain,
         policy_type policy = {},
-        std::optional<T> fill_value = std::nullopt
+        std::optional<T> fill_value = std::nullopt,
+        std::optional<MemoryId> home = std::nullopt
     ) :
-        DomainArray(runtime, make_layout(domain, policy), fill_value) {}
+        DomainArray(runtime, make_layout(domain, policy), fill_value, home) {
+        KMM_ASSERT(!domain.is_empty());
+        KMM_ASSERT(!make_layout(domain, policy).is_empty());
+        KMM_ASSERT(!make_layout(domain, policy).offset_span().is_empty());
+    }
 
     template<typename OtherDomainT, typename OtherPolicyT>
     DomainArray(const DomainArray<T, OtherDomainT, OtherPolicyT>& that) :
@@ -218,6 +251,47 @@ class DomainArray: public ArrayBase {
         return {buffer(), m_layout.reverse_axes()};
     }
 
+    /// Returns this array with its axes reordered according to the given permutation, e.g.
+    /// `permute_axes<2, 0, 1>()` moves the current axis 2 to position 0, axis 0 to position 1,
+    /// and axis 1 to position 2.
+    template<size_t... Is>
+    permute_axes_type<Is...> permute_axes(IndexSequence<Is...> seq = {}) const noexcept {
+        return {buffer(), m_layout.template permute_axes<Is...>(seq)};
+    }
+
+    /// Returns this array with axes `I` and `J` swapped.
+    template<size_t I, size_t J>
+    swap_axes_type<I, J> swap_axes() const noexcept {
+        return {buffer(), m_layout.template swap_axes<I, J>()};
+    }
+
+    /// Returns this array with axes 0 and 1 swapped. Only valid for a rank-2 array; use
+    /// `swap_axes` or `permute_axes` for other ranks.
+    transpose_type transpose() const noexcept {
+        return {buffer(), m_layout.transpose()};
+    }
+
+    /// Returns this array with the given axis moved to the given position, preserving the
+    /// relative order of the remaining axes.
+    template<size_t Axis, size_t Pos>
+    move_axis_to_position_type<Axis, Pos> move_axis_to_position() const noexcept {
+        return {buffer(), m_layout.template move_axis_to_position<Axis, Pos>()};
+    }
+
+    /// Returns this array with the given axis moved to the front (position 0), preserving the
+    /// relative order of the remaining axes.
+    template<size_t Axis>
+    move_axis_to_front_type<Axis> move_axis_to_front() const noexcept {
+        return {buffer(), m_layout.template move_axis_to_front<Axis>()};
+    }
+
+    /// Returns this array with the given axis moved to the back (position `rank - 1`),
+    /// preserving the relative order of the remaining axes.
+    template<size_t Axis>
+    move_axis_to_back_type<Axis> move_axis_to_back() const noexcept {
+        return {buffer(), m_layout.template move_axis_to_back<Axis>()};
+    }
+
     /// Returns this array with the given axis sliced according to the given slice token (e.g.
     /// `all`, a `Range`, `new_axis`).
     template<size_t Axis, typename SliceT>
@@ -281,8 +355,10 @@ class LaunchArgArray {
 
     void release(Runtime& runtime, Requisition& req) {}
 
-  private:
+  protected:
     DomainArray<T, DomainT, PolicyT> m_array;
+
+  private:
     size_t m_index = 0;
 };
 
@@ -305,13 +381,28 @@ class LaunchArg<Read<DomainArray<T, DomainT, PolicyT>>>:
         detail::LaunchArgArray<T, DomainT, PolicyT, AccessMode::Read>(arg.value) {}
 };
 
-/// Read-write access to a `DomainArray` wrapped in `write(...)`.
+/// Read-write access to a `DomainArray` wrapped in `write(...)`. If `arg.value` is not yet
+/// allocated (i.e. it has no backing buffer, only a layout), a new array is allocated on `runtime`
+/// during `acquire()` and assigned back to `arg.value`, so the caller observes the allocation too.
 template<typename T, typename DomainT, typename PolicyT>
 class LaunchArg<Write<DomainArray<T, DomainT, PolicyT>>>:
     public detail::LaunchArgArray<T, DomainT, PolicyT, AccessMode::ReadWrite> {
   public:
     explicit LaunchArg(Write<DomainArray<T, DomainT, PolicyT>> arg) :
-        detail::LaunchArgArray<T, DomainT, PolicyT, AccessMode::ReadWrite>(arg.value) {}
+        detail::LaunchArgArray<T, DomainT, PolicyT, AccessMode::ReadWrite>(arg.value),
+        m_target(&arg.value) {}
+
+    void acquire(Runtime& runtime, Requisition& req) {
+        if (!*m_target) {
+            *m_target = DomainArray<T, DomainT, PolicyT>(runtime, m_target->layout());
+            this->m_array = *m_target;
+        }
+
+        detail::LaunchArgArray<T, DomainT, PolicyT, AccessMode::ReadWrite>::acquire(runtime, req);
+    }
+
+  private:
+    DomainArray<T, DomainT, PolicyT>* m_target;
 };
 
 }  // namespace kmm

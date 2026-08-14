@@ -5,6 +5,8 @@
 #include <memory>
 #include <vector>
 
+#include "device_data_streams.hpp"
+
 #include "kmm/runtime/allocators/managed.hpp"
 #include "kmm/runtime/buffer.hpp"
 #include "kmm/runtime/device_event.hpp"
@@ -27,7 +29,7 @@ class DataInterface {
     /// when the buffer is safe to be used.
     virtual AllocResult allocate(
         MemoryId memory_id,
-        DeviceStream stream_hint,
+        const DeviceStreamId& stream_hint,
         DeviceEventSet& deps_out
     ) = 0;
 
@@ -35,7 +37,7 @@ class DataInterface {
     /// the deallocation should happen.
     virtual void deallocate(
         MemoryId memory_id,
-        DeviceStream stream_hint,
+        const DeviceStreamId& stream_hint,
         const DeviceEventSet& deps
     ) = 0;
 
@@ -46,11 +48,12 @@ class DataInterface {
     /// Copy data from the given `src` to `dst` memory. The given dependencies indicate
     /// when the copy should be performed. The caller must have called `allocate` on both
     /// the `src` and `dst` in the past.
-    virtual DeviceEvent copy(
+    virtual void copy(
         MemoryId src,
         MemoryId dst,
-        DeviceStream stream_hint,
-        const DeviceEventSet& deps
+        const DeviceStreamId& stream_hint,
+        const DeviceEventSet& deps_in,
+        DeviceEventSet& deps_out
     ) = 0;
 
     /// Indicate if copying data from `src` to `dst` is supported.
@@ -60,7 +63,7 @@ class DataInterface {
     /// dependencies complete. This is just a hint, useful for `cudaMemPrefetchAsync`.
     virtual void hint_access(
         MemoryId memory_id,
-        DeviceStream stream_hint,
+        const DeviceStreamId& stream_hint,
         const DeviceEventSet& deps
     ) {}
 
@@ -73,7 +76,7 @@ class DataInterface {
     /// Initialize the buffer on the GPU.
     virtual DeviceEvent initialize_device(
         DeviceId memory_id,
-        DeviceStream stream_hint,
+        const DeviceStreamId& stream_hint,
         const DeviceEventSet& deps
     ) {
         return DeviceEvent::null();
@@ -85,18 +88,24 @@ class DataInterface {
     virtual AllocResult allocate_and_copy(
         MemoryId src,
         MemoryId dst,
-        DeviceStream stream_hint,
+        const DeviceStreamId& stream_hint,
         const DeviceEventSet& deps_in,
-        DeviceEvent& dep_out
+        DeviceEventSet& deps_out
     ) {
         DeviceEventSet deps;
-        if (allocate(dst, stream_hint, deps) == AllocResult::Success) {
-            deps.insert(deps_in);
-            dep_out = copy(src, dst, stream_hint, deps);
-            return AllocResult::Success;
-        } else {
-            return AllocResult::ErrorOutOfMemory;
+        auto result = allocate(dst, stream_hint, deps);
+
+        if (result == AllocResult::Success) {
+            try {
+                deps.insert(deps_in);
+                copy(src, dst, stream_hint, deps, deps_out);
+            } catch (...) {
+                deallocate(dst, stream_hint, deps);
+                throw;
+            }
         }
+
+        return result;
     }
 };
 
@@ -115,33 +124,115 @@ class FlatDataInterface final: public DataInterface {
 
     size_t size_in_bytes() const override;
 
-    AllocResult allocate(MemoryId memory_id, DeviceStream stream_hint, DeviceEventSet& deps_out)
-        override;
-    void deallocate(MemoryId memory_id, DeviceStream stream_hint, const DeviceEventSet& deps)
-        override;
-    void* address(MemoryId memory_id) const override;
+    AllocResult allocate(  //
+        MemoryId memory_id,
+        const DeviceStreamId& stream_hint,
+        DeviceEventSet& deps_out
+    ) override;
 
-    DeviceEvent copy(
-        MemoryId src,
-        MemoryId dst,
-        DeviceStream stream_hint,
+    void deallocate(  //
+        MemoryId memory_id,
+        const DeviceStreamId& stream_hint,
         const DeviceEventSet& deps
     ) override;
+
+    void* address(  //
+        MemoryId memory_id
+    ) const override;
+
     bool is_copy_supported(MemoryId src, MemoryId dst) override;
 
+    void copy(
+        MemoryId src,
+        MemoryId dst,
+        const DeviceStreamId& stream_hint,
+        const DeviceEventSet& deps_in,
+        DeviceEventSet& deps_out
+    ) override;
+
     std::future<void> initialize_host(const DeviceEventSet& deps) override;
+
     DeviceEvent initialize_device(
         DeviceId memory_id,
-        DeviceStream stream_hint,
+        const DeviceStreamId& stream_hint,
         const DeviceEventSet& deps
+    ) override;
+
+    AllocResult allocate_and_copy(
+        MemoryId src,
+        MemoryId dst,
+        const DeviceStreamId& stream_hint,
+        const DeviceEventSet& deps_in,
+        DeviceEventSet& deps_out
     ) override;
 
   private:
     BufferLayout m_layout;
     refcnt_ptr<MemorySystem> m_system;
+    DeviceEventRegistry m_events;
     FillValue m_fill_value;
     void* m_host_ptr = nullptr;
     CUdeviceptr m_device_ptrs[MAX_DEVICES] {};
+};
+
+/// A `DataInterface` that always lives in a single pinned host allocation
+class HostDataInterface final: public DataInterface {
+  public:
+    /// If `fill_value` is non-empty, the buffer is filled with copies of it the first time it is
+    /// materialized (see `initialize_host`/`initialize_device`).
+    HostDataInterface(
+        BufferLayout layout,
+        refcnt_ptr<MemorySystem> system,
+        FillValue fill_value = {}
+    );
+
+    size_t size_in_bytes() const override;
+
+    AllocResult allocate(  //
+        MemoryId memory_id,
+        const DeviceStreamId& stream_hint,
+        DeviceEventSet& deps_out
+    ) override;
+
+    void deallocate(  //
+        MemoryId memory_id,
+        const DeviceStreamId& stream_hint,
+        const DeviceEventSet& deps
+    ) override;
+
+    void* address(  //
+        MemoryId memory_id
+    ) const override;
+
+    bool is_copy_supported(MemoryId src, MemoryId dst) override;
+
+    void copy(
+        MemoryId src,
+        MemoryId dst,
+        const DeviceStreamId& stream_hint,
+        const DeviceEventSet& deps_in,
+        DeviceEventSet& deps_out
+    ) override;
+
+    std::future<void> initialize_host(const DeviceEventSet& deps) override;
+
+    DeviceEvent initialize_device(
+        DeviceId memory_id,
+        const DeviceStreamId& stream_hint,
+        const DeviceEventSet& deps
+    ) override;
+
+  private:
+    void fill_host_buffer(const DeviceEventSet& deps);
+
+    BufferLayout m_layout;
+    refcnt_ptr<MemorySystem> m_system;
+    DeviceEventRegistry m_events;
+    FillValue m_fill_value;
+    void* m_host_ptr = nullptr;
+    size_t m_refcount = 0;
+    DeviceEventSet m_alloc_deps;
+    DeviceEventSet m_dealloc_deps;
 };
 
 }  // namespace kmm

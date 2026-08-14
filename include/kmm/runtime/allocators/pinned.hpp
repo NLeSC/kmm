@@ -4,9 +4,9 @@
 
 namespace kmm {
 
-class PinnedMemoryAllocator: public SyncAllocator {
+class PinnedMemoryAllocator: public Allocator {
   public:
-    PinnedMemoryAllocator(CUcontext context, size_t max_bytes = std::numeric_limits<size_t>::max());
+    PinnedMemoryAllocator(CUcontext context);
 
     AllocResult allocate(BufferLayout layout, void** addr_out) override final;
     void deallocate(void* addr, BufferLayout layout) override final;

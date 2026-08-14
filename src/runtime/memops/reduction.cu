@@ -1,3 +1,4 @@
+#include <cstddef>
 #include <cstdint>
 #include <cub/cub.cuh>
 #include <limits>
@@ -151,6 +152,9 @@ void run_reduce(
     ReduceOp op,
     T identity
 ) {
+    src_addr = static_cast<const std::byte*>(src_addr) + description.input_offset;
+    dst_addr = static_cast<std::byte*>(dst_addr) + description.output_offset;
+
     auto element_size = static_cast<memops_stride_type>(sizeof(T));
 
     // CUB's segmented reduce only understands contiguous segments, so the reduction axis must be
@@ -308,6 +312,10 @@ void reduce_async(
     void* dst_addr,
     const ReductionDescription& description
 ) {
+    if (description.is_equivalent_to_copy()) {
+        return copy_async(stream, src_addr, dst_addr, description.as_copy());
+    }
+
     switch (description.dtype) {
         case DataType::Int8:
             return reduce_typed_async<int8_t>(

@@ -2,6 +2,7 @@
 
 #include "kmm/core/bounds.hpp"
 #include "kmm/core/const_value.hpp"
+#include "kmm/core/fshape.hpp"
 #include "kmm/core/point.hpp"
 #include "kmm/core/range.hpp"
 #include "kmm/core/shape.hpp"
@@ -21,162 +22,18 @@ struct new_axis_t {
 constexpr static new_axis_t new_axis = new_axis_t();
 
 namespace detail {
-template<typename T>
-struct domain_traits;
 
-template<size_t N, typename IndexT>
-struct domain_traits<Shape<N, IndexT>> {
-    static constexpr size_t rank = N;
-    using index_type = IndexT;
-    using domain_type = Shape<N, index_type>;
+template<typename PolicyT, typename DomainT>
+struct policy_traits;
 
-    KMM_HOST_DEVICE
-    static constexpr Range<index_type> bounds(const domain_type& domain, size_t axis) {
-        return {static_cast<index_type>(0), domain[axis]};
-    }
-
-    KMM_HOST_DEVICE
-    static constexpr index_type extent(const domain_type& domain, size_t axis) {
-        return domain[axis];
-    }
-
-    template<size_t Axis>
-    using slice_axis_type = Shape<N, index_type>;
-
-    template<size_t Axis>
-    KMM_HOST_DEVICE static constexpr slice_axis_type<Axis> slice_axis(
-        domain_type domain,
-        index_type begin,
-        index_type end
-    ) {
-        domain[Axis] = end - begin;
-        return domain;
-    }
-    template<size_t Axis>
-    using drop_axis_type = Shape<N - 1, index_type>;
-
-    template<size_t Axis>
-    KMM_HOST_DEVICE static constexpr drop_axis_type<Axis> drop_axis(const domain_type& domain) {
-        return permute_axes(domain, drop_index_sequence<rank, Axis>());
-    }
-
-    using reverse_axes_type = Shape<N, index_type>;
-
-    KMM_HOST_DEVICE static constexpr reverse_axes_type reverse_axes(const domain_type& domain) {
-        return permute_axes(domain, reverse_index_sequence<rank>());
-    }
-
-    template<size_t Axis>
-    using insert_axis_type = Shape<N + 1, index_type>;
-
-    template<size_t Axis>
-    KMM_HOST_DEVICE static constexpr insert_axis_type<Axis> insert_axis(
-        const domain_type& domain,
-        index_type extent
-    ) {
-        insert_axis_type<Axis> result;
-
-        for (size_t i = 0; is_less(i, Axis); i++) {
-            result[i] = domain[i];
-        }
-
-        result[Axis] = extent;
-
-        for (size_t i = Axis; is_less(i, N); i++) {
-            result[i + 1] = domain[i];
-        }
-
-        return result;
-    }
-
-  private:
-    template<size_t... Is>
-    KMM_HOST_DEVICE static constexpr Shape<sizeof...(Is), index_type>
-    permute_axes(const domain_type& domain, IndexSequence<Is...>) {
-        return {domain[Is]...};
-    }
-};
-
-template<size_t N, typename IndexT>
-struct domain_traits<Bounds<N, IndexT>> {
-    static constexpr size_t rank = N;
-    using index_type = IndexT;
-    using domain_type = Bounds<N, index_type>;
-    template<size_t Axis>
-    using drop_axis_type = Bounds<N - 1, index_type>;
-    using reverse_axes_type = Bounds<N, index_type>;
-
-    KMM_HOST_DEVICE
-    static constexpr Range<index_type> bounds(const domain_type& domain, size_t axis) {
-        return domain[axis];
-    }
-
-    KMM_HOST_DEVICE
-    static constexpr index_type extent(const domain_type& domain, size_t axis) {
-        return domain[axis].size();
-    }
-
-    template<size_t Axis>
-    using slice_axis_type = Bounds<N, index_type>;
-
-    // Shifts the axis's range by `-begin` and truncates it to length `end - begin`, so the
-    // returned domain is locally zero-based at this axis; the caller is responsible for
-    // folding the absolute shift into a storage offset.
-    template<size_t Axis>
-    KMM_HOST_DEVICE static constexpr slice_axis_type<Axis> slice_axis(
-        domain_type domain,
-        index_type begin,
-        index_type end
-    ) {
-        domain[Axis] = Range<index_type> {end - begin};
-        return domain;
-    }
-
-    template<size_t Axis>
-    KMM_HOST_DEVICE static constexpr drop_axis_type<Axis> drop_axis(const domain_type& domain) {
-        return permute_axes(domain, drop_index_sequence<rank, Axis>());
-    }
-
-    KMM_HOST_DEVICE static constexpr reverse_axes_type reverse_axes(const domain_type& domain) {
-        return permute_axes(domain, reverse_index_sequence<rank>());
-    }
-
-    template<size_t Axis>
-    using insert_axis_type = Bounds<N + 1, index_type>;
-
-    template<size_t Axis>
-    KMM_HOST_DEVICE static constexpr insert_axis_type<Axis> insert_axis(
-        const domain_type& domain,
-        index_type extent
-    ) {
-        insert_axis_type<Axis> result;
-
-        for (size_t i = 0; is_less(i, Axis); i++) {
-            result[i] = domain[i];
-        }
-
-        result[Axis] = Range<index_type>(extent);
-
-        for (size_t i = Axis; is_less(i, N); i++) {
-            result[i + 1] = domain[i];
-        }
-
-        return result;
-    }
-
-  private:
-    template<size_t... Is>
-    KMM_HOST_DEVICE static constexpr Bounds<sizeof...(Is), index_type>
-    permute_axes(const domain_type& domain, IndexSequence<Is...>) {
-        return {domain[Is]...};
-    }
-};
-
-template<typename T>
+template<
+    typename PolicyT,
+    typename DomainT,
+    typename MappingT = typename policy_traits<PolicyT, DomainT>::mapping_type>
 struct mapping_traits;
 
-template<typename... StridesT>
-struct mapping_traits<Strides<StridesT...>> {
+template<typename PolicyT, typename DomainT, typename... StridesT>
+struct mapping_traits<PolicyT, DomainT, Strides<StridesT...>> {
     static constexpr size_t rank = sizeof...(StridesT);
     using mapping_type = Strides<StridesT...>;
     using stride_type = default_stride_type;
@@ -195,10 +52,10 @@ struct mapping_traits<Strides<StridesT...>> {
     }
 
     template<typename Seq>
-    struct permute_axis_helper;
+    struct unpack_sequence_helper;
 
     template<size_t... Is>
-    struct permute_axis_helper<IndexSequence<Is...>> {
+    struct unpack_sequence_helper<IndexSequence<Is...>> {
         using type = Strides<typename mapping_type::template axis_stride_type<Is>...>;
 
         KMM_HOST_DEVICE
@@ -208,19 +65,21 @@ struct mapping_traits<Strides<StridesT...>> {
     };
 
     template<size_t Axis>
-    using drop_axis_type = typename permute_axis_helper<drop_index_sequence<rank, Axis>>::type;
+    using drop_axis_type = typename unpack_sequence_helper<drop_index_sequence<rank, Axis>>::type;
 
     template<size_t Axis>
     KMM_HOST_DEVICE static constexpr drop_axis_type<Axis> drop_axis(const mapping_type& mapping) {
         static_assert(Axis < rank, "axis out of bounds");
-        return permute_axis_helper<drop_index_sequence<rank, Axis>>::apply(mapping);
+        return unpack_sequence_helper<drop_index_sequence<rank, Axis>>::apply(mapping);
     }
 
-    using reverse_axes_type = typename permute_axis_helper<reverse_index_sequence<rank>>::type;
+    template<size_t... Is>
+    using permute_axes_type = Strides<typename mapping_type::template axis_stride_type<Is>...>;
 
-    KMM_HOST_DEVICE
-    static constexpr reverse_axes_type reverse_axes(const mapping_type& mapping) {
-        return permute_axis_helper<reverse_index_sequence<rank>>::apply(mapping);
+    template<size_t... Is>
+    KMM_HOST_DEVICE static constexpr permute_axes_type<Is...>
+    permute_axes(const mapping_type& mapping, IndexSequence<Is...>) {
+        return permute_axes_type<Is...> {mapping.get(ConstIndex<Is>())...};
     }
 
     template<size_t Axis, typename Before, typename After>
@@ -521,7 +380,6 @@ class Layout {
     using self_type = Layout<DomainT, PolicyT>;
     using domain_type = DomainT;
     using policy_type = PolicyT;
-    using mapping_type = typename detail::policy_traits<policy_type, domain_type>::mapping_type;
 
     using domain_traits = detail::domain_traits<domain_type>;
     static constexpr size_t rank = domain_traits::rank;
@@ -531,7 +389,8 @@ class Layout {
     using range_type = Range<index_type>;
     using bounds_type = Bounds<rank, index_type>;
 
-    using mapping_traits = detail::mapping_traits<mapping_type>;
+    using mapping_traits = detail::mapping_traits<policy_type, domain_type>;
+    using mapping_type = typename mapping_traits::mapping_type;
     static_assert(mapping_traits::rank == rank, "domain and mapping must have the same rank");
     using stride_type = typename mapping_traits::stride_type;
     using ndstrides_type = Vec<stride_type, rank>;
@@ -549,9 +408,39 @@ class Layout {
         typename domain_traits::template insert_axis_type<Axis>,
         typename mapping_traits::template insert_axis_type<Axis>>;
 
-    using reverse_axes_type = Layout<  //
-        typename domain_traits::reverse_axes_type,
-        typename mapping_traits::reverse_axes_type>;
+    template<size_t... Is>
+    using permute_axes_type = Layout<  //
+        typename domain_traits::template permute_axes_type<Is...>,
+        typename mapping_traits::template permute_axes_type<Is...>>;
+
+  private:
+    template<typename Seq>
+    struct permute_axes_seq_type_helper;
+
+    template<size_t... Is>
+    struct permute_axes_seq_type_helper<IndexSequence<Is...>> {
+        using type = permute_axes_type<Is...>;
+    };
+
+  public:
+    using reverse_axes_type =
+        typename permute_axes_seq_type_helper<reverse_index_sequence<rank>>::type;
+
+    template<size_t I, size_t J>
+    using swap_axes_type =
+        typename permute_axes_seq_type_helper<swap_index_sequence<rank, I, J>>::type;
+
+    using transpose_type = swap_axes_type<0, 1>;
+
+    template<size_t Axis, size_t Pos>
+    using move_axis_to_position_type = typename permute_axes_seq_type_helper<
+        move_axis_to_position_index_sequence<rank, Axis, Pos>>::type;
+
+    template<size_t Axis>
+    using move_axis_to_front_type = move_axis_to_position_type<Axis, 0>;
+
+    template<size_t Axis>
+    using move_axis_to_back_type = move_axis_to_position_type<Axis, rank - 1>;
 
     template<size_t Axis, typename SliceT>
     using slice_axis_type = typename detail::slice_axis_impl<self_type, Axis, SliceT>::type;
@@ -872,12 +761,60 @@ class Layout {
             m_base_offset};
     }
 
+    /// Returns this layout with its axes reordered according to the given permutation, e.g.
+    /// `permute_axes<2, 0, 1>()` moves the current axis 2 to position 0, axis 0 to position 1,
+    /// and axis 1 to position 2.
+    template<size_t... Is>
+    KMM_HOST_DEVICE permute_axes_type<Is...> permute_axes(IndexSequence<Is...> = {})
+        const noexcept {
+        static_assert(sizeof...(Is) == rank, "permutation must contain exactly `rank` axes");
+        static_assert(is_permutation<IndexSequence<Is...>>, "must be a valid permutation of axes");
+
+        return permute_axes_type<Is...> {
+            domain_traits::template permute_axes<Is...>(domain(), IndexSequence<Is...> {}),
+            mapping_traits::template permute_axes<Is...>(mapping(), IndexSequence<Is...> {}),
+            m_base_offset};
+    }
+
     /// Returns this layout with the order of all axes reversed.
     KMM_HOST_DEVICE reverse_axes_type reverse_axes() const noexcept {
-        return reverse_axes_type {
-            domain_traits::reverse_axes(domain()),
-            mapping_traits::reverse_axes(mapping()),
-            m_base_offset};
+        return permute_axes(reverse_index_sequence<rank>());
+    }
+
+    /// Returns this layout with axes `I` and `J` swapped.
+    template<size_t I, size_t J>
+    KMM_HOST_DEVICE swap_axes_type<I, J> swap_axes() const noexcept {
+        static_assert(I < rank && J < rank, "axis out of bounds");
+        return permute_axes(swap_index_sequence<rank, I, J>());
+    }
+
+    /// Returns this layout with axes 0 and 1 swapped. Only valid for a rank-2 layout; use
+    /// `swap_axes` or `permute_axes` for other ranks.
+    KMM_HOST_DEVICE transpose_type transpose() const noexcept {
+        static_assert(rank == 2, "transpose() requires a rank-2 layout");
+        return swap_axes<0, 1>();
+    }
+
+    /// Returns this layout with the given axis moved to the given position, preserving the
+    /// relative order of the remaining axes.
+    template<size_t Axis, size_t Pos>
+    KMM_HOST_DEVICE move_axis_to_position_type<Axis, Pos> move_axis_to_position() const noexcept {
+        static_assert(Axis < rank && Pos < rank, "axis out of bounds");
+        return permute_axes(move_axis_to_position_index_sequence<rank, Axis, Pos>());
+    }
+
+    /// Returns this layout with the given axis moved to the front (position 0), preserving the
+    /// relative order of the remaining axes.
+    template<size_t Axis>
+    KMM_HOST_DEVICE move_axis_to_front_type<Axis> move_axis_to_front() const noexcept {
+        return move_axis_to_position<Axis, 0>();
+    }
+
+    /// Returns this layout with the given axis moved to the back (position `rank - 1`),
+    /// preserving the relative order of the remaining axes.
+    template<size_t Axis>
+    KMM_HOST_DEVICE move_axis_to_back_type<Axis> move_axis_to_back() const noexcept {
+        return move_axis_to_position<Axis, rank - 1>();
     }
 
     /// Returns this layout with the given axis sliced according to the given slice token (e.g. `all`, a `Range`, `new_axis`).

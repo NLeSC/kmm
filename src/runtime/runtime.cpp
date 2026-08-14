@@ -5,6 +5,7 @@
 
 #include "kmm/core/macros.hpp"
 #include "kmm/runtime/data_interface.hpp"
+#include "kmm/runtime/device_data_streams.hpp"
 #include "kmm/runtime/memory_buffer.hpp"
 #include "kmm/runtime/reduction_manager.hpp"
 #include "kmm/runtime/requisition.hpp"
@@ -13,6 +14,9 @@
 namespace kmm {
 
 struct BufferEntry {
+    KMM_NOT_COPYABLE(BufferEntry)
+
+  public:
     MemoryBuffer buffer;
     std::exception_ptr poison = nullptr;
     ReductionState reduction;
@@ -31,14 +35,24 @@ class RuntimeImpl: public reference_count<RuntimeImpl> {
     KMM_NOT_COPYABLE_OR_MOVABLE(RuntimeImpl)
 
   public:
-    RuntimeImpl(size_t host_memory_limit, size_t device_memory_limit) :
-        memory_system(make_refcnt<MemorySystem>(
-            system_info,
-            &stream_registry,
-            host_memory_limit,
-            device_memory_limit
-        )),
+    RuntimeImpl(const RuntimeConfig& config) :
+        system_info {},
+        memory_system {std::make_unique<MemorySystem>(system_info, event_registry, config)},
         reduction_manager(memory_manager, memory_system) {}
+
+    // Buffers are normally released one at a time via `Runtime::release_buffer`, but any that
+    // are still outstanding when the runtime itself is torn down need to be released here too:
+    // otherwise `buffers` would just drop its `MemoryBuffer` refs, and their host/device
+    // allocations would never go through `MemoryManager::release_buffer`.
+    ~RuntimeImpl() {
+        for (auto& [id, entry] : buffers) {
+            if (entry.reduction) {
+                reduction_manager.release_reduction(entry.reduction);
+            }
+
+            memory_manager.release_buffer(std::move(entry.buffer));
+        }
+    }
 
     BufferEntry& find_entry(BufferId id) {
         auto it = buffers.find(id);
@@ -71,7 +85,7 @@ class RuntimeImpl: public reference_count<RuntimeImpl> {
         auto now = std::chrono::system_clock::now();
 
         if (now >= next_poll_deadline) {
-            stream_registry.make_progress();
+            event_registry.make_progress();
             memory_system->make_progress();
             memory_manager.make_progress();
 
@@ -98,10 +112,10 @@ class RuntimeImpl: public reference_count<RuntimeImpl> {
         }
     }
 
-    SystemInfo system_info;
+    const SystemInfo system_info;
 
     std::mutex mutex;
-    DeviceStreamRegistry stream_registry;
+    DeviceEventRegistry event_registry;
     refcnt_ptr<MemorySystem> memory_system;
     MemoryManager memory_manager;
     ReductionManager reduction_manager;
@@ -110,15 +124,18 @@ class RuntimeImpl: public reference_count<RuntimeImpl> {
     std::chrono::system_clock::time_point next_poll_deadline;
 };
 
-Runtime::Runtime(size_t host_memory_limit, size_t device_memory_limit) :
-    m_impl(make_refcnt<RuntimeImpl>(host_memory_limit, device_memory_limit)) {}
+KMM_REFCNT_TRAITS_IMPL(RuntimeImpl)
+
+Runtime::Runtime(refcnt_ptr<RuntimeImpl> impl) : m_impl(std::move(impl)) {
+    KMM_ASSERT(m_impl);
+}
 
 MemorySystem& Runtime::memory_system() noexcept {
     return *m_impl->memory_system;
 }
 
-DeviceStreamRegistry& Runtime::stream_registry() noexcept {
-    return m_impl->stream_registry;
+DeviceEventRegistry& Runtime::event_registry() noexcept {
+    return m_impl->event_registry;
 }
 
 const SystemInfo& Runtime::system_info() const noexcept {
@@ -150,26 +167,40 @@ bool Runtime::poll_until_completion(
 }
 
 void Runtime::synchronize(const DeviceEvent& e) {
-    poll_until_completion([&] { return e.is_ready(); });
+    poll_until_completion([&] { return m_impl->event_registry.is_ready(e); });
 }
 
 void Runtime::synchronize(const DeviceEventSet& events) {
     for (const auto& e : events) {
-        if (!e.is_ready()) {
+        if (!m_impl->event_registry.is_ready(e)) {
             synchronize(e);
         }
     }
 }
 
-BufferId Runtime::create_buffer(BufferLayout layout, std::string name, FillValue fill_value) {
+void Runtime::synchronize() {
+    poll_until_completion([&] { return m_impl->event_registry.is_all_ready(); });
+}
+
+BufferId Runtime::create_buffer(
+    BufferLayout layout,
+    std::string name,
+    FillValue fill_value,
+    std::optional<MemoryId> home
+) {
     std::lock_guard<std::mutex> guard(m_impl->mutex);
 
     auto system = refcnt_ptr<MemorySystem>(m_impl->memory_system.get(), true);
     auto data =
         std::make_unique<FlatDataInterface>(layout, std::move(system), std::move(fill_value));
-    auto buffer = m_impl->memory_manager.create_buffer(std::move(data), std::move(name));
-
     auto id = BufferId(m_impl->next_buffer_id_counter++);
+
+    if (name.empty()) {
+        name = std::to_string(id.get());
+    }
+
+    auto buffer =
+        m_impl->memory_manager.create_buffer(std::move(data), std::move(name), true, home);
     m_impl->buffers.emplace(id, std::move(buffer));
     return id;
 }
@@ -274,8 +305,7 @@ void Runtime::release_buffer(BufferId id) {
     std::lock_guard<std::mutex> guard(m_impl->mutex);
 
     auto it = m_impl->buffers.find(id);
-    auto entry = std::move(it->second);
-    m_impl->buffers.erase(it);
+    auto& entry = it->second;
 
     if (entry.reduction) {
         // If the reduction was submitted, we need to release it.
@@ -283,16 +313,21 @@ void Runtime::release_buffer(BufferId id) {
     }
 
     m_impl->memory_manager.release_buffer(std::move(entry.buffer));
+    m_impl->buffers.erase(it);
 }
 
-void Runtime::submit(Requisition& req) {
+void Runtime::submit(std::optional<CUDAStreamRef> stream, Requisition& req) {
     std::unique_lock<std::mutex> guard(m_impl->mutex);
     KMM_ASSERT(req.m_state == RequisitionState::Building);
 
-    auto transaction = m_impl->memory_manager.create_transaction(req.m_parent);
+    auto stream_id = DeviceStreamId::null();
 
-    DeviceStream stream_hint = {};
-    KMM_ASSERT(!stream_hint.is_null());
+    if (stream.has_value()) {
+        stream_id = m_impl->event_registry.lookup_or_register_stream(*stream);
+        req.m_stream = stream_id;
+    }
+
+    req.m_transaction = m_impl->memory_manager.create_transaction(req.m_parent);
 
     for (size_t i = 0; i < req.m_entries.size(); i++) {
         auto& it = req.m_entries[i];
@@ -312,14 +347,14 @@ void Runtime::submit(Requisition& req) {
                 auto partial = m_impl->reduction_manager.acquire_partial(  //
                     entry.reduction,
                     it.memory_id,
-                    stream_hint
+                    stream_id
                 );
 
                 it.request = m_impl->memory_manager.create_request(  //
                     partial,
                     it.memory_id,
                     Access::Exclusive,
-                    transaction
+                    req.m_transaction
                 );
             } else {
                 if (entry.reduction) {
@@ -336,7 +371,7 @@ void Runtime::submit(Requisition& req) {
                     entry.buffer,
                     it.memory_id,
                     access,
-                    transaction
+                    req.m_transaction
                 );
             }
         } catch (...) {
@@ -356,7 +391,7 @@ void Runtime::submit(Requisition& req) {
         bool is_ready = true;
 
         for (auto& entry : req.m_entries) {
-            if (m_impl->memory_manager.poll_request(stream_hint, entry.request, req.m_deps)
+            if (m_impl->memory_manager.poll_request(stream_id, entry.request, req.m_deps)
                 == Poll::Pending) {
                 is_ready = false;
             }
@@ -364,6 +399,16 @@ void Runtime::submit(Requisition& req) {
 
         return is_ready;
     });
+
+    if (stream_id.is_null()) {
+        for (const auto& dep : req.m_deps) {
+            m_impl->poll_until_completion(guard, [&] {
+                return m_impl->event_registry.is_ready(dep);
+            });
+        }
+    } else {
+        m_impl->event_registry.wait_on_event(stream_id, req.m_deps);
+    }
 
     req.m_state = RequisitionState::Ready;
 }
@@ -378,19 +423,173 @@ void Runtime::release(Requisition& req, DeviceEventSet deps) {
     KMM_ASSERT(req.m_state != RequisitionState::Released);
     req.m_state = RequisitionState::Released;
 
-    if (!req.m_stream.is_null()) {
-        req.m_stream.wait_on_default_stream();
-        deps.insert(req.m_stream.record_event());
-    }
+    deps.insert(req.m_deps);
 
-    deps.insert(req.dependencies());
+    if (req.m_stream) {
+        m_impl->event_registry.wait_on_default_stream(*req.m_stream);
+        deps.insert(m_impl->event_registry.record(*req.m_stream));
+    }
 
     for (auto& entry : req.m_entries) {
         m_impl->find_entry(entry.buffer_id).record_access(entry.memory_id, entry.mode, deps);
         m_impl->memory_manager.release_request(std::move(entry.request), deps);
     }
+
+    req.m_stream = std::nullopt;
 }
 
-KMM_REFCNT_TRAITS_IMPL(RuntimeImpl)
+static DeviceEvent do_copy(
+    std::unique_lock<std::mutex>& guard,
+    RuntimeImpl* impl,
+    BufferAccessor dst_access,
+    BufferAccessor src_access,
+    const CopyDescription& description,
+    const DeviceEventSet& deps
+) {
+    KMM_ASSERT(range(dst_access.size_in_bytes).contains(description.dst_range()));
+    KMM_ASSERT(range(src_access.size_in_bytes).contains(description.src_range()));
+
+    auto dst_memory_id = dst_access.memory_id;
+    auto src_memory_id = src_access.memory_id;
+
+    DeviceStreamId stream_hint;
+    DeviceEvent event;
+
+    if (dst_memory_id.is_device() && src_memory_id.is_device()) {
+        event = impl->memory_system->copy_device_to_device(
+            src_memory_id.as_device(),
+            dst_memory_id.as_device(),
+            CUdeviceptr(src_access.address) + description.src_offset,
+            CUdeviceptr(dst_access.address) + description.dst_offset,
+            description.element_size,
+            stream_hint,
+            deps
+        );
+    } else if (dst_memory_id.is_device() && src_memory_id.is_host()) {
+        event = impl->memory_system->copy_host_to_device(
+            dst_memory_id.as_device(),
+            reinterpret_cast<const std::byte*>(src_access.address) + description.src_offset,
+            CUdeviceptr(dst_access.address) + description.dst_offset,
+            description.element_size,
+            stream_hint,
+            deps
+        );
+    } else if (dst_memory_id.is_host() && src_memory_id.is_device()) {
+        event = impl->memory_system->copy_device_to_host(
+            src_memory_id.as_device(),
+            CUdeviceptr(src_access.address) + description.src_offset,
+            reinterpret_cast<std::byte*>(dst_access.address) + description.dst_offset,
+            description.element_size,
+            stream_hint,
+            deps
+        );
+    } else {
+        // TOOD: maybe use a thread pool?
+        auto fut = std::async([=] { copy(src_access.address, dst_access.address, description); });
+
+        impl->poll_until_completion(guard, [&] {
+            if (fut.wait_for(std::chrono::seconds(0)) == std::future_status::timeout) {
+                return false;
+            }
+
+            fut.get();
+            return true;
+        });
+    }
+
+    return event;
+}
+
+DeviceEvent Runtime::submit_copy(
+    BufferId dst_id,
+    BufferId src_id,
+    CopyDescription description,
+    MemoryId memory_id,
+    MemoryTransaction parent
+) {
+    std::unique_lock<std::mutex> guard(m_impl->mutex);
+    description = description.simplify();
+
+    if (description.num_dims > 0) {
+        throw std::runtime_error("only copy of dimensionality N=1 are supported for now");
+    }
+
+    auto& dst_entry = m_impl->find_entry(dst_id);
+    auto& src_entry = m_impl->find_entry(src_id);
+
+    bool same_buffer = dst_id == src_id;
+
+    MemoryId dst_memory_id = memory_id;
+    MemoryId src_memory_id =
+        same_buffer ? dst_memory_id : src_entry.buffer->find_preferred_location(memory_id);
+
+    auto transaction = m_impl->memory_manager.create_transaction(parent);
+
+    MemoryRequest dst_req = m_impl->memory_manager.create_request(  //
+        dst_entry.buffer,
+        dst_memory_id,
+        Access::Exclusive,
+        transaction
+    );
+    MemoryRequest src_req = dst_req;
+
+    if (!same_buffer) {
+        try {
+            src_req = m_impl->memory_manager.create_request(  //
+                src_entry.buffer,
+                src_memory_id,
+                Access::ReadOnly,
+                transaction
+            );
+        } catch (...) {
+            // we must release the other request as well.
+            m_impl->memory_manager.release_request(std::move(dst_req));
+            throw;
+        }
+    }
+
+    DeviceStreamId stream_hint;
+    DeviceEventSet deps;
+    DeviceEvent event;
+
+    try {
+        m_impl->poll_until_completion(guard, [&] {
+            auto dst_status = m_impl->memory_manager.poll_request(stream_hint, dst_req, deps);
+            auto src_status = m_impl->memory_manager.poll_request(stream_hint, src_req, deps);
+            return src_status == Poll::Ready && dst_status == Poll::Ready;
+        });
+
+        event = do_copy(
+            guard,
+            m_impl.get(),
+            m_impl->memory_manager.access_request(dst_req),
+            m_impl->memory_manager.access_request(src_req),
+            description,
+            deps
+        );
+    } catch (...) {
+        if (!same_buffer) {
+            m_impl->memory_manager.release_request(src_req);
+            m_impl->memory_manager.release_request(dst_req);
+        } else {
+            m_impl->memory_manager.release_request(dst_req);
+        }
+
+        throw;
+    }
+
+    if (!same_buffer) {
+        m_impl->memory_manager.release_request(src_req, event);
+        m_impl->memory_manager.release_request(dst_req, event);
+    } else {
+        m_impl->memory_manager.release_request(dst_req, event);
+    }
+
+    return event;
+}
+
+Runtime make_runtime(const RuntimeConfig& config) {
+    return Runtime(std::make_unique<RuntimeImpl>(config));
+}
 
 }  // namespace kmm

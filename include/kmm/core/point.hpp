@@ -27,7 +27,7 @@ class Point: public Vec<T, N> {
     constexpr Point() : storage_type(fill<N>(static_cast<T>(0))) {}
 
     /// Constructs a point from N values.
-    template<typename... Ts, typename = assert_arity_t<N, T, Ts...>>
+    template<typename... Ts, typename = enable_if_t<N == 1 + sizeof...(Ts)>>
     KMM_HOST_DEVICE Point(T first, Ts&&... args) : storage_type {first, args...} {}
 
     /// Converts from a point of a different dimensionality/type, throwing on overflow.

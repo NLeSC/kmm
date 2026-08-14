@@ -12,7 +12,7 @@
 
 namespace kmm {
 
-class ArenaAllocator: public AsyncAllocator {
+class ArenaAllocator: public Allocator {
     KMM_NOT_COPYABLE_OR_MOVABLE(ArenaAllocator)
 
     struct Chunk {
@@ -37,41 +37,63 @@ class ArenaAllocator: public AsyncAllocator {
     };
 
   public:
-    ArenaAllocator(std::unique_ptr<AsyncAllocator> inner, size_t block_size = 512UL << 20);
+    ArenaAllocator(std::unique_ptr<Allocator> inner, size_t block_size = 512UL << 20);
     ~ArenaAllocator();
 
     AllocResult allocate_async(
         const DeviceStream& stream,
         BufferLayout layout,
-        void** addr_out,
-        DeviceEventSet& deps_out
+        void** addr_out
     ) override final;
 
     void deallocate_async(
         const DeviceStream& stream,
         void* addr,
-        BufferLayout layout,
-        DeviceEventSet deps
+        BufferLayout layout
     ) override final;
+
+    AllocResult allocate(BufferLayout layout, void** addr_out) override final;
+
+    void deallocate(void* addr, BufferLayout layout) override final;
 
     void poll() override final;
     void trim(size_t nbytes_remaining) override final;
+    bool trim_one(const DeviceStream* stream_opt);
+
+    // Total number of bytes reserved from the inner allocator (i.e. the sum of block sizes).
+    size_t bytes_reserved() const {
+        return m_bytes_reserved;
+    }
 
   private:
-    AllocResult add_block(const DeviceStream& stream, size_t min_size);
+    AllocResult allocate_generic(
+        const DeviceStream* stream_opt,
+        BufferLayout layout,
+        void** addr_out
+    );
+
+    void deallocate_generic(
+        const DeviceStream* stream_opt,
+        void* addr,
+        BufferLayout layout
+    );
+
+    AllocResult add_block(const DeviceStream* stream, size_t min_size);
 
     bool find_best_fit(
-        const DeviceStream& stream,
+        const DeviceStream* stream,
         size_t nbytes,
         Block*& block_out,
         size_t& offset_out
     ) const;
 
-    static void insert_free(Block& block, size_t offset, size_t size, DeviceEventSet deps);
+    static void insert_free(Block& block, size_t offset, size_t size, DeviceEventSet dep);
     static Chunk take_free(Block& block, size_t offset);
 
-    std::unique_ptr<AsyncAllocator> m_inner;
+    std::unique_ptr<Allocator> m_inner;
+    DeviceEventRegistry m_events;
     size_t m_block_size;
+    size_t m_bytes_reserved = 0;
     std::vector<std::unique_ptr<Block>> m_blocks;
     std::unordered_map<void*, Allocation> m_allocations;
 

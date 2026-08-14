@@ -99,7 +99,6 @@ struct strides_storage_type<StrideT, TypeSequence<StridesT...>> {
 template<typename StrideT, auto... Values>
 struct strides_storage_type<StrideT, TypeSequence<ConstValue<Values>...>> {
     static constexpr size_t rank = sizeof...(Values);
-    static constexpr StrideT static_values[rank] = {static_cast<StrideT>(Values)...};
 
     template<size_t Axis>
     using axis_stride_type =
@@ -110,6 +109,7 @@ struct strides_storage_type<StrideT, TypeSequence<ConstValue<Values>...>> {
 
     KMM_HOST_DEVICE
     constexpr StrideT get_dynamic(size_t axis) const noexcept {
+        constexpr StrideT static_values[rank] = {static_cast<StrideT>(Values)...};
         return axis < rank ? static_values[axis] : static_cast<StrideT>(0);
     }
 

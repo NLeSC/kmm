@@ -1,13 +1,14 @@
 #include <utility>
 
+#include "spdlog/spdlog.h"
+
 #include "kmm/runtime/allocators/managed.hpp"
 #include "kmm/runtime/device_event.hpp"
 #include "kmm/utils/gpu_utils.hpp"
 
 namespace kmm {
 
-ManagedMemoryAllocator::ManagedMemoryAllocator(CUcontext context, size_t max_bytes) :
-    SyncAllocator(max_bytes),
+ManagedMemoryAllocator::ManagedMemoryAllocator(CUcontext context) :
     m_context(context) {}
 
 AllocResult ManagedMemoryAllocator::allocate(BufferLayout layout, void** addr_out) {
@@ -21,10 +22,13 @@ AllocResult ManagedMemoryAllocator::allocate(BufferLayout layout, void** addr_ou
 
     KMM_CUDA_CHECK(result);
     *addr_out = (void*)ptr;
+    spdlog::trace("allocate {} bytes of managed memory (addr: {})", layout.size_in_bytes, *addr_out);
     return AllocResult::Success;
 }
 
 void ManagedMemoryAllocator::deallocate(void* addr, BufferLayout layout) {
+    spdlog::trace("deallocate {} bytes of managed memory (addr: {})", layout.size_in_bytes, addr);
+
     CUDAContextGuard guard {m_context};
     KMM_CUDA_CHECK(cuMemFree(CUdeviceptr(addr)));
 }

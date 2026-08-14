@@ -2,13 +2,17 @@
 
 #include <chrono>
 #include <limits>
+#include <optional>
 
-#include "kmm/runtime/device_stream_registry.hpp"
+#include "runtime_config.hpp"
+
+#include "kmm/runtime/device_data_streams.hpp"
 #include "kmm/runtime/memops/fill.hpp"
 #include "kmm/runtime/memops/types.hpp"
 #include "kmm/runtime/memory_manager.hpp"
 #include "kmm/runtime/memory_system.hpp"
 #include "kmm/runtime/system_info.hpp"
+#include "kmm/utils/function_ref.hpp"
 
 namespace kmm {
 
@@ -22,14 +26,6 @@ class RequisitionDep;
 class Runtime {
   public:
     /**
-     * Create a new runtime, optionally capping the amount of host and device memory it may use.
-     */
-    explicit Runtime(
-        size_t host_memory_limit = std::numeric_limits<size_t>::max(),
-        size_t device_memory_limit = std::numeric_limits<size_t>::max()
-    );
-
-    /**
      * Returns the physical-memory backend used to allocate and move buffer data.
      */
     MemorySystem& memory_system() noexcept;
@@ -37,7 +33,7 @@ class Runtime {
     /**
      * Returns the registry of device streams used to schedule and track work on the devices.
      */
-    DeviceStreamRegistry& stream_registry() noexcept;
+    DeviceEventRegistry& event_registry() noexcept;
 
     /**
      * Returns information about the machine's topology (hosts, devices, memories).
@@ -74,9 +70,17 @@ class Runtime {
      * @param name  The name of the new buffer.
      * @param fill_value If non-empty, the buffer's contents are set to repeated copies of this
      *  value the first time it is materialized in any memory.
+     * @param home If set, the memory where the buffer is preferentially kept resident, used to
+     *  pick a copy source once the buffer becomes valid there instead of the location of first
+     *  access.
      * @return The identifier of the new buffer.
      */
-    BufferId create_buffer(BufferLayout layout, std::string name, FillValue fill_value = {});
+    BufferId create_buffer(
+        BufferLayout layout,
+        std::string name,
+        FillValue fill_value = {},
+        std::optional<MemoryId> home = {}
+    );
 
     /**
      * Release a buffer, freeing its memory once any pending accesses to it have completed.
@@ -153,9 +157,11 @@ class Runtime {
     void invalidate_buffer(BufferId id);
 
     /**
-     * Submit a requisition, blocking until its requested buffer accesses are ready to use.
+     * Submit a requisition. If a stream is provided, all required dependencies will be put onto
+     * the stream and this method returns immediately. If no stream is provided, the method blocks
+     * until the dependencies are available.
      */
-    void submit(Requisition& req);
+    void submit(std::optional<CUDAStreamRef> stream, Requisition& req);
 
     /**
      * Returns the accessor granting access to the buffer targeted by a submitted memory request.
@@ -177,10 +183,30 @@ class Runtime {
      */
     void synchronize(const DeviceEventSet& e);
 
+    /**
+     * Block the calling thread until all events on all streams have completed.
+     */
+    void synchronize();
+
+    /**
+     * Copy from the given src buffer to the given dst buffer according to the given description.
+     */
+    DeviceEvent submit_copy(
+        BufferId dst_id,
+        BufferId src_id,
+        CopyDescription description,
+        MemoryId memory_id,
+        MemoryTransaction parent = {}
+    );
+
+    explicit Runtime(refcnt_ptr<RuntimeImpl>);
+
   private:
     refcnt_ptr<RuntimeImpl> m_impl;
 };
 
 KMM_REFCNT_TRAITS_FWD(RuntimeImpl)
+
+Runtime make_runtime(const RuntimeConfig& config = default_config_from_environment());
 
 }  // namespace kmm

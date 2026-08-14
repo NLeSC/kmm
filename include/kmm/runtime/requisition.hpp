@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <exception>
 #include <vector>
 
 #include "kmm/core/macros.hpp"
@@ -45,10 +46,9 @@ class Requisition {
     /// `Ready`.
     BufferAccessor accessor(Runtime& runtime, size_t index) const;
 
-    const DeviceStream& stream() const noexcept {
-        KMM_ASSERT(m_state == RequisitionState::Ready);
-        return m_stream;
-    }
+    /// Poisons every buffer accessed by this requisition, so future accesses to them rethrow
+    /// `reason` instead of succeeding. See `Runtime::poison_buffer`.
+    void poison(Runtime& runtime, std::exception_ptr reason) const noexcept;
 
     /// Events that must complete before it is safe to read/write the accessors above. Only valid
     /// once `Ready`.
@@ -57,12 +57,21 @@ class Requisition {
         return m_deps;
     }
 
+    /// The transaction created for this requisition's requests (a child of the `parent` passed to
+    /// the constructor). Only valid once `Submitted` or `Ready`; useful as the `parent` for a
+    /// transaction nested inside the work this requisition guards.
+    const MemoryTransaction& transaction() const noexcept {
+        KMM_ASSERT(m_state != RequisitionState::Building);
+        return m_transaction;
+    }
+
   private:
     friend class Runtime;
 
     MemoryId m_memory_id;
-    DeviceStream m_stream;
+    std::optional<DeviceStreamId> m_stream;
     MemoryTransaction m_parent;
+    MemoryTransaction m_transaction;
     std::vector<RequisitionDep> m_entries;
     DeviceEventSet m_deps;
     RequisitionState m_state = RequisitionState::Building;

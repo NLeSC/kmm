@@ -1,6 +1,43 @@
+#include "fmt/chrono.h"
+#include "spdlog/spdlog.h"
+
 #include "kmm/runtime/memory_buffer.hpp"
 
 namespace kmm {
+
+Poll HostAccessControl::poll_pending_future() {
+    if (pending_future.valid()) {
+        if (pending_future.wait_for(std::chrono::seconds(0)) == std::future_status::timeout) {
+            return Poll::Pending;
+        }
+
+        // will not block but does clear the future and handle any exceptions
+        wait_pending_future();
+    }
+
+    return Poll::Ready;
+}
+
+void HostAccessControl::wait_pending_future() {
+    if (pending_future.valid()) {
+        auto before = std::chrono::system_clock::now();
+
+        try {
+            pending_future.get();
+        } catch (...) {
+            pending_future = {};
+            is_valid = false;
+            throw;
+        }
+
+        auto after = std::chrono::system_clock::now();
+        auto duration = after - before;
+
+        if (duration > std::chrono::milliseconds(1)) {
+            spdlog::warn("waited for {} for host before to become available", duration);
+        }
+    }
+}
 
 bool MemoryBufferImpl::is_compatible(MemoryId memory_id, Access mode) noexcept {
     for (auto r = queue_head; r != nullptr; r = r->queue_next) {
@@ -60,7 +97,10 @@ void MemoryBufferImpl::unregister_request(BufferQueueNode* req) noexcept {
     req->queue_next = nullptr;
 }
 
-AllocResult MemoryBufferImpl::try_allocate_location(DeviceStream stream_hint, MemoryId dst_id) {
+AllocResult MemoryBufferImpl::try_allocate_location(
+    const DeviceStreamId& stream_hint,
+    MemoryId dst_id
+) {
     auto& dst_loc = location(dst_id);
     KMM_ASSERT(!dst_loc.is_allocated);
 
@@ -75,18 +115,18 @@ AllocResult MemoryBufferImpl::try_allocate_location(DeviceStream stream_hint, Me
     if (has_peer && peer_ready
         && (dst_id.is_host() || src_id.is_host() || data->is_copy_supported(src_id, dst_id))) {
         auto& src_loc = location(src_id);
-        DeviceEvent event;
+        DeviceEventSet events;
         AllocResult result = data->allocate_and_copy(
             src_id,
             dst_id,
             stream_hint,
             src_loc.retrieve_access(Access::SharedWrite),
-            event
+            events
         );
 
         if (result == AllocResult::Success) {
-            src_loc.record_access(Access::ReadOnly, event);
-            dst_loc.mark_allocated_valid(event);
+            src_loc.record_access(Access::ReadOnly, events);
+            dst_loc.mark_allocated_and_valid(events);
         }
 
         return result;
@@ -102,7 +142,9 @@ AllocResult MemoryBufferImpl::try_allocate_location(DeviceStream stream_hint, Me
     return result;
 }
 
-bool MemoryBufferImpl::allocate_host(DeviceStream stream_hint) {
+bool MemoryBufferImpl::allocate_host(const DeviceStreamId& stream_hint) {
+    spdlog::debug("allocate buffer {} in memory {}", name, MemoryId::host());
+
     if (try_allocate_location(stream_hint, MemoryId::host()) != AllocResult::Success) {
         throw std::runtime_error("could not allocate, out of host memory");
     }
@@ -111,15 +153,27 @@ bool MemoryBufferImpl::allocate_host(DeviceStream stream_hint) {
 }
 
 void MemoryBufferImpl::increment_host_users() noexcept {
+    spdlog::trace(
+        "buffer {}: host alloc_count {} -> {}",
+        name,
+        host_location.alloc_count,
+        host_location.alloc_count + 1
+    );
     host_location.alloc_count++;
 }
 
 void MemoryBufferImpl::decrement_host_users() noexcept {
+    spdlog::trace(
+        "buffer {}: host alloc_count {} -> {}",
+        name,
+        host_location.alloc_count,
+        host_location.alloc_count - 1
+    );
     KMM_ASSERT(host_location.alloc_count > 0);
     host_location.alloc_count--;
 }
 
-bool MemoryBufferImpl::deallocate_host(DeviceStream stream_hint) {
+bool MemoryBufferImpl::deallocate_host(const DeviceStreamId& stream_hint) {
     auto& loc = host_location;
     KMM_ASSERT(loc.alloc_count == 0);
 
@@ -132,16 +186,23 @@ bool MemoryBufferImpl::deallocate_host(DeviceStream stream_hint) {
     // the background) it must force the location to finish.
     loc.wait_pending_future();
 
+    spdlog::debug("deallocate buffer {} in memory {}", name, MemoryId::host());
+
     auto deps = loc.mark_deallocated();
     data->deallocate(MemoryId::host(), stream_hint, std::move(deps));
     return true;
 }
 
-bool MemoryBufferImpl::try_allocate_device(DeviceStream stream_hint, DeviceId id) {
-    return try_allocate_location(stream_hint, MemoryId::device(id)) == AllocResult::Success;
+AllocResult MemoryBufferImpl::try_allocate_device(const DeviceStreamId& stream_hint, DeviceId id) {
+    spdlog::debug("allocate buffer {} in memory {}", name, MemoryId::device(id));
+    return try_allocate_location(stream_hint, MemoryId::device(id));
 }
 
-bool MemoryBufferImpl::deallocate_device(DeviceStream stream_hint, DeviceId id, DeviceLRU& lru) {
+bool MemoryBufferImpl::deallocate_device(
+    const DeviceStreamId& stream_hint,
+    DeviceId id,
+    DeviceLRU& lru
+) {
     auto& loc = device_locations[id.get()];
     KMM_ASSERT(loc.alloc_count == 0);
 
@@ -149,14 +210,24 @@ bool MemoryBufferImpl::deallocate_device(DeviceStream stream_hint, DeviceId id, 
         return false;
     }
 
+    spdlog::debug("deallocate buffer {} in memory {}", name, MemoryId::device(id));
+
     auto deps = loc.mark_deallocated();
     data->deallocate(MemoryId::device(id), stream_hint, std::move(deps));
     lru.remove(&loc);
+
     return true;
 }
 
 void MemoryBufferImpl::increment_device_users(DeviceId id, DeviceLRU& lru) noexcept {
     auto& loc = device_locations[id.get()];
+    spdlog::trace(
+        "buffer {}: device {} alloc_count {} -> {}",
+        name,
+        id,
+        loc.alloc_count,
+        loc.alloc_count + 1
+    );
     loc.alloc_count++;
 
     if (loc.alloc_count == 1) {
@@ -166,8 +237,14 @@ void MemoryBufferImpl::increment_device_users(DeviceId id, DeviceLRU& lru) noexc
 
 void MemoryBufferImpl::decrement_device_users(DeviceId id, DeviceLRU& lru) noexcept {
     auto& loc = device_locations[id.get()];
-
     KMM_ASSERT(loc.alloc_count > 0);
+    spdlog::trace(
+        "buffer {}: device {} alloc_count {} -> {}",
+        name,
+        id,
+        loc.alloc_count,
+        loc.alloc_count - 1
+    );
     loc.alloc_count--;
 
     if (loc.alloc_count == 0 && evictable) {
@@ -175,7 +252,11 @@ void MemoryBufferImpl::decrement_device_users(DeviceId id, DeviceLRU& lru) noexc
     }
 }
 
-void MemoryBufferImpl::evict_device(DeviceStream stream_hint, DeviceId memory_id, DeviceLRU& lru) {
+void MemoryBufferImpl::evict_device(
+    const DeviceStreamId& stream_hint,
+    DeviceId memory_id,
+    DeviceLRU& lru
+) {
     auto& loc = device_locations[memory_id.get()];
     KMM_ASSERT(is_allocated(MemoryId::device(memory_id)));
 
@@ -191,7 +272,7 @@ void MemoryBufferImpl::evict_device(DeviceStream stream_hint, DeviceId memory_id
     deallocate_device(stream_hint, memory_id, lru);
 }
 
-Poll MemoryBufferImpl::ensure_alloc_valid(DeviceStream stream_hint, MemoryId memory_id) {
+Poll MemoryBufferImpl::ensure_alloc_valid(const DeviceStreamId& stream_hint, MemoryId memory_id) {
     auto& loc = location(memory_id);
 
     // If we are accessing the host, we must first check if the future on the host is ready.
@@ -217,6 +298,8 @@ Poll MemoryBufferImpl::ensure_alloc_valid(DeviceStream stream_hint, MemoryId mem
             home_memory_id = memory_id;
         }
 
+        spdlog::debug("initializing buffer {} on {}", name, memory_id);
+
         if (memory_id.is_host()) {
             host_location.pending_future = data->initialize_host(deps);
             loc.mark_valid(DeviceEvent::null());
@@ -224,6 +307,7 @@ Poll MemoryBufferImpl::ensure_alloc_valid(DeviceStream stream_hint, MemoryId mem
         } else {
             auto event = data->initialize_device(memory_id.as_device(), stream_hint, deps);
             loc.mark_valid(event);
+            return Poll::Ready;
         }
     } else if (memory_id.is_host() || peer_id.is_host() || data->is_copy_supported(peer_id, memory_id)) {
         // copy D2H or H2D or D2D (if possible)
@@ -235,8 +319,6 @@ Poll MemoryBufferImpl::ensure_alloc_valid(DeviceStream stream_hint, MemoryId mem
         do_copy(stream_hint, MemoryId::host(), memory_id);
         return Poll::Ready;
     }
-
-    return Poll::Ready;
 }
 
 void MemoryBufferImpl::invalidate_other_allocs(MemoryId memory_id) {
@@ -296,7 +378,7 @@ DeviceEventSet MemoryBufferImpl::invalidate_all() {
 }
 
 Poll MemoryBufferImpl::before_access(
-    DeviceStream stream_hint,
+    const DeviceStreamId& stream_hint,
     MemoryId memory_id,
     Access mode,
     DeviceEventSet& deps_out
@@ -337,7 +419,11 @@ void MemoryBufferImpl::after_access(MemoryId memory_id, Access mode, const Devic
     location(memory_id).record_access(mode, deps);
 }
 
-Poll MemoryBufferImpl::poll_copy(DeviceStream stream_hint, MemoryId src_id, MemoryId dst_id) {
+Poll MemoryBufferImpl::poll_copy(
+    const DeviceStreamId& stream_hint,
+    MemoryId src_id,
+    MemoryId dst_id
+) {
     // if this involves the host, we must first wait until the associated future completes. If
     // the future is still active, then there may still be threads actively reading/writing
     // to the host memory and we must wait until they complete.
@@ -350,7 +436,11 @@ Poll MemoryBufferImpl::poll_copy(DeviceStream stream_hint, MemoryId src_id, Memo
     return Poll::Ready;
 }
 
-void MemoryBufferImpl::do_copy(DeviceStream stream_hint, MemoryId src_id, MemoryId dst_id) {
+void MemoryBufferImpl::do_copy(
+    const DeviceStreamId& stream_hint,
+    MemoryId src_id,
+    MemoryId dst_id
+) {
     auto& src_alloc = location(src_id);
     auto& dst_alloc = location(dst_id);
 
@@ -364,10 +454,11 @@ void MemoryBufferImpl::do_copy(DeviceStream stream_hint, MemoryId src_id, Memory
     deps.insert(src_alloc.retrieve_access(Access::SharedWrite));
     deps.insert(dst_alloc.retrieve_access(Access::ReadOnly));
 
-    auto event = data->copy(src_id, dst_id, stream_hint, std::move(deps));
+    spdlog::debug("launch copy for buffer {} from {} to {} (deps: {})", name, src_id, dst_id, deps);
+    data->copy(src_id, dst_id, stream_hint, deps, deps);
 
-    src_alloc.record_access(Access::ReadOnly, event);
-    dst_alloc.mark_valid(event);
+    src_alloc.record_access(Access::ReadOnly, deps);
+    dst_alloc.mark_valid(deps);
 }
 
 BufferAccessor MemoryBufferImpl::accessor(MemoryId memory_id, Access mode) {

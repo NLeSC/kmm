@@ -3,6 +3,9 @@
 #include <stdexcept>
 #include <utility>
 
+#include "fmt/chrono.h"
+#include "spdlog/spdlog.h"
+
 #include "kmm/core/panic.hpp"
 #include "kmm/runtime/memory_buffer.hpp"
 #include "kmm/runtime/memory_manager.hpp"
@@ -10,7 +13,11 @@
 namespace kmm {
 
 struct MemoryTransactionImpl: reference_count<MemoryTransactionImpl> {
-    explicit MemoryTransactionImpl(MemoryTransaction parent) : parent(std::move(parent)) {}
+    explicit MemoryTransactionImpl(uint64_t id, MemoryTransaction parent) :
+        id(id),
+        parent(std::move(parent)) {}
+
+    const uint64_t id;
     MemoryTransaction parent;  // may be null
 };
 
@@ -31,6 +38,7 @@ struct MemoryRequestImpl: BufferQueueNode, DeviceQueueNode, reference_count<Memo
 
   public:
     MemoryRequestImpl(
+        uint64_t id,
         refcnt_ptr<MemoryBufferImpl> buffer,
         MemoryId memory_id,
         Access mode,
@@ -38,13 +46,14 @@ struct MemoryRequestImpl: BufferQueueNode, DeviceQueueNode, reference_count<Memo
     ) :
         BufferQueueNode(memory_id, mode, callback),
         DeviceQueueNode(callback),
+        id(id),
         buffer(std::move(buffer)) {}
 
     enum struct State { Unqueued, WaitingForAllocation, Granted, Ready, Released };
 
-    refcnt_ptr<MemoryBufferImpl> buffer;
+    const uint64_t id;
+    const refcnt_ptr<MemoryBufferImpl> buffer;
     State state = State::Unqueued;
-    void* pointer = nullptr;
 };
 
 // Recovers the `MemoryBufferImpl` owning `device_locations[id.get()]` from a
@@ -76,7 +85,7 @@ struct HostState {
     // Request-scoped acquire: bundles allocation (if needed) with the usage-count
     // bump. Its counterpart `release_for_request` only undoes the usage-count
     // half — deallocation is buffer-scoped, not request-scoped, see `deallocate`.
-    void acquire_for_request(DeviceStream stream_hint, MemoryBufferImpl* buf) {
+    void acquire_for_request(const DeviceStreamId& stream_hint, MemoryBufferImpl* buf) {
         if (!buf->is_allocated(MemoryId::host())) {
             buf->allocate_host(stream_hint);
             bytes_allocated += buf->size_in_bytes;
@@ -89,7 +98,7 @@ struct HostState {
         buf->decrement_host_users();
     }
 
-    void deallocate(DeviceStream stream_hint, MemoryBufferImpl* buf) noexcept {
+    void deallocate(const DeviceStreamId& stream_hint, MemoryBufferImpl* buf) noexcept {
         if (buf->deallocate_host(stream_hint)) {
             bytes_allocated -= buf->size_in_bytes;
         }
@@ -169,20 +178,25 @@ struct DeviceState {
         }
     }
 
-    bool try_allocate(DeviceStream stream_hint, MemoryBufferImpl* buf) {
+    AllocResult try_allocate(const DeviceStreamId& stream_hint, MemoryBufferImpl* buf) {
         if (!buf->is_allocated(MemoryId::device(memory_id))) {
-            if (!buf->try_allocate_device(stream_hint, memory_id)) {
-                return false;
+            auto result = buf->try_allocate_device(stream_hint, memory_id);
+
+            // could not allocate, exit now.
+            if (result != AllocResult::Success) {
+                return result;
             }
 
+            // increment byte count.
             bytes_allocated += buf->size_in_bytes;
         }
 
+        // increment user count.
         buf->increment_device_users(memory_id, lru);
-        return true;
+        return AllocResult::Success;
     }
 
-    void deallocate(DeviceStream stream_hint, MemoryBufferImpl* buf) noexcept {
+    void deallocate(const DeviceStreamId& stream_hint, MemoryBufferImpl* buf) noexcept {
         if (buf->is_allocated(MemoryId::device(memory_id))) {
             buf->deallocate_device(stream_hint, memory_id, lru);
             bytes_allocated -= buf->size_in_bytes;
@@ -208,15 +222,17 @@ struct DeviceState {
         return nullptr;
     }
 
-    bool try_evict_one(DeviceStream stream_hint) {
+    bool try_evict_one(const DeviceStreamId& stream_hint) {
         if (auto* victim = select_evict_victim()) {
+            spdlog::debug("out of memory on {}, evicting buffer {}", memory_id, victim->name);
             return try_evict_buffer(stream_hint, victim);
         } else {
+            spdlog::debug("out of memory on {}, no buffer available for eviction", memory_id);
             return false;
         }
     }
 
-    bool try_evict_buffer(DeviceStream stream_hint, MemoryBufferImpl* buf) {
+    bool try_evict_buffer(const DeviceStreamId& stream_hint, MemoryBufferImpl* buf) {
         auto& loc = buf->device_locations[memory_id.get()];
 
         if (!loc.in_lru) {
@@ -225,15 +241,17 @@ struct DeviceState {
 
         buf->evict_device(stream_hint, memory_id, lru);
         bytes_allocated -= buf->size_in_bytes;
+        spdlog::debug("buffer {} has been evicted from {}", buf->name, memory_id);
         return true;
     }
 
     // Defined below, once `MemoryRequestImpl` is a complete type.
-    bool try_acquire_for_request(DeviceStream stream_hint, MemoryRequestImpl* req);
+    bool try_acquire_for_request(const DeviceStreamId& stream_hint, MemoryRequestImpl* req);
     bool is_out_of_memory(MemoryRequestImpl* req);
 
     DeviceId memory_id;
     DeviceLRU lru;
+    bool has_printed_oom_warning = false;
 
     // Total number of bytes currently allocated on this device across all buffers
     // (i.e. the sum of `nbytes` of every buffer with an allocated `Location` here).
@@ -241,13 +259,16 @@ struct DeviceState {
 
     /// This is a linked list of requests wanting to allocate memory.
     /// - req_head to req_first_pending: all requests that have been assigned memory
-    /// - req_first_pending - req_tail: all requests that are still waiting for memory
+    /// - req_first_pending to req_tail: all requests that are still waiting for memory
     DeviceQueueNode* req_head = nullptr;
     DeviceQueueNode* req_first_pending = nullptr;
     DeviceQueueNode* req_tail = nullptr;
 };
 
-bool DeviceState::try_acquire_for_request(DeviceStream stream_hint, MemoryRequestImpl* req) {
+bool DeviceState::try_acquire_for_request(
+    const DeviceStreamId& stream_hint,
+    MemoryRequestImpl* req
+) {
     KMM_ASSERT(req_first_pending != nullptr);
 
     // only the first pending request may allocate
@@ -259,7 +280,15 @@ bool DeviceState::try_acquire_for_request(DeviceStream stream_hint, MemoryReques
 
     // if it is already allocated, then we are done
     while (true) {
-        if (try_allocate(stream_hint, buf)) {
+        auto result = try_allocate(stream_hint, buf);
+
+        // Success! Return true.
+        if (result == AllocResult::Success) {
+            if (has_printed_oom_warning) {
+                has_printed_oom_warning = false;
+                spdlog::info("{} is no longer out of memory", memory_id);
+            }
+
             req->callback.clear();
             req_first_pending = req->device_next;
 
@@ -271,6 +300,30 @@ bool DeviceState::try_acquire_for_request(DeviceStream stream_hint, MemoryReques
             return true;
         }
 
+        // Allocation failed, we need to retry later
+        if (result == AllocResult::ErrorPending) {
+            return false;
+        }
+
+        //
+        if (result != AllocResult::ErrorOutOfMemory) {
+            auto message = fmt::format(
+                "allocation failed for device {}: allocation is not supported",
+                memory_id
+            );
+            spdlog::error("{}", message);
+            throw std::runtime_error(message);
+        }
+
+        if (!has_printed_oom_warning) {
+            has_printed_oom_warning = true;
+            spdlog::warn(
+                "{} is out of memory. The system will now offload unused data from "
+                "GPU memory to host memory, which may significantly degrade performance.",
+                memory_id
+            );
+        }
+
         // Out of memory: reclaim the least-recently-used eligible location for
         // this device and retry. If successful, retry
         if (try_evict_one(stream_hint)) {
@@ -278,7 +331,9 @@ bool DeviceState::try_acquire_for_request(DeviceStream stream_hint, MemoryReques
         }
 
         if (is_out_of_memory(req)) {
-            throw std::runtime_error("out of memory");
+            auto message = fmt::format("allocation failed for device {}: out of memory", memory_id);
+            spdlog::error("{}", message);
+            throw std::runtime_error(message);
         }
 
         // Everything failed. return false
@@ -338,7 +393,7 @@ struct MemoryManager::Impl {
 
     // Frees any device location that's sitting idle in its LRU while marked
     // invalid: it holds no useful data, so there is no reason to wait for dealloc.
-    void reclaim_invalidated(DeviceStream stream_hint, MemoryBufferImpl* buf) {
+    void reclaim_invalidated(const DeviceStreamId& stream_hint, MemoryBufferImpl* buf) {
         for (size_t i = 0; i < MAX_DEVICES; i++) {
             auto& loc = buf->device_locations[i];
 
@@ -348,22 +403,38 @@ struct MemoryManager::Impl {
         }
     }
 
+    uint64_t next_request_id_counter = 1;
+    uint64_t next_transaction_id_counter = 1;
     HostState host_state;
     DeviceState device_states[MAX_DEVICES];
 };
 
-MemoryManager::MemoryManager() : m_impl() {}
+MemoryManager::MemoryManager() : m_impl(std::make_unique<Impl>()) {}
 
 MemoryManager::~MemoryManager() {
-    KMM_PANIC("todo: cleanup");
+    // By this point, every buffer must have gone through `release_buffer` (the caller's
+    // `RuntimeImpl` sweeps any it still owns before destroying `MemoryManager`), so there should
+    // be nothing left allocated and no request still waiting for memory.
+    KMM_ASSERT(m_impl->host().bytes_allocated == 0);
+
+    for (size_t id = 0; id < MAX_DEVICES; id++) {
+        auto& device = m_impl->device(DeviceId(id));
+        KMM_ASSERT(device.bytes_allocated == 0);
+        KMM_ASSERT(device.req_head == nullptr);
+    }
 }
 
 MemoryBuffer MemoryManager::create_buffer(
     std::unique_ptr<DataInterface> data,
     std::string name,
-    bool evictable
+    bool evictable,
+    std::optional<MemoryId> home_memory_id
 ) {
-    return MemoryBuffer(make_refcnt<MemoryBufferImpl>(std::move(name), evictable, std::move(data)));
+    spdlog::debug("buffer {} has been created", name);
+
+    return MemoryBuffer(
+        make_refcnt<MemoryBufferImpl>(std::move(name), evictable, std::move(data), home_memory_id)
+    );
 }
 
 void MemoryManager::release_buffer(MemoryBuffer buffer) {
@@ -376,17 +447,28 @@ void MemoryManager::release_buffer(MemoryBuffer buffer) {
 
     buf->released = true;
     KMM_ASSERT(buf->queue_head == nullptr);
-    DeviceStream stream_hint = DeviceStream {};
+    auto stream_hint = DeviceStreamId::null();
 
     m_impl->host().deallocate(stream_hint, buf);
 
     for (size_t id = 0; id < MAX_DEVICES; id++) {
         m_impl->device(DeviceId(id)).deallocate(stream_hint, buf);
     }
+
+    spdlog::debug("buffer {} has been deleted", buffer->name);
 }
 
 MemoryTransaction MemoryManager::create_transaction(MemoryTransaction parent) {
-    return MemoryTransaction(make_refcnt<MemoryTransactionImpl>(std::move(parent)));
+    auto id = m_impl->next_transaction_id_counter++;
+    auto txn = MemoryTransaction(make_refcnt<MemoryTransactionImpl>(id, std::move(parent)));
+
+    if (txn->parent) {
+        spdlog::debug("transaction {} has been created (parent={})", id, txn->parent->id);
+    } else {
+        spdlog::debug("transaction {} has been created", id);
+    }
+
+    return txn;
 }
 
 MemoryRequest MemoryManager::create_request(
@@ -397,6 +479,7 @@ MemoryRequest MemoryManager::create_request(
     NotifyHandle callback
 ) {
     auto req = make_refcnt<MemoryRequestImpl>(
+        m_impl->next_request_id_counter++,
         refcnt_ptr<MemoryBufferImpl>(buffer.get(), true),
         memory_id,
         mode,
@@ -417,11 +500,18 @@ MemoryRequest MemoryManager::create_request(
         throw std::runtime_error("failed to lock buffer for access");
     }
 
+    spdlog::debug(
+        "request {} has been created for buffer {} (memory={}, access={})",
+        req->id,
+        buffer->name,
+        memory_id,
+        mode
+    );
     return req;
 }
 
 Poll MemoryManager::poll_request(
-    DeviceStream stream_hint,
+    const DeviceStreamId& stream_hint,
     const MemoryRequest& request,
     DeviceEventSet& deps_out
 ) {
@@ -443,6 +533,7 @@ Poll MemoryManager::poll_request(
             }
         }
 
+        spdlog::debug("request {} has been granted memory for buffer {}", req->id, buf->name);
         req->state = MemoryRequestImpl::State::Granted;
     }
 
@@ -455,6 +546,7 @@ Poll MemoryManager::poll_request(
         req->state = MemoryRequestImpl::State::Ready;
     }
 
+    spdlog::debug("request {} has been granted access to buffer {}", req->id, buf->name);
     KMM_ASSERT(req->state == MemoryRequestImpl::State::Ready);
     return Poll::Ready;
 }
@@ -502,11 +594,12 @@ void MemoryManager::release_request(MemoryRequest request, const DeviceEventSet&
         req->state = MemoryRequestImpl::State::Released;
     }
 
+    spdlog::debug("request {} released access to buffer {}", req->id, buf->name);
     KMM_ASSERT(req->state == MemoryRequestImpl::State::Released);
 }
 
 void MemoryManager::prefetch_buffer(const MemoryBuffer& buffer, MemoryId memory_id, Access mode) {
-    DeviceStream stream_hint = {};
+    auto stream_hint = DeviceStreamId::null();
     MemoryRequest req;
 
     // A single poll attempt: this is only a hint, so if the buffer cannot be
@@ -533,7 +626,7 @@ void MemoryManager::prefetch_buffer(const MemoryBuffer& buffer, MemoryId memory_
 }
 
 void MemoryManager::try_evict_buffer(const MemoryBuffer& buffer, MemoryId memory_id) {
-    DeviceStream stream_hint;
+    auto stream_hint = DeviceStreamId::null();
 
     if (!buffer->is_allocated(memory_id)) {
         return;
@@ -563,14 +656,16 @@ void MemoryManager::try_evict_buffer(const MemoryBuffer& buffer, MemoryId memory
 }
 
 void MemoryManager::invalidate_buffer(const MemoryBuffer& buffer) {
-    DeviceStream stream_hint = {};
+    auto stream_hint = DeviceStreamId::null();
+    spdlog::debug("buffer {} has been invalidated", buffer->name);
     buffer->invalidate_all();
     m_impl->reclaim_invalidated(stream_hint, buffer.get());
 }
 
 void MemoryManager::trim_device(DeviceId id, size_t bytes_remaining) {
     auto& device = m_impl->device(id);
-    DeviceStream stream_hint = {};
+    auto stream_hint = DeviceStreamId::null();
+    auto bytes_before = device.bytes_allocated;
 
     // Evict LRU-eligible locations until `bytes_allocated` is below `bytes_remaining`.
     while (device.bytes_allocated > bytes_remaining) {
@@ -578,10 +673,33 @@ void MemoryManager::trim_device(DeviceId id, size_t bytes_remaining) {
             break;
         }
     }
+
+    if (device.bytes_allocated != bytes_before) {
+        spdlog::debug(
+            "trimmed device {} from {} to {} bytes (target: {} bytes)",
+            id,
+            bytes_before,
+            device.bytes_allocated,
+            bytes_remaining
+        );
+    }
 }
 
 void MemoryManager::make_progress() {
     //
+}
+
+std::ostream& operator<<(std::ostream& stream, Access access) {
+    switch (access) {
+        case Access::ReadOnly:
+            return stream << "ReadOnly";
+        case Access::SharedWrite:
+            return stream << "SharedWrite";
+        case Access::Exclusive:
+            return stream << "Exclusive";
+        default:
+            return stream << "???";
+    }
 }
 
 KMM_REFCNT_TRAITS_IMPL(MemoryTransactionImpl)

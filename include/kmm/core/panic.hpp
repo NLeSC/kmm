@@ -17,6 +17,16 @@
 #define KMM_DEBUG_ASSERT(...) KMM_ASSERT(__VA_ARGS__)
 #define KMM_TODO()            KMM_PANIC("not implemented")
 
+#ifndef NDEBUG
+    #define KMM_UNSAFE_ASSUME(expr) KMM_ASSERT(expr)
+#else
+    #define KMM_UNSAFE_ASSUME(expr)      \
+        do {                             \
+            if (!(expr))                 \
+                __builtin_unreachable(); \
+        } while (0)
+#endif
+
 #if !KMM_IS_DEVICE
     #include "fmt/format.h"
 

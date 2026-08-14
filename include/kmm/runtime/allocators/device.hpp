@@ -4,9 +4,9 @@
 
 namespace kmm {
 
-class DeviceMemoryAllocator: public SyncAllocator {
+class DeviceMemoryAllocator: public Allocator {
   public:
-    DeviceMemoryAllocator(CUcontext context, size_t max_bytes = std::numeric_limits<size_t>::max());
+    DeviceMemoryAllocator(CUcontext context);
 
     AllocResult allocate(BufferLayout layout, void** addr_out) override final;
     void deallocate(void* addr, BufferLayout layout) override final;

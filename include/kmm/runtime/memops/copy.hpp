@@ -1,7 +1,10 @@
 #pragma once
 
+#include "kmm/core/checked_compare.hpp"
+#include "kmm/core/checked_math.hpp"
 #include "kmm/core/macros.hpp"
 #include "kmm/core/panic.hpp"
+#include "kmm/core/range.hpp"
 #include "kmm/runtime/memops/types.hpp"
 #include "kmm/runtime/device_event.hpp"
 #include "kmm/runtime/device_stream.hpp"
@@ -29,6 +32,12 @@ struct CopyDim {
 struct CopyDescription {
     /// The size (in bytes) of a single element.
     size_t element_size = 1;
+
+    /// A byte offset added to `src_addr` before applying `dims`.
+    memops_stride_type src_offset = 0;
+
+    /// A byte offset added to `dst_addr` before applying `dims`.
+    memops_stride_type dst_offset = 0;
 
     /// The number of axes described by `dims`. Must be at most `MEMOPS_MAX_DIMS`.
     size_t num_dims = 0;
@@ -60,6 +69,14 @@ struct CopyDescription {
         return result;
     }
 
+    /// Returns the half-open range of byte offsets (relative to `src_addr`) that this copy
+    /// will read from.
+    Range<ptrdiff_t> src_range() const;
+
+    /// Returns the half-open range of byte offsets (relative to `dst_addr`) that this copy
+    /// will write to.
+    Range<ptrdiff_t> dst_range() const;
+
     /// Returns an equivalent description in canonical form. Axes are sorted by decreasing
     /// stride (i.e. largest stride is first) and
     CopyDescription simplify() const;
@@ -79,6 +96,42 @@ void copy_async(
     void* dst_addr,
     const CopyDescription& description
 );
+
+/// Builds a `CopyDescription` that copies `element_size`-sized elements between two layouts of
+/// matching rank (e.g. `kmm::Layout`), translating each layout's (element-space) base offset,
+/// per-axis origin, and strides into the byte offsets/strides that `CopyDescription` expects.
+template<typename DstLayoutT, typename SrcLayoutT>
+CopyDescription make_copy_description(
+    const DstLayoutT& dst,
+    const SrcLayoutT& src,
+    size_t element_size
+) {
+    static_assert(DstLayoutT::rank == SrcLayoutT::rank, "rank mismatch");
+    static_assert(DstLayoutT::rank <= MEMOPS_MAX_DIMS, "rank exceeds maximum");
+
+    ptrdiff_t dst_offset = dst.base_offset();
+    ptrdiff_t src_offset = src.base_offset();
+
+    for (size_t i = 0; i < DstLayoutT::rank; i++) {
+        dst_offset += static_cast<ptrdiff_t>(dst.stride(i)) * static_cast<ptrdiff_t>(dst.begin(i));
+        src_offset += static_cast<ptrdiff_t>(src.stride(i)) * static_cast<ptrdiff_t>(src.begin(i));
+    }
+
+    CopyDescription descr;
+    descr.element_size = element_size;
+    descr.src_offset = checked_mul<memops_stride_type>(src_offset, element_size);
+    descr.dst_offset = checked_mul<memops_stride_type>(dst_offset, element_size);
+
+    for (size_t i = 0; i < DstLayoutT::rank; i++) {
+        descr.add_dimension(
+            checked_cast<memops_extent_type>(dst.extent(i)),
+            checked_mul<memops_stride_type>(src.stride(i), element_size),
+            checked_mul<memops_stride_type>(dst.stride(i), element_size)
+        );
+    }
+
+    return descr;
+}
 
 /// @}
 

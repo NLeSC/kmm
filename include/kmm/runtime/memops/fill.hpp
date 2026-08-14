@@ -56,6 +56,9 @@ struct FillDim {
 struct FillDescription {
     FillValue value;
 
+    /// A byte offset added to `dst_addr` before applying `dims`.
+    memops_stride_type offset = 0;
+
     /// The number of axes described by `dims`. Must be at most `MEMOPS_MAX_DIMS`.
     size_t num_dims = 0;
 

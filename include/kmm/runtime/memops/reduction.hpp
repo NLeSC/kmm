@@ -4,6 +4,7 @@
 
 #include "kmm/core/macros.hpp"
 #include "kmm/core/panic.hpp"
+#include "kmm/runtime/memops/copy.hpp"
 #include "kmm/runtime/memops/types.hpp"
 
 namespace kmm {
@@ -44,6 +45,12 @@ struct ReductionDescription {
 
     /// The operator used to combine elements.
     ReductionOp operation = ReductionOp::Sum;
+
+    /// A byte offset added to `src_addr` before applying `dims`/`reduction_stride`.
+    memops_stride_type input_offset = 0;
+
+    /// A byte offset added to `dst_addr` before applying `dims`.
+    memops_stride_type output_offset = 0;
 
     /// The number of batch axes described by `dims`. Must be at most `MEMOPS_MAX_DIMS`.
     size_t num_dims = 0;
@@ -96,6 +103,19 @@ struct ReductionDescription {
     /// `extent * output_stride`). Does not touch `reduction_extent`/`reduction_stride`, since
     /// those describe a different axis (the one reduced over, shared by every output element).
     ReductionDescription simplify() const;
+
+    /// Returns `true` if this reduction combines exactly one input element into each output
+    /// element without accumulating into the previous value: every `combine(identity, value)`
+    /// then reduces to `value` (for all of `Sum`/`Product`/`Min`/`Max`), so the reduction is
+    /// equivalent to a plain strided copy from `src_addr` to `dst_addr`. See `as_copy`.
+    KMM_HOST_DEVICE
+    bool is_equivalent_to_copy() const {
+        return reduction_extent == 1 && !accumulate;
+    }
+
+    /// Converts this reduction into an equivalent `CopyDescription`. Only valid when
+    /// `is_equivalent_to_copy()` returns `true`.
+    CopyDescription as_copy() const;
 };
 
 /// Reduces `src_addr` into `dst_addr` on the CPU, according to `description`. Blocks until the

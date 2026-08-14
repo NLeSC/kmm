@@ -56,6 +56,13 @@ class DeviceInfo {
     }
 
     /**
+     * Return the (primary) CUDA context of this device.
+     */
+    CUDAContextId context_id() const {
+        return m_context_id;
+    }
+
+    /**
      * Returns the total memory size of this device.
      */
     size_t total_memory_size() const {
@@ -91,7 +98,7 @@ class DeviceInfo {
     DeviceId m_id;
     CUdevice m_device;
     CUcontext m_context;
-    cuda_context_id m_context_id;
+    CUDAContextId m_context_id;
     std::string m_name;
     size_t m_memory_capacity;
     size_t m_total_memory;

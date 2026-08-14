@@ -1,143 +1,176 @@
 #pragma once
 
-#include "kmm/runtime/device_stream.hpp"
+#include "fmt/format.h"
+
+#include "kmm/utils/hash_utils.hpp"
+#include "kmm/utils/small_vector.hpp"
 
 namespace kmm {
 
-class DeviceEvent {
-  public:
-    using index_type = uint64_t;
+static constexpr uint64_t MAX_DEVICE_STREAMS = 256;
+static constexpr uint64_t MAX_DEVICE_EVENTS = (~uint64_t(0)) / MAX_DEVICE_STREAMS - 1;
+class DeviceEventRegistry;
+class PrecedenceVector;
 
-    /// empty event
-    static DeviceEvent null() {
+class DeviceStreamId {
+    static constexpr uint64_t INVALID_INDEX = ~uint64_t(0);
+
+  public:
+    DeviceStreamId() noexcept = default;
+
+    explicit DeviceStreamId(uint64_t index) : m_index(index) {
+        KMM_ASSERT(index < MAX_DEVICE_STREAMS);
+    }
+
+    static DeviceStreamId null() noexcept {
         return {};
     }
 
-    DeviceEvent() = default;
-
-    DeviceEvent(DeviceStream stream, index_type index) :
-        m_index(index),
-        m_stream(std::move(stream)) {}
-
-    DeviceStream stream() const noexcept {
-        return m_stream;
-    }
-
-    index_type index() const noexcept {
+    uint64_t get() const noexcept {
+        KMM_UNSAFE_ASSUME(m_index < MAX_DEVICE_STREAMS);
         return m_index;
     }
 
-    bool is_ready() const noexcept {
-        return m_stream.is_ready(m_index);
+    bool is_null() const noexcept {
+        return m_index == INVALID_INDEX;
     }
 
-    // True if nothing has been recorded on `stream()` since this event, i.e. this is
-    // still the most recent event on its stream.
-    bool is_latest() const noexcept {
-        return m_stream.is_latest(m_index);
+    friend std::ostream& operator<<(std::ostream& stream, const DeviceStreamId& e);
+
+    friend bool operator==(const DeviceStreamId& a, const DeviceStreamId& b) {
+        return a.get() == b.get();
     }
 
-    void attach_callback(NotifyHandle callback) const {
-        m_stream.attach_callback(std::move(callback));
+    friend bool operator!=(const DeviceStreamId& a, const DeviceStreamId& b) {
+        return !(a == b);
     }
 
-    void synchronize() const {
-        if (!m_stream.is_null()) {
-            m_stream.synchronize(m_index);
+  private:
+    uint64_t m_index = INVALID_INDEX;
+};
+
+class DeviceEvent {
+  public:
+    DeviceEvent() noexcept = default;
+
+    DeviceEvent(DeviceStreamId stream_id, uint64_t event_id) {
+        if (!stream_id.is_null()) {
+            KMM_ASSERT(stream_id.get() < MAX_DEVICE_STREAMS);
+            m_event_and_stream_index = stream_id.get() + event_id * MAX_DEVICE_STREAMS;
         }
     }
 
-    bool is_null() const noexcept {
-        return m_stream.is_null();
+    static DeviceEvent null() noexcept {
+        return {};
     }
 
-    // True if `other` is on the same stream and at least as recent. Does not account for
-    // readiness; callers that care about an already-completed event trivially preceding
-    // everything should check `is_ready()` themselves (see the free `precedes` functions below).
-    bool precedes_same_stream(const DeviceEvent& other) const noexcept {
-        return stream() == other.stream() && m_index <= other.m_index;
+    DeviceStreamId stream() const noexcept {
+        return DeviceStreamId(m_event_and_stream_index % MAX_DEVICE_STREAMS);
+    }
+
+    uint64_t index() const {
+        return m_event_and_stream_index / MAX_DEVICE_STREAMS;
+    }
+
+    size_t hash() const {
+        return m_event_and_stream_index;
+    }
+
+    bool is_null() const noexcept {
+        return m_event_and_stream_index == 0;
+    }
+
+    bool precedes(const DeviceEvent& that) const noexcept {
+        return stream() == that.stream()
+            && this->m_event_and_stream_index <= that.m_event_and_stream_index;
+    }
+
+    friend std::ostream& operator<<(std::ostream& stream, const DeviceEvent& e);
+
+    friend bool operator==(const DeviceEvent& a, const DeviceEvent& b) {
+        return a.m_event_and_stream_index == b.m_event_and_stream_index;
     }
 
     friend bool operator<(const DeviceEvent& a, const DeviceEvent& b) {
-        return a.m_stream < b.m_stream || (a.m_stream == b.m_stream && a.index() < b.index());
+        return a.m_event_and_stream_index < b.m_event_and_stream_index;
     }
 
-    friend bool operator==(const DeviceEvent& a, const DeviceEvent& b) {
-        return a.m_stream == b.m_stream || a.m_stream == b.m_stream;
+    friend bool operator<=(const DeviceEvent& a, const DeviceEvent& b) {
+        return a.m_event_and_stream_index <= b.m_event_and_stream_index;
     }
 
-    friend std::ostream& operator<<(std::ostream&, const DeviceEvent& e);
+    friend bool operator!=(const DeviceEvent& a, const DeviceEvent& b) {
+        return !(a == b);
+    }
+
+    friend bool operator>(const DeviceEvent& a, const DeviceEvent& b) {
+        return b < a;
+    }
+
+    friend bool operator>=(const DeviceEvent& a, const DeviceEvent& b) {
+        return b <= a;
+    }
 
   private:
-    index_type m_index = 0;
-    DeviceStream m_stream;
+    uint64_t m_event_and_stream_index = 0;
 };
 
 class DeviceEventSet {
   public:
-    DeviceEventSet() = default;
-    DeviceEventSet(const DeviceEventSet&) = default;
-    DeviceEventSet(DeviceEventSet&&) noexcept = default;
-    DeviceEventSet(std::initializer_list<DeviceEvent>);
-    DeviceEventSet(const DeviceEvent&);
+    DeviceEventSet() noexcept = default;
+    DeviceEventSet(const DeviceEvent& event);
+    DeviceEventSet(const DeviceEventSet& events) = default;
+    DeviceEventSet(DeviceEventSet&& events) noexcept = default;
+    DeviceEventSet(std::initializer_list<DeviceEvent> list);
 
-    DeviceEventSet& operator=(const DeviceEventSet&) = default;
-    DeviceEventSet& operator=(DeviceEventSet&&) noexcept = default;
-    DeviceEventSet& operator=(std::initializer_list<DeviceEvent>);
+    DeviceEventSet& operator=(const DeviceEventSet& that) = default;
+    DeviceEventSet& operator=(DeviceEventSet&& that) noexcept = default;
+    DeviceEventSet& operator=(std::initializer_list<DeviceEvent> list);
 
-    void insert(DeviceEvent e) noexcept;
-    void insert(const DeviceEventSet& that) noexcept;
-    void insert(DeviceEventSet&& that) noexcept;
-
-    void prune() noexcept;
+    void insert(DeviceEvent event) noexcept;
+    void insert(const DeviceEventSet& events) noexcept;
+    void insert(DeviceEventSet&& events) noexcept;
+    void prune(const DeviceEventRegistry& registry) noexcept;
     void clear() noexcept;
-    bool is_empty() const;
-
-    // True if some event in this set is on the same stream as `event` and at
-    // least as recent, i.e. this set already implies `event` has happened.
+    bool is_empty() const noexcept;
     bool contains(const DeviceEvent& event) const noexcept;
+    bool contains(const DeviceEventSet& events) const noexcept;
+    DeviceEvent find(DeviceStreamId stream_id) const noexcept;
 
-    friend std::ostream& operator<<(std::ostream&, const DeviceEventSet& e);
-
-    const DeviceEvent* begin() const {
+    const DeviceEvent* begin() const noexcept {
         return m_events.begin();
     }
-    const DeviceEvent* end() const {
+    const DeviceEvent* end() const noexcept {
         return m_events.end();
     }
 
+    friend std::ostream& operator<<(std::ostream& stream, const DeviceEventSet& e);
+
+    // from device_event_registry.cpp
+    friend class PrecedenceVector;
+
   private:
-    friend class DeviceStreamRegistry;
-    small_vector<DeviceEvent, 2> m_events;
+    small_vector<DeviceEvent, 4> m_events;
 };
 
-inline bool precedes(const DeviceEvent& a, const DeviceEvent& b) noexcept {
-    return a.is_ready() || a.precedes_same_stream(b);
-}
-
-inline bool precedes(const DeviceEvent& a, const DeviceEventSet& b) noexcept {
-    return a.is_ready() || b.contains(a);
-}
-
-inline bool precedes(const DeviceEventSet& a, const DeviceEventSet& b) noexcept {
-    for (const auto& event : a) {
-        if (!event.is_ready() && !b.contains(event)) {
-            return false;
-        }
-    }
-
-    return true;
-}
-
-inline bool precedes(const DeviceEvent& a, const DeviceStream& stream) {
-    return stream.preceded_by(a);
-}
-
-inline bool precedes(const DeviceEventSet& a, const DeviceStream& stream) {
-    return stream.preceded_by(a);
-}
-
 }  // namespace kmm
+
+template<>
+struct std::hash<kmm::DeviceStreamId> {
+    size_t operator()(const kmm::DeviceStreamId& id) const noexcept {
+        return id.get();
+    }
+};
+
+template<>
+struct std::hash<kmm::DeviceEvent> {
+    size_t operator()(const kmm::DeviceEvent& id) const noexcept {
+        return id.hash();
+    }
+};
+
+template<>
+struct fmt::formatter<kmm::DeviceStreamId>: fmt::ostream_formatter {};
 
 template<>
 struct fmt::formatter<kmm::DeviceEvent>: fmt::ostream_formatter {};

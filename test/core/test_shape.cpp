@@ -6,6 +6,11 @@
 
 using namespace kmm;
 
+template<typename DomainT>
+void foo(DomainT x) {}
+
+#include "kmm/core/bounds.hpp"
+
 TEST_CASE("Shape construction") {
     SECTION("default constructs all zeros") {
         Shape<3, int> s;

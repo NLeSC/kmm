@@ -1,7 +1,9 @@
 #pragma once
 
 #include "kmm/core/checked_compare.hpp"
+#include "kmm/core/domain_traits.hpp"
 #include "kmm/core/point.hpp"
+#include "kmm/core/range.hpp"
 #include "kmm/core/type_utils.hpp"
 #include "kmm/core/vec.hpp"
 
@@ -32,7 +34,7 @@ class Shape: public Vec<T, N> {
     Shape& operator=(Shape&&) noexcept = default;
 
     /// Create a shape `(first, args...)`
-    template<typename... Ts, typename = assert_arity_t<N, T, Ts...>>
+    template<typename... Ts, typename = enable_if_t<N == 1 + sizeof...(Ts)>>
     KMM_HOST_DEVICE Shape(T first, Ts&&... args) : storage_type {first, args...} {}
 
     /// Create a shape from another shape. Throws on overflow.
@@ -168,7 +170,8 @@ Shape(Ts&&...) -> Shape<sizeof...(Ts)>;
 /// Constructs a Shape from the given per-axis extents.
 template<typename... Ts>
 KMM_HOST_DEVICE Shape<sizeof...(Ts)> shape(const Ts&... values) {
-    return Shape<sizeof...(Ts)> {Vec<default_index_type, sizeof...(Ts)> {values...}};
+    return Shape<sizeof...(Ts)> {
+        Vec<default_index_type, sizeof...(Ts)> {static_cast<default_index_type>(values)...}};
 }
 
 template<typename T, size_t N, size_t M>
@@ -194,6 +197,79 @@ KMM_HOST_DEVICE bool operator!=(const Shape<N, T>& lhs, const Shape<M, U>& rhs) 
 }
 
 /// @}
+
+namespace detail {
+
+template<size_t N, typename IndexT>
+struct domain_traits<Shape<N, IndexT>> {
+    static constexpr size_t rank = N;
+    using index_type = IndexT;
+    using domain_type = Shape<N, index_type>;
+
+    KMM_HOST_DEVICE
+    static constexpr Range<index_type> bounds(const domain_type& domain, size_t axis) {
+        return {static_cast<index_type>(0), domain[axis]};
+    }
+
+    KMM_HOST_DEVICE
+    static constexpr index_type extent(const domain_type& domain, size_t axis) {
+        return domain[axis];
+    }
+
+    template<size_t Axis>
+    using slice_axis_type = Shape<N, index_type>;
+
+    template<size_t Axis>
+    KMM_HOST_DEVICE static constexpr slice_axis_type<Axis> slice_axis(
+        domain_type domain,
+        index_type begin,
+        index_type end
+    ) {
+        domain[Axis] = end - begin;
+        return domain;
+    }
+    template<size_t Axis>
+    using drop_axis_type = Shape<N - 1, index_type>;
+
+    template<size_t Axis>
+    KMM_HOST_DEVICE static constexpr drop_axis_type<Axis> drop_axis(const domain_type& domain) {
+        return permute_axes(domain, drop_index_sequence<rank, Axis>());
+    }
+
+    template<size_t... Is>
+    using permute_axes_type = Shape<sizeof...(Is), index_type>;
+
+    template<size_t... Is>
+    KMM_HOST_DEVICE static constexpr permute_axes_type<Is...>
+    permute_axes(const domain_type& domain, IndexSequence<Is...>) {
+        return {domain[Is]...};
+    }
+
+    template<size_t Axis>
+    using insert_axis_type = Shape<N + 1, index_type>;
+
+    template<size_t Axis>
+    KMM_HOST_DEVICE static constexpr insert_axis_type<Axis> insert_axis(
+        const domain_type& domain,
+        index_type extent
+    ) {
+        insert_axis_type<Axis> result;
+
+        for (size_t i = 0; is_less(i, Axis); i++) {
+            result[i] = domain[i];
+        }
+
+        result[Axis] = extent;
+
+        for (size_t i = Axis; is_less(i, N); i++) {
+            result[i + 1] = domain[i];
+        }
+
+        return result;
+    }
+};
+
+}  // namespace detail
 
 }  // namespace kmm
 

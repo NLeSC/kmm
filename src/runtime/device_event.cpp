@@ -4,16 +4,26 @@
 #include "kmm/core/macros.hpp"
 #include "kmm/core/panic.hpp"
 #include "kmm/runtime/device_event.hpp"
+#include "kmm/runtime/device_event_registry.hpp"
 
 namespace kmm {
 
-DeviceEventSet::DeviceEventSet(std::initializer_list<DeviceEvent> list) : m_events(list) {}
+DeviceEventSet::DeviceEventSet(std::initializer_list<DeviceEvent> list) {
+    *this = list;
+}
 
-DeviceEventSet::DeviceEventSet(const DeviceEvent& event) : m_events({event}) {}
+DeviceEventSet::DeviceEventSet(const DeviceEvent& event) {
+    insert(event);
+}
 
 DeviceEventSet& DeviceEventSet::operator=(std::initializer_list<DeviceEvent> list) {
+    m_events.resize(list.size());
     m_events.clear();
-    m_events.insert_all(list.begin(), list.end());
+
+    for (auto e : list) {
+        insert(e);
+    }
+
     return *this;
 }
 
@@ -65,7 +75,7 @@ void DeviceEventSet::insert(DeviceEventSet&& that) noexcept {
     that.clear();
 }
 
-void DeviceEventSet::prune() noexcept {
+void DeviceEventSet::prune(const DeviceEventRegistry& registry) noexcept {
     size_t index = 0;
 
     while (true) {
@@ -73,7 +83,7 @@ void DeviceEventSet::prune() noexcept {
             return;
         }
 
-        if (m_events[index].is_ready()) {
+        if (registry.is_ready(m_events[index])) {
             break;
         }
 
@@ -84,7 +94,7 @@ void DeviceEventSet::prune() noexcept {
     std::swap(m_events[index], m_events[new_size]);
 
     while (index < new_size) {
-        if (!m_events[index].is_ready()) {
+        if (!registry.is_ready(m_events[index])) {
             index++;
         } else {
             new_size--;
@@ -99,17 +109,17 @@ void DeviceEventSet::clear() noexcept {
     m_events.clear();
 }
 
-bool DeviceEventSet::is_empty() const {
+bool DeviceEventSet::is_empty() const noexcept {
     return m_events.is_empty();
 }
 
 bool DeviceEventSet::contains(const DeviceEvent& event) const noexcept {
-    if (event.is_ready()) {
+    if (event.is_null()) {
         return true;
     }
 
     for (const auto& e : m_events) {
-        if (event.precedes_same_stream(e)) {
+        if (event.precedes(e)) {
             return true;
         }
     }
@@ -117,20 +127,44 @@ bool DeviceEventSet::contains(const DeviceEvent& event) const noexcept {
     return false;
 }
 
-std::ostream& operator<<(std::ostream& stream, const DeviceStream& e) {
-    return stream << e.id().get();
+bool DeviceEventSet::contains(const DeviceEventSet& events) const noexcept {
+    for (const auto& e : events.m_events) {
+        if (!contains(e)) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+DeviceEvent DeviceEventSet::find(DeviceStreamId stream_id) const noexcept {
+    for (const auto& e : m_events) {
+        if (e.stream() == stream_id) {
+            return e;
+        }
+    }
+
+    return DeviceEvent {};
+}
+
+std::ostream& operator<<(std::ostream& stream, const DeviceStreamId& e) {
+    if (e.is_null()) {
+        return stream << "<none>";
+    } else {
+        return stream << e.get();
+    }
 }
 
 std::ostream& operator<<(std::ostream& stream, const DeviceEvent& e) {
     if (e.is_null()) {
         return stream << "<none>";
+    } else {
+        return stream << e.stream() << ":" << e.index();
     }
-
-    return stream << e.stream() << ":" << e.index();
 }
 
 std::ostream& operator<<(std::ostream& stream, const DeviceEventSet& e) {
-    std::vector<DeviceEvent> events = {e.begin(), e.end()};
+    std::vector<DeviceEvent> events = {e.m_events.begin(), e.m_events.end()};
     std::sort(events.begin(), events.end());
 
     stream << "{";

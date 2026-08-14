@@ -4,6 +4,7 @@
 #include <limits>
 
 #include "kmm/core/panic.hpp"
+#include "kmm/runtime/memops/copy.hpp"
 #include "kmm/runtime/memops/reduction.hpp"
 #include "simplify_dims.hpp"
 
@@ -33,62 +34,174 @@ ReductionDescription ReductionDescription::simplify() const {
     return result;
 }
 
+CopyDescription ReductionDescription::as_copy() const {
+    KMM_ASSERT(is_equivalent_to_copy());
+
+    CopyDescription result;
+    result.element_size = data_type_size(dtype);
+    result.src_offset = input_offset;
+    result.dst_offset = output_offset;
+    result.num_dims = num_dims;
+
+    for (size_t i = 0; i < num_dims; i++) {
+        result.dims[i] = CopyDim {dims[i].extent, dims[i].input_stride, dims[i].output_stride};
+    }
+
+    return result;
+}
+
+/// Per-`ReductionOp` identity element and combining function, specialized per `T`/`Op` so that
+/// `reduce_leaf` below has no runtime branch or function-pointer indirection to pick the operator.
+template<typename T, ReductionOp Op>
+struct ReduceTraits;
+
 template<typename T>
+struct ReduceTraits<T, ReductionOp::Sum> {
+    static T identity() {
+        return static_cast<T>(0);
+    }
+
+    static T combine(T a, T b) {
+        return static_cast<T>(a + b);
+    }
+};
+
+template<typename T>
+struct ReduceTraits<T, ReductionOp::Product> {
+    static T identity() {
+        return static_cast<T>(1);
+    }
+
+    static T combine(T a, T b) {
+        return static_cast<T>(a * b);
+    }
+};
+
+template<typename T>
+struct ReduceTraits<T, ReductionOp::Min> {
+    static T identity() {
+        return std::numeric_limits<T>::max();
+    }
+
+    static T combine(T a, T b) {
+        return a < b ? a : b;
+    }
+};
+
+template<typename T>
+struct ReduceTraits<T, ReductionOp::Max> {
+    static T identity() {
+        return std::numeric_limits<T>::lowest();
+    }
+
+    static T combine(T a, T b) {
+        return a > b ? a : b;
+    }
+};
+
+template<typename T, ReductionOp Op, bool Accumulate>
 static void reduce_leaf(
     const std::byte* src,
     std::byte* dst,
     memops_extent_type reduction_extent,
-    memops_stride_type reduction_stride,
-    T identity,
-    T (*combine)(T, T),
-    bool accumulate
+    memops_stride_type reduction_stride
 ) {
-    T acc = identity;
+    T acc = ReduceTraits<T, Op>::identity();
 
     for (memops_extent_type i = 0; i < reduction_extent; i++) {
         T value;
         std::memcpy(&value, src + i * reduction_stride, sizeof(T));
-        acc = combine(acc, value);
+        acc = ReduceTraits<T, Op>::combine(acc, value);
     }
 
-    if (accumulate) {
+    if constexpr (Accumulate) {
         T previous;
         std::memcpy(&previous, dst, sizeof(T));
-        acc = combine(previous, acc);
+        acc = ReduceTraits<T, Op>::combine(previous, acc);
     }
 
     std::memcpy(dst, &acc, sizeof(T));
 }
 
-template<typename T>
+/// Recurses over the batch axes with `Rank` (the number of remaining axes) as a template
+/// parameter, so the compiler can fully unroll the loop nest for the common, small ranks instead
+/// of looping over a runtime-sized `dims` array.
+template<typename T, ReductionOp Op, bool Accumulate, size_t Rank>
 static void reduce_dim(
     const std::byte* src,
     std::byte* dst,
     const ReductionDim* dims,
-    size_t num_dims,
     memops_extent_type reduction_extent,
-    memops_stride_type reduction_stride,
-    T identity,
-    T (*combine)(T, T),
-    bool accumulate
+    memops_stride_type reduction_stride
 ) {
-    if (num_dims == 0) {
-        reduce_leaf<T>(src, dst, reduction_extent, reduction_stride, identity, combine, accumulate);
-        return;
+    if constexpr (Rank == 0) {
+        reduce_leaf<T, Op, Accumulate>(src, dst, reduction_extent, reduction_stride);
+    } else {
+        for (memops_extent_type i = 0; i < dims->extent; i++) {
+            reduce_dim<T, Op, Accumulate, Rank - 1>(
+                src + i * dims->input_stride,
+                dst + i * dims->output_stride,
+                dims + 1,
+                reduction_extent,
+                reduction_stride
+            );
+        }
     }
+}
 
-    for (memops_extent_type i = 0; i < dims->extent; i++) {
-        reduce_dim<T>(
-            src + i * dims->input_stride,
-            dst + i * dims->output_stride,
-            dims + 1,
-            num_dims - 1,
+/// Dispatches the runtime `num_dims` (at most `MEMOPS_MAX_DIMS`, checked by the caller) to the
+/// matching `reduce_dim<T, Op, Accumulate, Rank>` instantiation.
+template<typename T, ReductionOp Op, bool Accumulate, size_t Rank = MEMOPS_MAX_DIMS>
+static void reduce_dim_dispatch(
+    size_t num_dims,
+    const std::byte* src,
+    std::byte* dst,
+    const ReductionDim* dims,
+    memops_extent_type reduction_extent,
+    memops_stride_type reduction_stride
+) {
+    if (num_dims == Rank) {
+        reduce_dim<T, Op, Accumulate, Rank>(src, dst, dims, reduction_extent, reduction_stride);
+    } else if constexpr (Rank > 0) {
+        reduce_dim_dispatch<T, Op, Accumulate, Rank - 1>(
+            num_dims,
+            src,
+            dst,
+            dims,
             reduction_extent,
-            reduction_stride,
-            identity,
-            combine,
-            accumulate
+            reduction_stride
         );
+    } else {
+        KMM_PANIC("invalid number of dimensions");
+    }
+}
+
+template<typename T, ReductionOp Op, bool Accumulate>
+static void reduce_op_accumulate(
+    const void* src_addr,
+    void* dst_addr,
+    const ReductionDescription& description
+) {
+    reduce_dim_dispatch<T, Op, Accumulate>(
+        description.num_dims,
+        static_cast<const std::byte*>(src_addr) + description.input_offset,
+        static_cast<std::byte*>(dst_addr) + description.output_offset,
+        description.dims,
+        description.reduction_extent,
+        description.reduction_stride
+    );
+}
+
+template<typename T, ReductionOp Op>
+static void reduce_op(
+    const void* src_addr,
+    void* dst_addr,
+    const ReductionDescription& description
+) {
+    if (description.accumulate) {
+        reduce_op_accumulate<T, Op, true>(src_addr, dst_addr, description);
+    } else {
+        reduce_op_accumulate<T, Op, false>(src_addr, dst_addr, description);
     }
 }
 
@@ -98,44 +211,25 @@ static void reduce_typed(
     void* dst_addr,
     const ReductionDescription& description
 ) {
-    T identity;
-    T (*combine)(T, T);
-
     switch (description.operation) {
         case ReductionOp::Sum:
-            identity = static_cast<T>(0);
-            combine = [](T a, T b) -> T { return static_cast<T>(a + b); };
-            break;
+            return reduce_op<T, ReductionOp::Sum>(src_addr, dst_addr, description);
         case ReductionOp::Product:
-            identity = static_cast<T>(1);
-            combine = [](T a, T b) -> T { return static_cast<T>(a * b); };
-            break;
+            return reduce_op<T, ReductionOp::Product>(src_addr, dst_addr, description);
         case ReductionOp::Min:
-            identity = std::numeric_limits<T>::max();
-            combine = [](T a, T b) -> T { return a < b ? a : b; };
-            break;
+            return reduce_op<T, ReductionOp::Min>(src_addr, dst_addr, description);
         case ReductionOp::Max:
-            identity = std::numeric_limits<T>::lowest();
-            combine = [](T a, T b) -> T { return a > b ? a : b; };
-            break;
-        default:
-            KMM_PANIC("invalid reduction operator");
+            return reduce_op<T, ReductionOp::Max>(src_addr, dst_addr, description);
     }
 
-    reduce_dim<T>(
-        static_cast<const std::byte*>(src_addr),
-        static_cast<std::byte*>(dst_addr),
-        description.dims,
-        description.num_dims,
-        description.reduction_extent,
-        description.reduction_stride,
-        identity,
-        combine,
-        description.accumulate
-    );
+    KMM_PANIC("invalid reduction operator");
 }
 
 void reduce(const void* src_addr, void* dst_addr, const ReductionDescription& description) {
+    if (description.is_equivalent_to_copy()) {
+        return copy(src_addr, dst_addr, description.as_copy());
+    }
+
     switch (description.dtype) {
         case DataType::Unknown:
             break;

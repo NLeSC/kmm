@@ -73,7 +73,17 @@ class ViewAccessor {
 template<typename DerivedT, size_t N>
 class DomainViewBase {
   public:
-    template<typename IndexT>
+    // The `typename = ...` constrains this to index types that convert directly to a scalar
+    // `index_type` (e.g. `int`), so it does not compete with `DomainView`'s non-template
+    // `operator[](const ndindex_type&)` overload for `Vec`/`Point` indices (which do not convert
+    // to a scalar `index_type`). `Self` (defaulted to `DerivedT`) makes the default argument
+    // depend on this function template's own parameters rather than solely on the enclosing
+    // class template's `DerivedT`, deferring its instantiation to call time -- `DerivedT` is
+    // still incomplete while `DomainViewBase` is being instantiated as its base class.
+    template<
+        typename IndexT,
+        typename Self = DerivedT,
+        typename = decltype(static_cast<typename Self::index_type>(declval<IndexT>()))>
     KMM_HOST_DEVICE decltype(auto) operator[](IndexT i) const noexcept {
         const auto* self = static_cast<const DerivedT*>(this);
         using index_type = typename DerivedT::index_type;
@@ -129,6 +139,28 @@ class DomainView: public detail::DomainViewBase<DomainView<T, LayoutT, AccessorT
     using insert_axis_type = rebind_layout<typename layout_type::template insert_axis_type<Axis>>;
 
     using reverse_axes_type = rebind_layout<typename layout_type::reverse_axes_type>;
+
+    template<size_t... Is>
+    using permute_axes_type =
+        rebind_layout<typename layout_type::template permute_axes_type<Is...>>;
+
+    template<size_t I, size_t J>
+    using swap_axes_type = rebind_layout<typename layout_type::template swap_axes_type<I, J>>;
+
+    using transpose_type = rebind_layout<typename layout_type::transpose_type>;
+
+    template<size_t Axis, size_t Pos>
+    using move_axis_to_position_type =
+        rebind_layout<typename layout_type::template move_axis_to_position_type<Axis, Pos>>;
+
+    template<size_t Axis>
+    using move_axis_to_front_type =
+        rebind_layout<typename layout_type::template move_axis_to_front_type<Axis>>;
+
+    template<size_t Axis>
+    using move_axis_to_back_type =
+        rebind_layout<typename layout_type::template move_axis_to_back_type<Axis>>;
+
     using zero_origin_type = rebind_layout<typename layout_type::zero_origin_type>;
     using move_origin_type = rebind_layout<typename layout_type::move_origin_type>;
 
@@ -253,12 +285,8 @@ class DomainView: public detail::DomainViewBase<DomainView<T, LayoutT, AccessorT
         return m_accessor.dereference(data_at(index));
     }
 
-    /// Returns a reference to the element at the given index. A non-template overload so it wins
-    /// over `base_type`'s templated chained `operator[](IndexT)` when called with an exact
-    /// `ndindex_type` (e.g. `view[Vec<int,2>(1,2)]`), matching the "non-template beats template"
-    /// overload-resolution tie-break; `view[1][2]` still goes through the chained version.
-    KMM_HOST_DEVICE
-    reference operator[](const ndindex_type& index) const noexcept {
+    template<typename IndexT = index_type>
+    KMM_HOST_DEVICE reference operator[](const Vec<IndexT, rank>& index) const noexcept {
         return access(index);
     }
 
@@ -310,6 +338,48 @@ class DomainView: public detail::DomainViewBase<DomainView<T, LayoutT, AccessorT
     /// Returns this view with the order of all axes reversed.
     KMM_HOST_DEVICE reverse_axes_type reverse_axes() const noexcept {
         return with_layout(m_layout.reverse_axes());
+    }
+
+    /// Returns this view with its axes reordered according to the given permutation, e.g.
+    /// `permute_axes<2, 0, 1>()` moves the current axis 2 to position 0, axis 0 to position 1,
+    /// and axis 1 to position 2.
+    template<size_t... Is>
+    KMM_HOST_DEVICE permute_axes_type<Is...> permute_axes(IndexSequence<Is...> seq = {})
+        const noexcept {
+        return with_layout(m_layout.template permute_axes<Is...>(seq));
+    }
+
+    /// Returns this view with axes `I` and `J` swapped.
+    template<size_t I, size_t J>
+    KMM_HOST_DEVICE swap_axes_type<I, J> swap_axes() const noexcept {
+        return with_layout(m_layout.template swap_axes<I, J>());
+    }
+
+    /// Returns this view with axes 0 and 1 swapped. Only valid for a rank-2 view; use
+    /// `swap_axes` or `permute_axes` for other ranks.
+    KMM_HOST_DEVICE transpose_type transpose() const noexcept {
+        return with_layout(m_layout.transpose());
+    }
+
+    /// Returns this view with the given axis moved to the given position, preserving the
+    /// relative order of the remaining axes.
+    template<size_t Axis, size_t Pos>
+    KMM_HOST_DEVICE move_axis_to_position_type<Axis, Pos> move_axis_to_position() const noexcept {
+        return with_layout(m_layout.template move_axis_to_position<Axis, Pos>());
+    }
+
+    /// Returns this view with the given axis moved to the front (position 0), preserving the
+    /// relative order of the remaining axes.
+    template<size_t Axis>
+    KMM_HOST_DEVICE move_axis_to_front_type<Axis> move_axis_to_front() const noexcept {
+        return with_layout(m_layout.template move_axis_to_front<Axis>());
+    }
+
+    /// Returns this view with the given axis moved to the back (position `rank - 1`),
+    /// preserving the relative order of the remaining axes.
+    template<size_t Axis>
+    KMM_HOST_DEVICE move_axis_to_back_type<Axis> move_axis_to_back() const noexcept {
+        return with_layout(m_layout.template move_axis_to_back<Axis>());
     }
 
     /// Returns this view with the given axis sliced according to the given slice token (e.g. `all`, a `Range`, `new_axis`).

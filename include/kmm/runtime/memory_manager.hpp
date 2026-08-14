@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <memory>
+#include <optional>
 
 #include "kmm/core/macros.hpp"
 #include "kmm/runtime/buffer.hpp"
@@ -42,7 +43,8 @@ class MemoryManager {
     MemoryBuffer create_buffer(
         std::unique_ptr<DataInterface> data,
         std::string name,
-        bool evictable = true
+        bool evictable = true,
+        std::optional<MemoryId> home_memory_id = {}
     );
 
     void release_buffer(MemoryBuffer buffer);
@@ -61,7 +63,7 @@ class MemoryManager {
     );
 
     Poll poll_request(
-        DeviceStream stream_hint,
+        const DeviceStreamId& stream_hint,
         const MemoryRequest& request,
         DeviceEventSet& deps_out
     );
@@ -88,4 +90,9 @@ class MemoryManager {
     std::unique_ptr<Impl> m_impl;
 };
 
+std::ostream& operator<<(std::ostream& stream, Access access);
+
 }  // namespace kmm
+
+template<>
+struct fmt::formatter<kmm::Access>: fmt::ostream_formatter {};

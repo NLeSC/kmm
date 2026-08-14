@@ -25,28 +25,69 @@ CUDAContextGuard::~CUDAContextGuard() {
     cuCtxPopCurrent(&popped);
 }
 
-CUDAStream::CUDAStream(CUcontext context, unsigned int flags) {
-    CUDAContextGuard guard(context);
-    KMM_CUDA_CHECK(cuStreamCreate(&m_stream, flags));
-}
-
-CUDAStream::~CUDAStream() {
-    if (m_stream != nullptr) {
-        cuStreamDestroy(m_stream);
-    }
-}
-
-cuda_context_id::cuda_context_id(CUcontext context) {
+CUDAContextId::CUDAContextId(CUcontext context) {
     KMM_CUDA_CHECK(cuCtxGetId(context, &m_id));
 }
 
-cuda_stream_id::cuda_stream_id(CUstream stream) :
-    m_context_id([&] {
-        CUcontext context;
-        KMM_CUDA_CHECK(cuStreamGetCtx(stream, &context));
-        return context;
-    }()) {
+CUcontext context_from_stream(CUstream stream) {
+    CUcontext context;
+    KMM_CUDA_CHECK(cuStreamGetCtx(stream, &context));
+    return context;
+}
+
+CUDAStreamId::CUDAStreamId(CUstream stream) : CUDAStreamId(stream, context_from_stream(stream)) {}
+
+CUDAStreamId::CUDAStreamId(CUstream stream, CUcontext context) : m_context_id(context) {
     KMM_CUDA_CHECK(cuStreamGetId(stream, &m_id));
+}
+
+CUDAStreamId::CUDAStreamId(const CUDAStreamRef& stream) : CUDAStreamId(stream.stream_id()) {}
+
+CUDAStreamId::CUDAStreamId(const CUDAStream& stream) :
+    CUDAStreamId(static_cast<CUDAStreamRef>(stream)) {}
+
+CUDAStreamRef::CUDAStreamRef(CUstream stream) :
+    m_context(context_from_stream(stream)),
+    m_stream(stream),
+    m_stream_id(stream, m_context) {}
+
+CUDAStream::CUDAStream(CUcontext context, unsigned int flags) :
+    m_stream([&]() {
+        CUstream result;
+        CUDAContextGuard guard(context);
+        KMM_CUDA_CHECK(cuStreamCreate(&result, flags));
+        return result;
+    }()) {}
+
+CUDAStream::~CUDAStream() {
+    destroy();
+}
+
+void CUDAStream::destroy() noexcept {
+    if (m_stream != nullptr) {
+        cuStreamDestroy(m_stream);
+        m_stream = nullptr;
+    }
+}
+
+std::ostream& operator<<(std::ostream& stream, const CUDAStream& self) {
+    if (self.m_stream == nullptr) {
+        return stream << "CUDA-stream: none";
+    }
+
+    return stream << CUDAStreamRef(self.m_stream);
+}
+
+std::ostream& operator<<(std::ostream& stream, const CUDAStreamRef& self) {
+    return stream << self.m_stream_id;
+}
+
+std::ostream& operator<<(std::ostream& stream, const CUDAStreamId& self) {
+    return stream << "CUDA-stream:" << self.m_id;
+}
+
+std::ostream& operator<<(std::ostream& stream, const CUDAContextId& self) {
+    return stream << "CUDA-context:" << self.m_id;
 }
 
 }  // namespace kmm

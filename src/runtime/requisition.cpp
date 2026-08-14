@@ -36,4 +36,12 @@ BufferAccessor Requisition::accessor(Runtime& runtime, size_t index) const {
     return runtime.accessor(m_entries[index]);
 }
 
+void Requisition::poison(Runtime& runtime, std::exception_ptr reason) const noexcept {
+    for (const auto& entry : m_entries) {
+        if (entry.mode != AccessMode::Read) {
+            runtime.poison_buffer(entry.buffer_id, reason);
+        }
+    }
+}
+
 }  // namespace kmm

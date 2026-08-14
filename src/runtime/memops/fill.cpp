@@ -47,22 +47,24 @@ FillDescription FillDescription::simplify() const {
     return result;
 }
 
-void fill(void* dst_addr, const FillDescription& description, const void* fill_value) {
+void fill(void* dst_addr, const FillDescription& description) {
     fill_dim(
-        static_cast<std::byte*>(dst_addr),
+        static_cast<std::byte*>(dst_addr) + description.offset,
         description.dims,
         description.num_dims,
         description.value.length,
-        fill_value
+        description.value.buffer
     );
 }
 
 void fill_async(
     CUstream stream,
     void* dst_addr,
-    const FillDescription& description,
-    const void* fill_value
+    const FillDescription& description
 ) {
+    dst_addr = static_cast<std::byte*>(dst_addr) + description.offset;
+
+    const void* fill_value = description.value.buffer;
     size_t n = description.num_dims;
     size_t element_size = description.value.length;
 

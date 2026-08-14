@@ -4,11 +4,10 @@
 
 namespace kmm {
 
-class ManagedMemoryAllocator: public SyncAllocator {
+class ManagedMemoryAllocator: Allocator {
   public:
     ManagedMemoryAllocator(
-        CUcontext context,
-        size_t max_bytes = std::numeric_limits<size_t>::max()
+        CUcontext context
     );
 
     AllocResult allocate(BufferLayout layout, void** addr_out) override final;

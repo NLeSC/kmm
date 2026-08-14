@@ -1,6 +1,9 @@
 #pragma once
 
 #include <functional>
+#include <iostream>
+
+#include "fmt/ostream.h"
 
 #include "kmm/core/macros.hpp"
 #include "kmm/core/panic.hpp"
@@ -19,7 +22,7 @@ class DeviceId {
     }
 
     KMM_INLINE size_t get() const noexcept {
-        KMM_ASSUME(m_id < MAX_DEVICES);
+        KMM_UNSAFE_ASSUME(m_id < MAX_DEVICES);
         return m_id;
     }
 
@@ -30,6 +33,8 @@ class DeviceId {
     KMM_INLINE constexpr bool operator!=(const DeviceId& that) const noexcept {
         return !(*this == that);
     }
+
+    friend std::ostream& operator<<(std::ostream& stream, const DeviceId& e);
 
   private:
     uint8_t m_id;
@@ -50,6 +55,8 @@ class BufferId {
     KMM_INLINE constexpr bool operator!=(const BufferId& that) const noexcept {
         return !(*this == that);
     }
+
+    friend std::ostream& operator<<(std::ostream& stream, const BufferId& e);
 
   private:
     uint64_t m_id;
@@ -111,6 +118,8 @@ class MemoryId {
         return that <= *this;
     }
 
+    friend std::ostream& operator<<(std::ostream& stream, const MemoryId& e);
+
   private:
     constexpr MemoryId(Kind kind, DeviceId device_id) : m_kind(kind), m_device_id(device_id) {}
 
@@ -140,3 +149,12 @@ struct std::hash<kmm::MemoryId> {
         return val.is_device() ? val.as_device().get() : size_t(-1);
     }
 };
+
+template<>
+struct fmt::formatter<kmm::DeviceId>: fmt::ostream_formatter {};
+
+template<>
+struct fmt::formatter<kmm::BufferId>: fmt::ostream_formatter {};
+
+template<>
+struct fmt::formatter<kmm::MemoryId>: fmt::ostream_formatter {};

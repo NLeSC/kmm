@@ -65,6 +65,26 @@ TEST_CASE("drop_index_sequence") {
     CHECK_TYPE((drop_index_sequence<4, 3>()), IndexSequence<0, 1, 2>);
 }
 
+TEST_CASE("move_axis_to_position_index_sequence") {
+    // identity: axis already at its target position
+    CHECK_TYPE((move_axis_to_position_index_sequence<4, 2, 2>()), IndexSequence<0, 1, 2, 3>);
+
+    // move axis 1 to position 3 (rightward): axes 2, 3 shift left to fill the gap
+    CHECK_TYPE((move_axis_to_position_index_sequence<4, 1, 3>()), IndexSequence<0, 2, 3, 1>);
+
+    // move axis 3 to position 1 (leftward): axes 1, 2 shift right to fill the gap
+    CHECK_TYPE((move_axis_to_position_index_sequence<4, 3, 1>()), IndexSequence<0, 3, 1, 2>);
+
+    // move to front / back
+    CHECK_TYPE((move_axis_to_position_index_sequence<3, 2, 0>()), IndexSequence<2, 0, 1>);
+    CHECK_TYPE((move_axis_to_position_index_sequence<3, 0, 2>()), IndexSequence<1, 2, 0>);
+
+    // single-axis and no-op cases
+    CHECK_TYPE((move_axis_to_position_index_sequence<1, 0, 0>()), IndexSequence<0>);
+    CHECK_TYPE((move_axis_to_position_index_sequence<4, 0, 0>()), IndexSequence<0, 1, 2, 3>);
+    CHECK_TYPE((move_axis_to_position_index_sequence<4, 3, 3>()), IndexSequence<0, 1, 2, 3>);
+}
+
 TEST_CASE("is_partial_permutation") {
     CHECK((is_partial_permutation<IndexSequence<>, 0>));
     CHECK((is_partial_permutation<IndexSequence<0>, 1>));

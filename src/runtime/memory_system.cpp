@@ -1,42 +1,137 @@
+#include <algorithm>
 #include <utility>
 
+#include "spdlog/spdlog.h"
+
+#include "kmm/core/checked_math.hpp"
+#include "kmm/runtime/allocators/arena.hpp"
+#include "kmm/runtime/allocators/device.hpp"
+#include "kmm/runtime/allocators/device_pool.hpp"
+#include "kmm/runtime/allocators/limit.hpp"
+#include "kmm/runtime/allocators/pinned.hpp"
+#include "kmm/runtime/device_data_streams.hpp"
 #include "kmm/runtime/memory_system.hpp"
 #include "kmm/utils/gpu_utils.hpp"
 
 namespace kmm {
 
 struct MemorySystem::DeviceState {
-    DeviceState(CUcontext context, DeviceStreamRegistry* streams, size_t memory_limit) :
+    DeviceState(CUcontext context, std::unique_ptr<Allocator> allocator) :
         context(context),
-        native_stream(context),
-        copy_stream(streams->lookup(native_stream.get())),
-        allocator(std::make_unique<DeviceMemoryAllocator>(context, memory_limit)) {}
+        allocator(std::move(allocator)) {}
 
     CUcontext context;
-    CUDAStream native_stream;
-    DeviceStream copy_stream;
-    std::unique_ptr<AsyncAllocator> allocator;
+    std::unique_ptr<Allocator> allocator;
+
+    MemoryStats stats;
+
+    void record_allocation(size_t nbytes) {
+        stats.record_allocation(nbytes);
+    }
+
+    void record_deallocation(size_t nbytes) {
+        stats.record_deallocation(nbytes);
+    }
 };
+
+static std::unique_ptr<Allocator> make_host_allocator(
+    const RuntimeConfig& config,
+    DeviceEventRegistry events,
+    CUcontext context
+) {
+    std::unique_ptr<Allocator> allocator;
+    allocator = std::make_unique<PinnedMemoryAllocator>(context);
+
+    if (config.host_memory_limit != std::numeric_limits<size_t>::max()) {
+        allocator = std::make_unique<LimitAllocator>(
+            std::move(allocator),
+            events,
+            config.host_memory_limit
+        );
+    }
+
+    if (config.host_memory_kind != HostMemoryKind::NoPool && config.host_memory_block_size > 0) {
+        allocator =
+            std::make_unique<ArenaAllocator>(std::move(allocator), config.host_memory_block_size);
+    }
+
+    return allocator;
+}
+
+static std::unique_ptr<Allocator> make_device_allocator(
+    const RuntimeConfig& config,
+    DeviceEventRegistry events,
+    CUcontext context,
+    size_t device_memory_size
+) {
+    std::unique_ptr<Allocator> allocator;
+
+    size_t limit = config.device_memory_limit;
+
+    if (config.device_memory_keep_free > 0) {
+        size_t reserved = config.device_memory_keep_free < device_memory_size
+            ? device_memory_size - config.device_memory_keep_free
+            : 0;
+        limit = std::min(limit, reserved);
+    }
+
+    switch (config.device_memory_kind) {
+        case DeviceMemoryKind::DefaultPool:
+            allocator =
+                std::make_unique<DevicePoolAllocator>(context, DevicePoolKind::Default, limit);
+            break;
+        case DeviceMemoryKind::PrivatePool:
+            allocator =
+                std::make_unique<DevicePoolAllocator>(context, DevicePoolKind::Create, limit);
+            break;
+        case DeviceMemoryKind::CachingPool:
+            allocator = std::make_unique<DeviceMemoryAllocator>(context);
+            break;
+        default:
+            allocator = std::make_unique<DeviceMemoryAllocator>(context);
+            break;
+    }
+
+    if (limit != std::numeric_limits<size_t>::max()) {
+        allocator = std::make_unique<LimitAllocator>(std::move(allocator), events, limit);
+    }
+
+    if (config.device_memory_kind != DeviceMemoryKind::NoPool
+        && config.device_memory_block_size > 0) {
+        allocator =
+            std::make_unique<ArenaAllocator>(std::move(allocator), config.device_memory_block_size);
+    }
+
+    return allocator;
+}
 
 MemorySystem::MemorySystem(
     const SystemInfo& system_info,
-    DeviceStreamRegistry* streams,
-    size_t host_memory_limit,
-    size_t device_memory_limit
+    DeviceEventRegistry events,
+    const RuntimeConfig& config
 ) :
+    m_events(events),
+    m_streams(
+        system_info,
+        events,
+        config.device_concurrent_streams,
+        config.device_concurrent_streams,
+        config.device_concurrent_streams
+    ),
     m_num_devices(system_info.num_devices()) {
-    KMM_ASSERT(m_num_devices > 0);
-    KMM_ASSERT(m_num_devices <= MAX_DEVICES);
+    spdlog::info("initializing memory system with {} device(s)", m_num_devices);
 
-    // Portable pinned memory is visible to every context, so any device's context works here.
-    m_host_allocator = std::make_unique<PinnedMemoryAllocator>(
-        system_info.device(DeviceId(0)).context(),
-        host_memory_limit
-    );
+    CUcontext host_context =
+        m_num_devices > 0 ? system_info.device(DeviceId(0)).context() : nullptr;
+    m_host_allocator = make_host_allocator(config, events, host_context);
 
     for (size_t i = 0; i < m_num_devices; i++) {
-        auto context = system_info.device(DeviceId(i)).context();
-        m_devices[i] = std::make_unique<DeviceState>(context, streams, device_memory_limit);
+        const auto& info = system_info.device(DeviceId(i));
+
+        m_devices[i] = std::make_unique<DeviceState>(
+            info.context(),
+            make_device_allocator(config, events, info.context(), info.total_memory_size())
+        );
     }
 
     // Determine, and where possible enable, peer-to-peer access between every device pair.
@@ -79,28 +174,83 @@ MemorySystem::MemorySystem(
                     KMM_CUDA_CHECK(result);
                 }
             }
+
+            spdlog::debug(
+                "peer access between device {} and device {}: {} -> {} = {}, {} -> {} = {}",
+                i,
+                j,
+                i,
+                j,
+                i_can_access_j != 0,
+                j,
+                i,
+                j_can_access_i != 0
+            );
         }
     }
 }
 
-MemorySystem::~MemorySystem() = default;
+MemorySystem::~MemorySystem() {
+    spdlog::info("memory system stats:");
+    spdlog::info(" - host:");
+    spdlog::info("   - allocated: {} bytes", m_host_stats.bytes_allocated);
+    spdlog::info("   - allocated at peak: {} bytes", m_host_stats.max_bytes_inuse);
+
+    for (size_t i = 0; i < m_num_devices; i++) {
+        spdlog::info("   - copied to device {}: {} bytes", i, m_host_stats.bytes_to_device[i]);
+        spdlog::info("   - copied from device {}: {} bytes", i, m_devices[i]->stats.bytes_to_host);
+    }
+
+    if (const auto* arena = dynamic_cast<const ArenaAllocator*>(m_host_allocator.get())) {
+        spdlog::info("   - reserved from underlying allocator: {} bytes", arena->bytes_reserved());
+    }
+
+    for (size_t i = 0; i < m_num_devices; i++) {
+        const auto& state = *m_devices[i];
+
+        spdlog::info(" - device {}:", i);
+        spdlog::info("   - allocated: {} bytes", state.stats.bytes_allocated);
+        spdlog::info("   - allocated at peak: {} bytes", state.stats.max_bytes_inuse);
+        spdlog::info("   - copied to host: {} bytes", state.stats.bytes_to_host);
+        spdlog::info("   - copied from host: {} bytes", m_host_stats.bytes_to_device[i]);
+
+        for (size_t j = 0; j < m_num_devices; j++) {
+            if (j != i) {
+                spdlog::info(
+                    "   - copied to device {}: {} bytes",
+                    j,
+                    state.stats.bytes_to_device[j]
+                );
+                spdlog::info(
+                    "   - copied from device {}: {} bytes",
+                    j,
+                    m_devices[j]->stats.bytes_to_device[i]
+                );
+            }
+        }
+
+        if (const auto* arena = dynamic_cast<const ArenaAllocator*>(state.allocator.get())) {
+            spdlog::info(
+                "   - reserved from underlying allocator: {} bytes",
+                arena->bytes_reserved()
+            );
+        }
+    }
+}
 
 MemorySystem::DeviceState& MemorySystem::device_state(DeviceId id) const {
     KMM_ASSERT(id.get() < m_num_devices);
     return *m_devices[id.get()];
 }
 
-DeviceStream MemorySystem::stream(DeviceId device) const {
-    return device_state(device).copy_stream;
-}
-
 void MemorySystem::make_progress() {
-    m_streams->make_progress();
     m_host_allocator->poll();
 
     for (size_t i = 0; i < m_num_devices; i++) {
         m_devices[i]->allocator->poll();
     }
+
+    m_streams.make_progress();
 }
 
 void MemorySystem::trim_host(size_t bytes_remaining) {
@@ -113,40 +263,131 @@ void MemorySystem::trim_device(size_t bytes_remaining) {
     }
 }
 
-AllocResult MemorySystem::allocate_host(
-    size_t nbytes,
-    DeviceId device_affinity,
-    void** ptr_out,
-    DeviceEventSet& deps_out
+template<typename F>
+DeviceEvent schedule_onto_stream(
+    bool use_hint,
+    const DeviceEventRegistry& events,
+    DeviceDataStreams& streams,
+    DeviceId device_id,
+    StreamKind kind,
+    const DeviceStreamId& stream_hint,
+    const DeviceEventSet& deps_in,
+    F callback
 ) {
-    return m_host_allocator->allocate_async(  //
-        device_state(device_affinity).copy_stream,
-        BufferLayout {nbytes},
-        ptr_out,
-        deps_out
-    );
+    if (stream_hint.is_null() || !use_hint) {
+        return streams.submit(device_id, kind, deps_in, [&](auto stream_id) -> uint64_t {
+            return callback(DeviceStream {events, stream_id});
+        });
+    } else {
+        return events.submit(stream_hint, deps_in, [&](auto stream) {
+            callback(DeviceStream {events, stream_hint});
+        });
+    }
 }
 
-void MemorySystem::deallocate_host(void* ptr, size_t nbytes, DeviceEventSet deps) {
-    m_host_allocator
-        ->deallocate_async(DeviceStream {}, ptr, BufferLayout {nbytes}, std::move(deps));
+DeviceId MemorySystem::affinity_for_stream(const DeviceStreamId& stream_hint) {
+    if (!stream_hint.is_null()) {
+        for (size_t i = 0; i < m_num_devices; i++) {
+            if (m_events.has_context(stream_hint, m_devices[i]->context)) {
+                return DeviceId(i);
+            }
+        }
+    }
+
+    return DeviceId(0);
+}
+
+AllocResult MemorySystem::allocate_host(
+    BufferLayout layout,
+    void** ptr_out,
+    const DeviceStreamId& stream_hint,
+    DeviceEventSet& deps_out
+) {
+    AllocResult result;
+
+    if (stream_hint.is_null()) {
+        result = m_host_allocator->allocate(layout, ptr_out);
+    } else {
+        result =
+            m_host_allocator->allocate_async(DeviceStream {m_events, stream_hint}, layout, ptr_out);
+
+        deps_out.insert(m_events.record(stream_hint));
+    }
+
+    if (result == AllocResult::Success) {
+        m_host_stats.record_allocation(layout.size_in_bytes);
+    }
+
+    spdlog::trace(
+        "allocate {} bytes of host memory (addr: {}, result: {})",
+        layout.size_in_bytes,
+        *ptr_out,
+        static_cast<int>(result)
+    );
+
+    return result;
+}
+
+void MemorySystem::deallocate_host(
+    void* ptr,
+    BufferLayout layout,
+    const DeviceStreamId& stream_hint,
+    const DeviceEventSet& deps_in
+) {
+    spdlog::trace("deallocate {} bytes of host memory (addr: {})", layout.size_in_bytes, ptr);
+
+    m_host_stats.record_deallocation(layout.size_in_bytes);
+
+    if (stream_hint.is_null()) {
+        m_host_allocator->deallocate(ptr, layout);
+    } else {
+        m_events.wait_on_event(stream_hint, deps_in);
+        m_host_allocator->deallocate_async(DeviceStream {m_events, stream_hint}, ptr, layout);
+    }
+}
+
+bool MemorySystem::same_context(kmm::DeviceId device_id, const kmm::DeviceStreamId& stream_hint) {
+    return m_events.has_context(stream_hint, device_state(device_id).context);
 }
 
 AllocResult MemorySystem::allocate_device(
     DeviceId device_id,
-    size_t nbytes,
+    BufferLayout layout,
     CUdeviceptr* ptr_out,
+    const DeviceStreamId& stream_hint,
     DeviceEventSet& deps_out
 ) {
-    auto& dev = device_state(device_id);
     void* addr = nullptr;
+    AllocResult result;
 
-    AllocResult result =
-        dev.allocator->allocate_async(dev.copy_stream, BufferLayout {nbytes}, &addr, deps_out);
+    auto event = schedule_onto_stream(
+        same_context(device_id, stream_hint),
+        m_events,
+        m_streams,
+        device_id,
+        StreamKind::DeviceToDevice,
+        stream_hint,
+        {},
+        [&](const auto& stream) {
+            result = device_state(device_id).allocator->allocate_async(stream, layout, &addr);
+            return 0;
+        }
+    );
+
+    deps_out.insert(event);
+    *ptr_out = reinterpret_cast<CUdeviceptr>(addr);
 
     if (result == AllocResult::Success) {
-        *ptr_out = CUdeviceptr(addr);
+        device_state(device_id).record_allocation(layout.size_in_bytes);
     }
+
+    spdlog::trace(
+        "allocate {} bytes of device memory on device {} (addr: {:#x}, result: {})",
+        layout.size_in_bytes,
+        device_id,
+        *ptr_out,
+        static_cast<int>(result)
+    );
 
     return result;
 }
@@ -154,10 +395,34 @@ AllocResult MemorySystem::allocate_device(
 void MemorySystem::deallocate_device(
     DeviceId device_id,
     CUdeviceptr ptr,
-    size_t nbytes,
-    DeviceEventSet deps
+    BufferLayout layout,
+    const DeviceStreamId& stream_hint,
+    const DeviceEventSet& deps_in
 ) {
-    KMM_TODO();
+    spdlog::trace(
+        "deallocate {} bytes of device memory on device {} (addr: {:#x})",
+        layout.size_in_bytes,
+        device_id,
+        ptr
+    );
+
+    schedule_onto_stream(
+        same_context(device_id, stream_hint),
+        m_events,
+        m_streams,
+        device_id,
+        StreamKind::DeviceToDevice,
+        stream_hint,
+        deps_in,
+        [&](const auto& stream) {
+            device_state(device_id)
+                .allocator->deallocate_async(stream, reinterpret_cast<void*>(ptr), layout);
+
+            return 0;
+        }
+    );
+
+    device_state(device_id).record_deallocation(layout.size_in_bytes);
 }
 
 DeviceEvent MemorySystem::copy_host_to_device(
@@ -165,14 +430,36 @@ DeviceEvent MemorySystem::copy_host_to_device(
     const void* src_addr,
     CUdeviceptr dst_addr,
     size_t nbytes,
-    DeviceEventSet deps
+    const DeviceStreamId& stream_hint,
+    const DeviceEventSet& deps_in
 ) {
-    auto& dev = device_state(device_id);
-    CUDAContextGuard guard {dev.context};
+    spdlog::trace(
+        "copy {} bytes from host (addr: {}) to device {} (addr: {:#x})",
+        nbytes,
+        src_addr,
+        device_id,
+        dst_addr
+    );
 
-    return dev.copy_stream.with_stream(deps, [&](CUstream stream) {
-        KMM_CUDA_CHECK(cuMemcpyHtoDAsync(dst_addr, src_addr, nbytes, stream));
-    });
+    bool use_hint =
+        same_context(device_id, stream_hint) && m_events.is_latest_in(stream_hint, deps_in);
+
+    auto event = schedule_onto_stream(
+        use_hint,
+        m_events,
+        m_streams,
+        device_id,
+        StreamKind::HostToDevice,
+        stream_hint,
+        deps_in,
+        [&](CUstream stream) {
+            KMM_CUDA_CHECK(cuMemcpyHtoDAsync(dst_addr, src_addr, nbytes, (CUstream)stream));
+            return nbytes;
+        }
+    );
+
+    m_host_stats.bytes_to_device[device_id.get()] += nbytes;
+    return event;
 }
 
 DeviceEvent MemorySystem::copy_device_to_host(
@@ -180,14 +467,36 @@ DeviceEvent MemorySystem::copy_device_to_host(
     CUdeviceptr src_addr,
     void* dst_addr,
     size_t nbytes,
-    DeviceEventSet deps
+    const DeviceStreamId& stream_hint,
+    const DeviceEventSet& deps_in
 ) {
-    auto& dev = device_state(device_id);
-    CUDAContextGuard guard {dev.context};
+    spdlog::trace(
+        "copy {} bytes from device {} (addr: {:#x}) to host (addr: {})",
+        nbytes,
+        device_id,
+        src_addr,
+        dst_addr
+    );
 
-    return dev.copy_stream.with_stream(deps, [&](CUstream stream) {
-        KMM_CUDA_CHECK(cuMemcpyDtoHAsync(dst_addr, src_addr, nbytes, stream));
-    });
+    bool use_hint =
+        same_context(device_id, stream_hint) && m_events.is_latest_in(stream_hint, deps_in);
+
+    auto event = schedule_onto_stream(
+        use_hint,
+        m_events,
+        m_streams,
+        device_id,
+        StreamKind::DeviceToHost,
+        stream_hint,
+        deps_in,
+        [&](CUstream stream) {
+            KMM_CUDA_CHECK(cuMemcpyDtoHAsync(dst_addr, src_addr, nbytes, (CUstream)stream));
+            return nbytes;
+        }
+    );
+
+    device_state(device_id).stats.bytes_to_host += nbytes;
+    return event;
 }
 
 DeviceEvent MemorySystem::copy_device_to_device(
@@ -196,17 +505,207 @@ DeviceEvent MemorySystem::copy_device_to_device(
     CUdeviceptr src_addr,
     CUdeviceptr dst_addr,
     size_t nbytes,
-    DeviceEventSet deps
+    const DeviceStreamId& stream_hint,
+    const DeviceEventSet& deps_in
 ) {
-    auto& src = device_state(src_device);
-    auto& dst = device_state(dst_device);
-    CUDAContextGuard guard {dst.context};
+    spdlog::trace(
+        "copy {} bytes from device {} (addr: {:#x}) to device {} (addr: {:#x})",
+        nbytes,
+        src_device,
+        src_addr,
+        dst_device,
+        dst_addr
+    );
 
-    return dst.copy_stream.with_stream(deps, [&](CUstream stream) {
-        KMM_CUDA_CHECK(
-            cuMemcpyPeerAsync(dst_addr, dst.context, src_addr, src.context, nbytes, stream)
-        );
-    });
+    auto event = m_streams.submit(  //
+        dst_device,
+        StreamKind::DeviceToDevice,
+        deps_in,
+        [&](auto stream_id) -> uint64_t {
+            KMM_CUDA_CHECK(cuMemcpyPeerAsync(
+                dst_addr,
+                device_state(dst_device).context,
+                src_addr,
+                device_state(src_device).context,
+                nbytes,
+                m_events.get(stream_id)
+            ));
+
+            return nbytes;
+        }
+    );
+
+    device_state(src_device).stats.bytes_to_device[dst_device.get()] += nbytes;
+    return event;
+}
+
+AllocResult MemorySystem::allocate_host_and_copy_from_device(
+    BufferLayout layout,
+    void** dst_addr,
+    DeviceId device_id,
+    CUdeviceptr src_addr,
+    const DeviceStreamId& stream_hint,
+    const DeviceEventSet& deps_in,
+    DeviceEvent& dep_out
+) {
+    AllocResult result;
+    bool use_hint =
+        same_context(device_id, stream_hint) && m_events.is_latest_in(stream_hint, deps_in);
+
+    dep_out = schedule_onto_stream(
+        use_hint,
+        m_events,
+        m_streams,
+        device_id,
+        StreamKind::DeviceToHost,
+        stream_hint,
+        deps_in,
+        [&](const auto& stream) {
+            void* addr = nullptr;
+
+            result = m_host_allocator->allocate_async(stream, layout, &addr);
+
+            if (result != AllocResult::Success) {
+                return size_t(0);
+            }
+
+            *dst_addr = addr;
+
+            try {
+                KMM_CUDA_CHECK(
+                    cuMemcpyDtoHAsync(*dst_addr, src_addr, layout.size_in_bytes, (CUstream)stream)
+                );
+                return layout.size_in_bytes;
+            } catch (...) {
+                m_host_allocator->deallocate_async(stream, addr, layout);
+                throw;
+            }
+        }
+    );
+
+    if (result == AllocResult::Success) {
+        device_state(device_id).stats.bytes_to_host += layout.size_in_bytes;
+    }
+
+    return result;
+}
+
+AllocResult MemorySystem::allocate_device_and_copy_from_host(
+    DeviceId device_id,
+    BufferLayout layout,
+    CUdeviceptr* dst_addr,
+    const void* src_addr,
+    const DeviceStreamId& stream_hint,
+    const DeviceEventSet& deps_in,
+    DeviceEvent& dep_out
+) {
+    AllocResult result;
+    bool use_hint =
+        same_context(device_id, stream_hint) && m_events.is_latest_in(stream_hint, deps_in);
+
+    dep_out = schedule_onto_stream(
+        use_hint,
+        m_events,
+        m_streams,
+        device_id,
+        StreamKind::HostToDevice,
+        stream_hint,
+        deps_in,
+        [&](const auto& stream) {
+            void* addr = nullptr;
+
+            result = device_state(device_id).allocator->allocate_async(stream, layout, &addr);
+
+            if (result != AllocResult::Success) {
+                return size_t(0);
+            }
+
+            *dst_addr = reinterpret_cast<CUdeviceptr>(addr);
+
+            try {
+                spdlog::trace(
+                    "allocate {} bytes on device {} and copy from host (addr: {}, dst addr: {:#x})",
+                    layout.size_in_bytes,
+                    device_id,
+                    src_addr,
+                    *dst_addr
+                );
+                KMM_CUDA_CHECK(
+                    cuMemcpyHtoDAsync(*dst_addr, src_addr, layout.size_in_bytes, (CUstream)stream)
+                );
+                return layout.size_in_bytes;
+            } catch (...) {
+                device_state(device_id).allocator->deallocate(addr, layout);
+                throw;
+            }
+        }
+    );
+
+    if (result == AllocResult::Success) {
+        device_state(device_id).record_allocation(layout.size_in_bytes);
+        m_host_stats.bytes_to_device[device_id.get()] += layout.size_in_bytes;
+    }
+
+    return result;
+}
+
+DeviceEvent MemorySystem::fill_device(
+    DeviceId device_id,
+    CUdeviceptr addr,
+    const FillDescription& description,
+    const DeviceStreamId& stream_hint,
+    const DeviceEventSet& deps_in
+) {
+    spdlog::trace("fill device {} memory (addr: {:#x})", device_id, addr);
+
+    return schedule_onto_stream(
+        same_context(device_id, stream_hint),
+        m_events,
+        m_streams,
+        device_id,
+        StreamKind::DeviceToDevice,
+        stream_hint,
+        deps_in,
+        [&](CUstream stream) {
+            fill_async(stream, reinterpret_cast<void*>(addr), description);
+            return checked_mul<size_t>(description.num_elements(), description.value.length);
+        }
+    );
+}
+
+DeviceEvent MemorySystem::reduce_device(
+    DeviceId device_id,
+    CUdeviceptr src_addr,
+    CUdeviceptr dst_addr,
+    const ReductionDescription& description,
+    const DeviceStreamId& stream_hint,
+    const DeviceEventSet& deps_in
+) {
+    spdlog::trace(
+        "reduce device {} memory (src addr: {:#x}, dst addr: {:#x})",
+        device_id,
+        src_addr,
+        dst_addr
+    );
+
+    return schedule_onto_stream(
+        same_context(device_id, stream_hint),
+        m_events,
+        m_streams,
+        device_id,
+        StreamKind::DeviceToDevice,
+        stream_hint,
+        deps_in,
+        [&](CUstream stream) {
+            reduce_async(
+                stream,
+                reinterpret_cast<void*>(src_addr),
+                reinterpret_cast<void*>(dst_addr),
+                description
+            );
+            return description.num_outputs();
+        }
+    );
 }
 
 bool MemorySystem::is_copy_supported(MemoryId src, MemoryId dst) {

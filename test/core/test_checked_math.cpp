@@ -177,11 +177,21 @@ std::vector<T> generate_inputs(std::mt19937_64 rng, size_t n) {
     std::vector<T> inputs = {
         std::numeric_limits<T>::min(),
         std::numeric_limits<T>::min() + static_cast<T>(1),
+        std::numeric_limits<T>::min() + static_cast<T>(2),
+        std::numeric_limits<T>::min() + static_cast<T>(3),
+        std::numeric_limits<T>::min() / static_cast<T>(2) + static_cast<T>(1),
+        std::numeric_limits<T>::min() / static_cast<T>(2),
+        std::numeric_limits<T>::min() / static_cast<T>(2) - static_cast<T>(1),
         static_cast<T>(-2),
         static_cast<T>(-1),
         static_cast<T>(0),
         static_cast<T>(1),
         static_cast<T>(2),
+        std::numeric_limits<T>::max() / static_cast<T>(2) + static_cast<T>(1),
+        std::numeric_limits<T>::max() / static_cast<T>(2),
+        std::numeric_limits<T>::max() / static_cast<T>(2) - static_cast<T>(1),
+        std::numeric_limits<T>::max() - static_cast<T>(3),
+        std::numeric_limits<T>::max() - static_cast<T>(2),
         std::numeric_limits<T>::max() - static_cast<T>(1),
         std::numeric_limits<T>::max(),
     };
@@ -198,7 +208,7 @@ std::vector<T> generate_inputs(std::mt19937_64 rng, size_t n) {
     return inputs;
 }
 
-template<typename L, typename R, typename O, typename F, typename G>
+template<typename O, typename L, typename R, typename F, typename G>
 void stress_test_checked(F op, G checked_op) {
     INFO("L=" << typeid(L).name());
     INFO("R=" << typeid(R).name());
@@ -219,21 +229,21 @@ void stress_test_checked(F op, G checked_op) {
             if (expected >= __int128(std::numeric_limits<O>::min())
                 && expected <= __int128(std::numeric_limits<O>::max())) {
                 INFO("expected=" << static_cast<O>(expected));
-                REQUIRE(checked_op(a, b, &c));
+                REQUIRE_NOTHROW(c = checked_op(a, b));
 
                 INFO("gotten=" << c);
                 REQUIRE(c == static_cast<O>(expected));
             } else {
                 INFO("expected=<out of range>");
-                REQUIRE_FALSE(checked_op(a, b, &c));
+                REQUIRE_THROWS(checked_op(a, b));
             }
         }
     }
 }
 
-template<typename L, typename R, typename O>
+template<typename O, typename L, typename R>
 void stress_test_checked_add() {
-    stress_test_checked<L, R, O>(std::plus<__int128> {}, detail::checked_add_impl<L, R, O>::apply);
+    stress_test_checked<O, L, R>(std::plus<__int128> {}, checked_add<O, L, R>);
 }
 
 TEST_CASE("checked_add (stress test)", "[.][slow]") {
@@ -252,9 +262,9 @@ TEST_CASE("checked_add (stress test)", "[.][slow]") {
     stress_test_checked_add<ulong, long, ulong>();
 }
 
-template<typename L, typename R, typename O>
+template<typename O, typename L, typename R>
 void stress_test_checked_sub() {
-    stress_test_checked<L, R, O>(std::minus<__int128> {}, detail::checked_sub_impl<L, R, O>::apply);
+    stress_test_checked<O, L, R>(std::minus<__int128> {}, checked_sub<O, L, R>);
 }
 
 TEST_CASE("checked_sub (stress test)", "[.][slow]") {
@@ -273,16 +283,16 @@ TEST_CASE("checked_sub (stress test)", "[.][slow]") {
     stress_test_checked_sub<ulong, long, ulong>();
 }
 
-template<typename L, typename R, typename O>
+template<typename O, typename L, typename R>
 void stress_test_checked_mul() {
-    stress_test_checked<L, R, O>(
+    stress_test_checked<O, L, R>(
         [](__int128 a, __int128 b) {
             auto x = a >= 0 ? (unsigned __int128)a : (unsigned __int128)-a;
             auto y = b >= 0 ? (unsigned __int128)b : (unsigned __int128)-b;
             auto z = x * y;
             return ((a >= 0) == (b >= 0)) ? __int128(z) : -__int128(z);
         },
-        detail::checked_mul_impl<L, R, O>::apply
+        checked_mul<O, L, R>
     );
 }
 
@@ -302,12 +312,12 @@ TEST_CASE("checked_mul (stress test)", "[.][slow]") {
     stress_test_checked_mul<ulong, long, ulong>();
 }
 
-template<typename L, typename R, typename O>
+template<typename O, typename L, typename R>
 void stress_test_checked_div() {
-    stress_test_checked<L, R, O>(
-        [](__int128 a, __int128 b) { return b != 0 ? a / b : __int128(1) << 127; },
-        detail::checked_div_impl<L, R, O>::apply
-    );
+    stress_test_checked<
+        O,
+        L,
+        R>([](__int128 a, __int128 b) { return b != 0 ? a / b : __int128(1) << 127; }, checked_div<O, L, R>);
 }
 
 TEST_CASE("checked_div (stress test)", "[.][slow]") {
@@ -324,4 +334,28 @@ TEST_CASE("checked_div (stress test)", "[.][slow]") {
     stress_test_checked_div<ulong, long, long>();
     stress_test_checked_div<ulong, ulong, ulong>();
     stress_test_checked_div<ulong, long, ulong>();
+}
+
+template<typename O, typename L, typename R>
+void stress_test_checked_rem() {
+    stress_test_checked<
+        O,
+        L,
+        R>([](__int128 a, __int128 b) { return b != 0 ? a % b : __int128(1) << 127; }, checked_rem<O, L, R>);
+}
+
+TEST_CASE("checked_rem (stress test)", "[.][slow]") {
+    stress_test_checked_rem<int, int, int>();
+    stress_test_checked_mul<uint, uint, uint>();
+    stress_test_checked_rem<long, long, long>();
+    stress_test_checked_rem<ulong, ulong, ulong>();
+
+    stress_test_checked_rem<long, ulong, long>();
+    stress_test_checked_rem<long, long, long>();
+    stress_test_checked_rem<long, ulong, ulong>();
+    stress_test_checked_rem<long, long, ulong>();
+    stress_test_checked_rem<ulong, ulong, long>();
+    stress_test_checked_rem<ulong, long, long>();
+    stress_test_checked_rem<ulong, ulong, ulong>();
+    stress_test_checked_rem<ulong, long, ulong>();
 }

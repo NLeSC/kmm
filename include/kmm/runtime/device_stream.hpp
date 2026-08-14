@@ -1,91 +1,83 @@
 #pragma once
 
-#include <initializer_list>
 #include <ostream>
+#include <utility>
 
-#include "kmm/core/panic.hpp"
-#include "kmm/utils/function_ref.hpp"
-#include "kmm/utils/gpu_utils.hpp"
-#include "kmm/utils/notify.hpp"
-#include "kmm/utils/refcnt_ptr.hpp"
-#include "kmm/utils/small_vector.hpp"
+#include "fmt/ostream.h"
+
+#include "kmm/runtime/device_event_registry.hpp"
 
 namespace kmm {
 
-class DeviceStream;
-class DeviceEvent;
-class DeviceEventSet;
-
-// Free-standing (not nested) so `KMM_REFCNT_TRAITS_FWD` can be declared before `DeviceStream`,
-// which needs it available already for the inline `is_null`/`operator<`/`operator==` below.
-class DeviceStreamImpl;
-KMM_REFCNT_TRAITS_FWD(DeviceStreamImpl)
-
 class DeviceStream {
+    KMM_NOT_COPYABLE_OR_MOVABLE(DeviceStream)
+
   public:
-    using index_type = uint8_t;
+    DeviceStream() = default;
 
-    DeviceStream() noexcept = default;
-    static DeviceStream create(CUcontext context, CUstream stream, bool destroy_if_done);
+    DeviceStream(DeviceEventRegistry registry, DeviceStreamId stream_id) :
+        m_manager(std::move(registry)),
+        m_stream_id(stream_id),
+        m_stream(m_manager.get(stream_id)),
+        m_context(m_manager.context(stream_id)) {}
 
-    DeviceEvent record_event() const;
-    bool is_ready() const noexcept;
-    void make_progress() const;
-
-    void attach_callback(NotifyHandle callback) const;
-
-    // Native handle access
-    cuda_stream_id id() const;
-    CUstream get() const;
-    CUcontext context() const;
-
-    void wait_on_default_stream() const;
-    void wait_on_event(CUevent event) const;
-    void wait_on_event(const DeviceEvent& event) const;
-    void wait_on_events(const DeviceEventSet& events) const;
-
-    void synchronize() const;
-
-    // Ordering queries: is `src` already guaranteed to happen before `dst`.
-    // Note: this is a hint. If `true` then `src` MUST precede `dst. However, if
-    // it returns `false`, then `src` MAY still precede `dst`.
-    bool preceded_by(const DeviceEvent& src) const;
-    bool preceded_by(const DeviceEventSet& src) const;
-
-    // True if some event in `deps` was recorded on this stream and nothing has been
-    // recorded on this stream since, i.e. reusing this stream for the next operation
-    // would not force it to queue behind unrelated work.
-    bool is_latest_in(const DeviceEventSet& deps) const;
-
-    void attach_callback(uint64_t event_id, NotifyHandle callback) const;
-    void synchronize(uint64_t event_id) const;
-    bool is_ready(uint64_t event_id) const;
-    bool is_latest(uint64_t event_id) const;
-
-    DeviceEvent with_stream(const DeviceEventSet& pred, function_ref<void(CUstream)> fun) const;
-
-    bool with_event(uint64_t event_id, function_ref<void(CUstream, CUevent)> callback) const;
-
-    bool is_null() const {
-        return m_impl == nullptr;
+    DeviceStreamId id() const noexcept {
+        return m_stream_id;
     }
 
-    friend bool operator<(const DeviceStream& a, const DeviceStream& b) {
-        return a.m_impl.get() < b.m_impl.get();
+    CUcontext context() const noexcept {
+        return m_context;
     }
 
-    friend bool operator==(const DeviceStream& a, const DeviceStream& b) {
-        return a.m_impl.get() == b.m_impl.get();
+    operator CUstream() const noexcept {
+        return m_stream;
     }
 
-    using Impl = DeviceStreamImpl;
+    bool is_null() const noexcept {
+        return m_stream_id.is_null();
+    }
+
+    bool preceded_by(const DeviceEventSet& deps) const noexcept {
+        return m_manager.precedes(deps, m_stream_id);
+    }
+
+    void wait_on_event(const DeviceEvent& dep) const {
+        m_manager.wait_on_event(m_stream_id, dep);
+    }
+
+    void wait_on_event(const DeviceEventSet& deps) const {
+        m_manager.wait_on_event(m_stream_id, deps);
+    }
+
+    void wait_on_default_stream() const {
+        m_manager.wait_on_default_stream(m_stream_id);
+    }
+
+    void synchronize() const {
+        m_manager.synchronize(m_stream_id);
+    }
+
+    DeviceEvent record_event() const {
+        return m_manager.record(m_stream_id);
+    }
+
+    /**
+     * Waits for `deps`, calls `fun(stream)` to submit work onto the stream, then records an event.
+     */
+    template<typename F>
+    DeviceEvent submit(const DeviceEventSet& deps, F&& fun) const {
+        return m_manager.submit(m_stream_id, deps, std::forward<F>(fun));
+    }
+
+    friend std::ostream& operator<<(std::ostream& stream, const DeviceStream& e) {
+        return stream << e.m_stream_id;
+    }
 
   private:
-    friend class DeviceStreamImpl;
-
-    explicit DeviceStream(refcnt_ptr<Impl> impl) noexcept;
-
-    refcnt_ptr<Impl> m_impl;
+    DeviceEventRegistry m_manager;
+    DeviceStreamId m_stream_id;
+    CUstream m_stream = nullptr;
+    CUcontext m_context = nullptr;
 };
 
 }  // namespace kmm

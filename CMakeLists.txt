@@ -3,6 +3,7 @@ cmake_minimum_required(VERSION 3.18)
 project(kmm VERSION 0.1.0 LANGUAGES CXX)
 
 option(KMM_BUILD_TESTS "Build kmm tests" ON)
+option(KMM_BUILD_EXAMPLES "Build kmm examples" ON)
 option(KMM_USE_CUDA "Enable CUDA support" OFF)
 
 file(GLOB_RECURSE sources src/*.cpp)
@@ -34,6 +35,9 @@ if(KMM_USE_CUDA)
 
     target_link_libraries(kmm PUBLIC CUDA::cudart CUDA::cuda_driver)
     target_compile_definitions(kmm PUBLIC KMM_USE_CUDA)
+    target_compile_options(kmm PUBLIC
+        $<$<COMPILE_LANGUAGE:CUDA>:--extended-lambda --expt-relaxed-constexpr>
+    )
 endif()
 
 
@@ -59,5 +63,9 @@ target_link_libraries(${PROJECT_NAME} PUBLIC unordered_dense::unordered_dense)
 if(KMM_BUILD_TESTS)
   add_subdirectory(external/Catch2)
   add_subdirectory(test)
+endif()
+
+if(KMM_BUILD_EXAMPLES AND KMM_USE_CUDA)
+  add_subdirectory(examples)
 endif()
 

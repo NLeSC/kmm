@@ -41,7 +41,7 @@ class ReductionManager {
     MemoryBuffer acquire_partial(
         ReductionState& reduction,
         MemoryId memory_id,
-        DeviceStream stream_hint
+        const DeviceStreamId& stream_hint
     );
 
     /// Transition the reduction from open (i.e., partial buffers can still be acquired) to

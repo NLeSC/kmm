@@ -31,44 +31,35 @@ size_t FlatDataInterface::size_in_bytes() const {
 
 AllocResult FlatDataInterface::allocate(
     MemoryId memory_id,
-    DeviceStream stream_hint,
+    const DeviceStreamId& stream_hint,
     DeviceEventSet& deps_out
 ) {
     if (memory_id.is_host()) {
         KMM_ASSERT(m_host_ptr == nullptr);
-
-        void* ptr = nullptr;
-        auto result = m_system->allocate_host(m_layout.size_in_bytes, DeviceId(0), &ptr, deps_out);
-
-        if (result == AllocResult::Success) {
-            m_host_ptr = ptr;
-        }
-
-        return result;
+        return m_system->allocate_host(m_layout, &m_host_ptr, stream_hint, deps_out);
     } else {
         auto id = memory_id.as_device();
         auto& ptr = m_device_ptrs[id.get()];
         KMM_ASSERT(ptr == 0);
-
-        return m_system->allocate_device(id, m_layout.size_in_bytes, &ptr, deps_out);
+        return m_system->allocate_device(id, m_layout, &ptr, stream_hint, deps_out);
     }
 }
 
 void FlatDataInterface::deallocate(
     MemoryId memory_id,
-    DeviceStream stream_hint,
+    const DeviceStreamId& stream_hint,
     const DeviceEventSet& deps
 ) {
     if (memory_id.is_host()) {
         KMM_ASSERT(m_host_ptr != nullptr);
-        m_system->deallocate_host(m_host_ptr, m_layout.size_in_bytes, deps);
+        m_system->deallocate_host(m_host_ptr, m_layout, stream_hint, deps);
         m_host_ptr = nullptr;
     } else {
         auto id = memory_id.as_device();
         auto& ptr = m_device_ptrs[id.get()];
         KMM_ASSERT(ptr != 0);
 
-        m_system->deallocate_device(id, ptr, m_layout.size_in_bytes, deps);
+        m_system->deallocate_device(id, ptr, m_layout, stream_hint, deps);
         ptr = 0;
     }
 }
@@ -81,48 +72,62 @@ void* FlatDataInterface::address(MemoryId memory_id) const {
     }
 }
 
-DeviceEvent FlatDataInterface::copy(
+void FlatDataInterface::copy(
     MemoryId src,
     MemoryId dst,
-    DeviceStream stream_hint,
-    const DeviceEventSet& deps
+    const DeviceStreamId& stream_hint,
+    const DeviceEventSet& deps,
+    DeviceEventSet& deps_out
 ) {
     size_t nbytes = m_layout.size_in_bytes;
 
     if (src.is_host() && dst.is_device()) {
         auto id = dst.as_device();
-        return m_system->copy_host_to_device(  //
+        auto event = m_system->copy_host_to_device(  //
             id,
             m_host_ptr,
             m_device_ptrs[id.get()],
             nbytes,
-            std::move(deps)
+            stream_hint,
+            deps
         );
+
+        deps_out.insert(event);
+        return;
     }
 
     if (src.is_device() && dst.is_host()) {
         auto id = src.as_device();
-        return m_system->copy_device_to_host(  //
+
+        auto event = m_system->copy_device_to_host(  //
             id,
             m_device_ptrs[id.get()],
             m_host_ptr,
             nbytes,
-            std::move(deps)
+            stream_hint,
+            deps
         );
+
+        deps_out.insert(event);
+        return;
     }
 
     if (src.is_device() && dst.is_device()) {
         auto src_id = src.as_device();
         auto dst_id = dst.as_device();
 
-        return m_system->copy_device_to_device(
+        auto event = m_system->copy_device_to_device(
             src_id,
             dst_id,
             m_device_ptrs[src_id.get()],
             m_device_ptrs[dst_id.get()],
             nbytes,
-            std::move(deps)
+            stream_hint,
+            deps
         );
+
+        deps_out.insert(event);
+        return;
     }
 
     KMM_PANIC("cannot copy from host memory to host memory");
@@ -135,7 +140,7 @@ bool FlatDataInterface::is_copy_supported(MemoryId src, MemoryId dst) {
 std::future<void> FlatDataInterface::initialize_host(const DeviceEventSet& deps) {
     if (m_fill_value.length != 0) {
         for (const auto& event : deps) {
-            event.synchronize();
+            m_events.synchronize(event);
         }
 
         size_t element_size = m_fill_value.length;
@@ -156,31 +161,181 @@ std::future<void> FlatDataInterface::initialize_host(const DeviceEventSet& deps)
 
 DeviceEvent FlatDataInterface::initialize_device(
     DeviceId memory_id,
-    DeviceStream stream_hint,
+    const DeviceStreamId& stream_hint,
     const DeviceEventSet& deps
 ) {
     if (m_fill_value.length == 0) {
         return DeviceEvent::null();
     }
 
-    auto stream = m_system->stream(memory_id);
-    void* dst_addr = (void*)m_device_ptrs[memory_id.get()];
+    KMM_ASSERT(m_layout.size_in_bytes % m_fill_value.length);
+    size_t element_size = m_fill_value.length;
+    size_t count = m_layout.size_in_bytes / m_fill_value.length;
+
+    FillDescription description;
+    description.value = m_fill_value;
+    description.add_dimension(
+        static_cast<memops_extent_type>(count),
+        static_cast<memops_stride_type>(element_size)
+    );
+
+    return m_system
+        ->fill_device(memory_id, m_device_ptrs[memory_id.get()], description, stream_hint, deps);
+}
+
+AllocResult FlatDataInterface::allocate_and_copy(
+    MemoryId src,
+    MemoryId dst,
+    const DeviceStreamId& stream_hint,
+    const DeviceEventSet& deps_in,
+    DeviceEventSet& deps_out
+) {
+    if (src.is_host() && dst.is_device()) {
+        auto id = dst.as_device();
+        auto& ptr = m_device_ptrs[id.get()];
+        KMM_ASSERT(ptr == 0);
+
+        auto dep_out = DeviceEvent {};
+        auto result = m_system->allocate_device_and_copy_from_host(  //
+            id,
+            m_layout,
+            &m_device_ptrs[id.get()],
+            m_host_ptr,
+            stream_hint,
+            deps_in,
+            dep_out
+        );
+
+        deps_out.insert(dep_out);
+        return result;
+    }
+
+    if (src.is_device() && dst.is_host()) {
+        DeviceEventSet deps;
+        auto id = src.as_device();
+        KMM_ASSERT(m_host_ptr == nullptr);
+
+        auto dep_out = DeviceEvent {};
+        auto result = m_system->allocate_host_and_copy_from_device(
+            m_layout,
+            &m_host_ptr,
+            id,
+            m_device_ptrs[id.get()],
+            stream_hint,
+            deps_in,
+            dep_out
+        );
+
+        deps_out.insert(dep_out);
+        return result;
+    }
+
+    // just forward to the default impl.
+    return DataInterface::allocate_and_copy(src, dst, stream_hint, deps_in, deps_out);
+}
+
+HostDataInterface::HostDataInterface(
+    BufferLayout layout,
+    refcnt_ptr<MemorySystem> system,
+    FillValue fill_value
+) :
+    m_layout(normalize_buffer_layout(layout)),
+    m_system(std::move(system)),
+    m_fill_value(std::move(fill_value)) {}
+
+size_t HostDataInterface::size_in_bytes() const {
+    return m_layout.size_in_bytes;
+}
+
+AllocResult HostDataInterface::allocate(
+    MemoryId memory_id,
+    const DeviceStreamId& stream_hint,
+    DeviceEventSet& deps_out
+) {
+    if (m_refcount == 0) {
+        DeviceEventSet deps;
+        auto result = m_system->allocate_host(m_layout, &m_host_ptr, stream_hint, deps);
+
+        if (result != AllocResult::Success) {
+            return result;
+        }
+
+        m_alloc_deps = std::move(deps);
+    }
+
+    m_refcount++;
+    deps_out.insert(m_alloc_deps);
+    return AllocResult::Success;
+}
+
+void HostDataInterface::deallocate(
+    MemoryId memory_id,
+    const DeviceStreamId& stream_hint,
+    const DeviceEventSet& deps
+) {
+    KMM_ASSERT(m_refcount > 0);
+    m_dealloc_deps.insert(deps);
+
+    if (--m_refcount == 0) {
+        m_system->deallocate_host(m_host_ptr, m_layout, stream_hint, m_dealloc_deps);
+        m_host_ptr = nullptr;
+        m_alloc_deps.clear();
+        m_dealloc_deps.clear();
+    }
+}
+
+void* HostDataInterface::address(MemoryId memory_id) const {
+    return m_host_ptr;
+}
+
+bool HostDataInterface::is_copy_supported(MemoryId src, MemoryId dst) {
+    return m_system->is_copy_supported(src, dst);
+}
+
+void HostDataInterface::copy(
+    MemoryId src,
+    MemoryId dst,
+    const DeviceStreamId& stream_hint,
+    const DeviceEventSet& deps,
+    DeviceEventSet& deps_out
+) {
+    deps_out.insert(deps);
+}
+
+void HostDataInterface::fill_host_buffer(const DeviceEventSet& deps) {
+    if (m_fill_value.length == 0) {
+        return;
+    }
+
+    for (const auto& event : deps) {
+        m_events.synchronize(event);
+    }
 
     size_t element_size = m_fill_value.length;
     size_t count = m_layout.size_in_bytes / element_size;
 
-    CUDAContextGuard guard {stream.context()};
+    FillDescription description;
+    description.value = m_fill_value;
+    description.add_dimension(
+        static_cast<memops_extent_type>(count),
+        static_cast<memops_stride_type>(element_size)
+    );
 
-    return stream.with_stream(deps, [&](CUstream cuda_stream) {
-        FillDescription description;
-        description.value = m_fill_value;
-        description.add_dimension(
-            static_cast<memops_extent_type>(count),
-            static_cast<memops_stride_type>(element_size)
-        );
+    fill(m_host_ptr, description);
+}
 
-        fill_async(cuda_stream, dst_addr, description);
-    });
+std::future<void> HostDataInterface::initialize_host(const DeviceEventSet& deps) {
+    fill_host_buffer(deps);
+    return {};
+}
+
+DeviceEvent HostDataInterface::initialize_device(
+    DeviceId memory_id,
+    const DeviceStreamId& stream_hint,
+    const DeviceEventSet& deps
+) {
+    fill_host_buffer(deps);
+    return DeviceEvent::null();
 }
 
 }  // namespace kmm

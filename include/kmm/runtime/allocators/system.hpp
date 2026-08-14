@@ -4,7 +4,7 @@
 
 namespace kmm {
 
-class SystemAllocator: public SyncAllocator {
+class SystemAllocator: public Allocator {
     AllocResult allocate(BufferLayout layout, void** addr_out);
     void deallocate(void* addr, BufferLayout layout);
 };

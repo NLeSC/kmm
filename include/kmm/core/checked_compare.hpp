@@ -108,17 +108,17 @@ KMM_DEFINE_INT_TRAITS(long long)
 template<typename L, typename R>
 struct checked_compare_base {
     KMM_HOST_DEVICE
-    static constexpr bool is_equal(const L& left, const R& right) {
+    static constexpr bool is_equal(L left, R right) {
         return left == right;
     }
 
     KMM_HOST_DEVICE
-    static constexpr bool is_less(const L& left, const R& right) {
+    static constexpr bool is_less(L left, R right) {
         return left < right;
     }
 
     KMM_HOST_DEVICE
-    static constexpr bool is_less_equal(const L& left, const R& right) {
+    static constexpr bool is_less_equal(L left, R right) {
         return left <= right;
     }
 };
@@ -147,17 +147,17 @@ struct checked_compare_impl<L, R, numeric_type_tag::unsigned_int, numeric_type_t
     using UR = typename numeric_type_traits<R>::unsigned_type;
 
     KMM_HOST_DEVICE
-    static constexpr bool is_equal(const L& left, const R& right) {
+    static constexpr bool is_equal(L left, R right) {
         return right >= static_cast<R>(0) && left == static_cast<UR>(right);
     }
 
     KMM_HOST_DEVICE
-    static constexpr bool is_less(const L& left, const R& right) {
+    static constexpr bool is_less(L left, R right) {
         return right >= static_cast<R>(0) && left < static_cast<UR>(right);
     }
 
     KMM_HOST_DEVICE
-    static constexpr bool is_less_equal(const L& left, const R& right) {
+    static constexpr bool is_less_equal(L left, R right) {
         return right >= static_cast<R>(0) && left <= static_cast<UR>(right);
     }
 };
@@ -167,17 +167,17 @@ struct checked_compare_impl<L, R, numeric_type_tag::signed_int, numeric_type_tag
     using UL = typename numeric_type_traits<L>::unsigned_type;
 
     KMM_HOST_DEVICE
-    static constexpr bool is_equal(const L& left, const R& right) {
+    static constexpr bool is_equal(L left, R right) {
         return left >= static_cast<L>(0) && static_cast<UL>(left) == right;
     }
 
     KMM_HOST_DEVICE
-    static constexpr bool is_less(const L& left, const R& right) {
+    static constexpr bool is_less(L left, R right) {
         return left < static_cast<L>(0) || static_cast<UL>(left) < right;
     }
 
     KMM_HOST_DEVICE
-    static constexpr bool is_less_equal(const L& left, const R& right) {
+    static constexpr bool is_less_equal(L left, R right) {
         return left < static_cast<L>(0) || static_cast<UL>(left) <= right;
     }
 };
@@ -192,7 +192,7 @@ struct checked_compare_impl<
 template<typename L, typename R>
 struct checked_compare_impl<L, R, numeric_type_tag::floating_point, numeric_type_tag::signed_int> {
     KMM_HOST_DEVICE
-    static constexpr bool is_less(const L& left, const R& right) {
+    static constexpr bool is_less(L left, R right) {
         if (numeric_type_traits<L>::isnan(left)) {
             return false;
         }
@@ -209,7 +209,7 @@ struct checked_compare_impl<L, R, numeric_type_tag::floating_point, numeric_type
     }
 
     KMM_HOST_DEVICE
-    static constexpr bool is_equal(const L& left, const R& right) {
+    static constexpr bool is_equal(L left, R right) {
         if (numeric_type_traits<L>::floor(left) != left) {
             return false;
         }
@@ -226,7 +226,7 @@ struct checked_compare_impl<L, R, numeric_type_tag::floating_point, numeric_type
     }
 
     KMM_HOST_DEVICE
-    static constexpr bool is_less_equal(const L& left, const R& right) {
+    static constexpr bool is_less_equal(L left, R right) {
         return is_less(left, right) || is_equal(left, right);
     }
 };
@@ -234,7 +234,7 @@ struct checked_compare_impl<L, R, numeric_type_tag::floating_point, numeric_type
 template<typename L, typename R>
 struct checked_compare_impl<L, R, numeric_type_tag::signed_int, numeric_type_tag::floating_point> {
     KMM_HOST_DEVICE
-    static constexpr bool is_less(const L& left, const R& right) {
+    static constexpr bool is_less(L left, R right) {
         if (numeric_type_traits<R>::isnan(right)) {
             return false;
         }
@@ -251,12 +251,12 @@ struct checked_compare_impl<L, R, numeric_type_tag::signed_int, numeric_type_tag
     }
 
     KMM_HOST_DEVICE
-    static constexpr bool is_equal(const L& left, const R& right) {
+    static constexpr bool is_equal(L left, R right) {
         return checked_compare_impl<R, L>::is_equal(right, left);
     }
 
     KMM_HOST_DEVICE
-    static constexpr bool is_less_equal(const L& left, const R& right) {
+    static constexpr bool is_less_equal(L left, R right) {
         return is_less(left, right) || is_equal(left, right);
     }
 };
@@ -268,7 +268,7 @@ struct checked_compare_impl<
     numeric_type_tag::floating_point,
     numeric_type_tag::unsigned_int> {
     KMM_HOST_DEVICE
-    static constexpr bool is_less(const L& left, const R& right) {
+    static constexpr bool is_less(L left, R right) {
         if (numeric_type_traits<L>::isnan(left)) {
             return false;
         }
@@ -285,7 +285,7 @@ struct checked_compare_impl<
     }
 
     KMM_HOST_DEVICE
-    static constexpr bool is_equal(const L& left, const R& right) {
+    static constexpr bool is_equal(L left, R right) {
         if (numeric_type_traits<L>::isnan(left)) {
             return false;
         }
@@ -306,7 +306,7 @@ struct checked_compare_impl<
     }
 
     KMM_HOST_DEVICE
-    static constexpr bool is_less_equal(const L& left, const R& right) {
+    static constexpr bool is_less_equal(L left, R right) {
         return is_less(left, right) || is_equal(left, right);
     }
 };
@@ -318,7 +318,7 @@ struct checked_compare_impl<
     numeric_type_tag::unsigned_int,
     numeric_type_tag::floating_point> {
     KMM_HOST_DEVICE
-    static constexpr bool is_less(const L& left, const R& right) {
+    static constexpr bool is_less(L left, R right) {
         if (numeric_type_traits<R>::isnan(right)) {
             return false;
         }
@@ -335,12 +335,12 @@ struct checked_compare_impl<
     }
 
     KMM_HOST_DEVICE
-    static constexpr bool is_equal(const L& left, const R& right) {
+    static constexpr bool is_equal(L left, R right) {
         return checked_compare_impl<R, L>::is_equal(right, left);
     }
 
     KMM_HOST_DEVICE
-    static constexpr bool is_less_equal(const L& left, const R& right) {
+    static constexpr bool is_less_equal(L left, R right) {
         return is_less(left, right) || is_equal(left, right);
     }
 };
@@ -500,7 +500,7 @@ using underlying_type_t = typename underlying_type<T>::type;
 
 /// Returns whether `left < right`, safely comparing operands of different types and signedness.
 template<typename L, typename R>
-KMM_HOST_DEVICE constexpr bool is_less(const L& left, const R& right) {
+KMM_HOST_DEVICE constexpr bool is_less(L left, R right) {
     return detail::checked_compare_impl<underlying_type_t<L>, underlying_type_t<R>>::is_less(
         static_cast<underlying_type_t<L>>(left),
         static_cast<underlying_type_t<R>>(right)
@@ -509,7 +509,7 @@ KMM_HOST_DEVICE constexpr bool is_less(const L& left, const R& right) {
 
 /// Returns whether `left == right`, safely comparing operands of different types and signedness.
 template<typename L, typename R>
-KMM_HOST_DEVICE constexpr bool is_equal(const L& left, const R& right) {
+KMM_HOST_DEVICE constexpr bool is_equal(L left, R right) {
     return detail::checked_compare_impl<underlying_type_t<L>, underlying_type_t<R>>::is_equal(
         static_cast<underlying_type_t<L>>(left),
         static_cast<underlying_type_t<R>>(right)
@@ -518,7 +518,7 @@ KMM_HOST_DEVICE constexpr bool is_equal(const L& left, const R& right) {
 
 /// Returns whether `left <= right`, safely comparing operands of different types and signedness.
 template<typename L, typename R>
-KMM_HOST_DEVICE constexpr bool is_less_equal(const L& left, const R& right) {
+KMM_HOST_DEVICE constexpr bool is_less_equal(L left, R right) {
     return detail::checked_compare_impl<underlying_type_t<L>, underlying_type_t<R>>::is_less_equal(
         static_cast<underlying_type_t<L>>(left),
         static_cast<underlying_type_t<R>>(right)
@@ -527,13 +527,13 @@ KMM_HOST_DEVICE constexpr bool is_less_equal(const L& left, const R& right) {
 
 /// Returns whether `left > right`, safely comparing operands of different types and signedness.
 template<typename L, typename R>
-KMM_HOST_DEVICE constexpr bool is_greater(const L& left, const R& right) {
+KMM_HOST_DEVICE constexpr bool is_greater(L left, R right) {
     return is_less(right, left);
 }
 
 /// Returns whether `left >= right`, safely comparing operands of different types and signedness.
 template<typename L, typename R>
-KMM_HOST_DEVICE constexpr bool is_greater_equal(const L& left, const R& right) {
+KMM_HOST_DEVICE constexpr bool is_greater_equal(L left, R right) {
     return is_less_equal(right, left);
 }
 

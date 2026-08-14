@@ -1,5 +1,6 @@
 #pragma once
 
+#include "kmm/core/domain_traits.hpp"
 #include "kmm/core/point.hpp"
 #include "kmm/core/range.hpp"
 #include "kmm/core/shape.hpp"
@@ -34,7 +35,7 @@ class Bounds: public Vec<Range<T>, N> {
     Bounds& operator=(const Bounds&) = default;
     Bounds& operator=(Bounds&&) noexcept = default;
 
-    template<typename... Ts, typename = assert_arity_t<N, T, Ts...>>
+    template<typename... Ts, typename = enable_if_t<N == 1 + sizeof...(Ts)>>
     KMM_HOST_DEVICE Bounds(Range<T> first, Ts&&... args) : storage_type {first, args...} {}
 
     template<size_t M, typename U>
@@ -254,7 +255,10 @@ class Bounds: public Vec<Range<T>, N> {
     }
 
     /// Returns `true` if this bounds contains the given point `{first, rest, ...}`.
-    template<typename... Ts, typename = assert_arity_t<N, T, Ts...>>
+    //
+    // NB: uses `enable_if_t<...>` directly rather than the `assert_arity_t` alias -- see the
+    // comment on the analogous `Shape` constructor for why.
+    template<typename... Ts, typename = enable_if_t<N == 1 + sizeof...(Ts)>>
     KMM_HOST_DEVICE bool contains(const T& first, Ts&&... rest) const {
         return contains(Point<N, T> {first, rest...});
     }
@@ -282,6 +286,82 @@ KMM_HOST_DEVICE Bounds<sizeof...(Ts)> bounds(const Ts&... values) {
 }
 
 /// @}
+
+namespace detail {
+
+template<size_t N, typename IndexT>
+struct domain_traits<Bounds<N, IndexT>> {
+    static constexpr size_t rank = N;
+    using index_type = IndexT;
+    using domain_type = Bounds<N, index_type>;
+    template<size_t Axis>
+    using drop_axis_type = Bounds<N - 1, index_type>;
+
+    KMM_HOST_DEVICE
+    static constexpr Range<index_type> bounds(const domain_type& domain, size_t axis) {
+        return domain[axis];
+    }
+
+    KMM_HOST_DEVICE
+    static constexpr index_type extent(const domain_type& domain, size_t axis) {
+        return domain[axis].size();
+    }
+
+    template<size_t Axis>
+    using slice_axis_type = Bounds<N, index_type>;
+
+    // Shifts the axis's range by `-begin` and truncates it to length `end - begin`, so the
+    // returned domain is locally zero-based at this axis; the caller is responsible for
+    // folding the absolute shift into a storage offset.
+    template<size_t Axis>
+    KMM_HOST_DEVICE static constexpr slice_axis_type<Axis> slice_axis(
+        domain_type domain,
+        index_type begin,
+        index_type end
+    ) {
+        domain[Axis] = Range<index_type> {end - begin};
+        return domain;
+    }
+
+    template<size_t Axis>
+    KMM_HOST_DEVICE static constexpr drop_axis_type<Axis> drop_axis(const domain_type& domain) {
+        return permute_axes(domain, drop_index_sequence<rank, Axis>());
+    }
+
+    template<size_t... Is>
+    using permute_axes_type = Bounds<sizeof...(Is), index_type>;
+
+    template<size_t... Is>
+    KMM_HOST_DEVICE static constexpr permute_axes_type<Is...>
+    permute_axes(const domain_type& domain, IndexSequence<Is...>) {
+        return {domain[Is]...};
+    }
+
+    template<size_t Axis>
+    using insert_axis_type = Bounds<N + 1, index_type>;
+
+    template<size_t Axis>
+    KMM_HOST_DEVICE static constexpr insert_axis_type<Axis> insert_axis(
+        const domain_type& domain,
+        index_type extent
+    ) {
+        insert_axis_type<Axis> result;
+
+        for (size_t i = 0; is_less(i, Axis); i++) {
+            result[i] = domain[i];
+        }
+
+        result[Axis] = Range<index_type>(extent);
+
+        for (size_t i = Axis; is_less(i, N); i++) {
+            result[i + 1] = domain[i];
+        }
+
+        return result;
+    }
+};
+
+}  // namespace detail
 
 }  // namespace kmm
 
