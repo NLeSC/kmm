@@ -147,8 +147,9 @@ elseif(KMM_USE_HIP)
   target_link_libraries(${PROJECT_NAME}
           PUBLIC
           hip::host
-          hip::device
           roc::rocblas
+          PRIVATE
+          hip::device
   )
 
   # Define `KMM_USE_HIP` macro so that headers can detect HIP usage
