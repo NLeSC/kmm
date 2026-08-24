@@ -150,8 +150,8 @@ struct PartialFold {
         } else {
             auto event = system.reduce_device(
                 memory_id.as_device(),
-                reinterpret_cast<CUdeviceptr>(local_addr),
-                reinterpret_cast<CUdeviceptr>(home_addr),
+                reinterpret_cast<GPUDeviceptr>(local_addr),
+                reinterpret_cast<GPUDeviceptr>(home_addr),
                 description,
                 DeviceStreamId::null(),
                 request_deps

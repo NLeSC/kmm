@@ -1,8 +1,7 @@
 #pragma once
 
-#include <cuda.h>
-
 #include "kmm/core/macros.hpp"
+#include "kmm/utils/gpu_api.hpp"
 #include "kmm/core/panic.hpp"
 #include "kmm/runtime/memops/copy.hpp"
 #include "kmm/runtime/memops/types.hpp"
@@ -126,7 +125,7 @@ void reduce(const void* src_addr, void* dst_addr, const ReductionDescription& de
 /// enqueued on `stream` after waiting for `dependencies`, and the returned event becomes ready
 /// once the reduction has completed.
 void reduce_async(
-    CUstream stream,
+    GPUStream stream,
     const void* src_addr,
     void* dst_addr,
     const ReductionDescription& description

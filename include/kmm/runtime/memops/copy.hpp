@@ -91,7 +91,7 @@ void copy(const void* src_addr, void* dst_addr, const CopyDescription& descripti
 /// once the copy has completed. Either (or both) of `src_addr`/`dst_addr` may point to host or
 /// device memory.
 void copy_async(
-    CUstream stream,
+    GPUStream stream,
     const void* src_addr,
     void* dst_addr,
     const CopyDescription& description

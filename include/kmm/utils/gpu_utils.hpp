@@ -1,6 +1,5 @@
 #pragma once
 
-#include <cuda.h>
 #include <functional>
 #include <iosfwd>
 #include <memory>
@@ -11,13 +10,14 @@
 #include "fmt/ostream.h"
 
 #include "kmm/core/macros.hpp"
+#include "kmm/utils/gpu_api.hpp"
 
-#define KMM_CUDA_CHECK(...)                                                        \
-    do {                                                                           \
-        auto __code = (__VA_ARGS__);                                               \
-        if (KMM_UNLIKELY(__code != decltype(__code)(0))) {                         \
-            ::kmm::cuda_throw_exception(__code, __FILE__, __LINE__, #__VA_ARGS__); \
-        }                                                                          \
+#define KMM_GPU_CHECK(...)                                                        \
+    do {                                                                          \
+        auto __code = (__VA_ARGS__);                                              \
+        if (KMM_UNLIKELY(__code != decltype(__code)(0))) {                        \
+            ::kmm::gpu_throw_exception(__code, __FILE__, __LINE__, #__VA_ARGS__); \
+        }                                                                         \
     } while (0)
 
 namespace kmm {
@@ -25,11 +25,11 @@ namespace kmm {
 /// \addtogroup utility
 /// @{
 
-void cuda_throw_exception(CUresult result, const char* file, int line, const char* expression);
+void gpu_throw_exception(GPUResult result, const char* file, int line, const char* expression);
 
-class CUDAException: public std::exception {
+class GPUException: public std::exception {
   public:
-    CUDAException(std::string message = {}) : m_message(std::move(message)) {}
+    GPUException(std::string message = {}) : m_message(std::move(message)) {}
 
     const char* what() const noexcept override {
         return m_message.c_str();
@@ -39,27 +39,27 @@ class CUDAException: public std::exception {
     std::string m_message;
 };
 
-class CUDAContextGuard {
-    KMM_NOT_COPYABLE_OR_MOVABLE(CUDAContextGuard)
+class GPUContextGuard {
+    KMM_NOT_COPYABLE_OR_MOVABLE(GPUContextGuard)
 
   public:
-    CUDAContextGuard(CUcontext context);
-    ~CUDAContextGuard();
+    GPUContextGuard(GPUContext context);
+    ~GPUContextGuard();
 
   private:
-    CUcontext m_context;
+    GPUContext m_context;
 };
 
-CUcontext context_from_stream(CUstream stream);
+GPUContext context_from_stream(GPUStream stream);
 
-struct CUDAContextId {
-    CUDAContextId(CUcontext context);
+struct GPUContextId {
+    GPUContextId(GPUContext context);
 
-    bool operator==(const CUDAContextId& that) const noexcept {
+    bool operator==(const GPUContextId& that) const noexcept {
         return m_id == that.m_id;
     }
 
-    bool operator!=(const CUDAContextId& that) const noexcept {
+    bool operator!=(const GPUContextId& that) const noexcept {
         return !(*this == that);
     }
 
@@ -67,112 +67,107 @@ struct CUDAContextId {
         return m_id;
     }
 
-    friend std::ostream& operator<<(std::ostream&, const CUDAContextId& self);
+    friend std::ostream& operator<<(std::ostream&, const GPUContextId& self);
 
   private:
     unsigned long long m_id;
 };
 
-class CUDAStreamRef;
-class CUDAStream;
+class GPUStreamRef;
+class GPUStreamOwner;
 
-struct CUDAStreamId {
-    CUDAStreamId(CUstream stream);
-    CUDAStreamId(CUstream stream, CUcontext context);
-    CUDAStreamId(const CUDAStreamRef& stream);
-    CUDAStreamId(const CUDAStream& stream);
+struct GPUStreamId {
+    GPUStreamId(GPUStream stream);
+    GPUStreamId(GPUStream stream, GPUContext context);
+    GPUStreamId(const GPUStreamRef& stream);
+    GPUStreamId(const GPUStreamOwner& stream);
 
     unsigned long long get() const noexcept {
         return m_id;
     }
 
-    const CUDAContextId& context() const noexcept {
+    const GPUContextId& context() const noexcept {
         return m_context_id;
     }
 
-    bool operator==(const CUDAStreamId& that) const noexcept {
+    bool operator==(const GPUStreamId& that) const noexcept {
         return m_id == that.m_id && m_context_id == that.m_context_id;
     }
 
-    bool operator!=(const CUDAStreamId& that) const noexcept {
+    bool operator!=(const GPUStreamId& that) const noexcept {
         return !(*this == that);
     }
 
-    friend std::ostream& operator<<(std::ostream&, const CUDAStreamId& self);
+    friend std::ostream& operator<<(std::ostream&, const GPUStreamId& self);
 
   private:
-    CUDAContextId m_context_id;
+    GPUContextId m_context_id;
     unsigned long long m_id;
 };
 
-class CUDAStreamRef {
+class GPUStreamRef {
   public:
-    CUDAStreamRef(CUstream);
+    GPUStreamRef(GPUStream);
 
-    CUcontext context() const noexcept {
+    GPUContext context() const noexcept {
         return m_context;
     }
 
-    CUstream stream() const noexcept {
+    GPUStream stream() const noexcept {
         return m_stream;
     }
 
-    CUDAStreamId stream_id() const noexcept {
+    GPUStreamId stream_id() const noexcept {
         return m_stream_id;
     }
 
-    operator CUstream() const noexcept {
+    operator GPUStream() const noexcept {
         return m_stream;
     }
 
-    friend std::ostream& operator<<(std::ostream&, const CUDAStreamRef& self);
+    friend std::ostream& operator<<(std::ostream&, const GPUStreamRef& self);
 
   private:
-    CUcontext m_context = nullptr;
-    CUstream m_stream = nullptr;
-    CUDAStreamId m_stream_id;
+    GPUContext m_context = nullptr;
+    GPUStream m_stream = nullptr;
+    GPUStreamId m_stream_id;
 };
 
-class CUDAStream {
+class GPUStreamOwner {
   public:
-    CUDAStream(const CUDAStream&) = delete;
-    CUDAStream& operator=(const CUDAStream&) = delete;
+    GPUStreamOwner(const GPUStreamOwner&) = delete;
+    GPUStreamOwner& operator=(const GPUStreamOwner&) = delete;
 
-    explicit CUDAStream(CUcontext context, unsigned int flags = CU_STREAM_NON_BLOCKING);
-    ~CUDAStream();
+    explicit GPUStreamOwner(GPUContext context, unsigned int flags = GPU_STREAM_DEFAULT_FLAGS);
+    ~GPUStreamOwner();
 
-    CUDAStream(CUDAStream&& that) noexcept : m_stream(that.m_stream) {
+    GPUStreamOwner(GPUStreamOwner&& that) noexcept : m_stream(that.m_stream) {
         that.m_stream = nullptr;
     }
 
-    CUDAStream& operator=(CUDAStream&& that) noexcept {
-        if (this != &that) {
-            destroy();
-            m_stream = that.m_stream;
-            that.m_stream = nullptr;
-        }
-
+    GPUStreamOwner& operator=(GPUStreamOwner&& that) noexcept {
+        std::swap(m_stream, that.m_stream);
         return *this;
     }
 
-    CUstream get() const noexcept {
+    GPUStream get() const noexcept {
         return m_stream;
     }
 
-    operator CUstream() const noexcept {
+    operator GPUStream() const noexcept {
         return m_stream;
     }
 
-    operator CUDAStreamRef() const noexcept {
+    operator GPUStreamRef() const noexcept {
         return m_stream;
     }
 
-    friend std::ostream& operator<<(std::ostream&, const CUDAStream& self);
+    friend std::ostream& operator<<(std::ostream&, const GPUStreamOwner& self);
 
   private:
     void destroy() noexcept;
 
-    CUstream m_stream = nullptr;
+    GPUStream m_stream = nullptr;
 };
 
 /// @}
@@ -180,27 +175,27 @@ class CUDAStream {
 }  // namespace kmm
 
 template<>
-struct std::hash<kmm::CUDAContextId> {
-    size_t operator()(const kmm::CUDAContextId& id) const noexcept {
+struct std::hash<kmm::GPUContextId> {
+    size_t operator()(const kmm::GPUContextId& id) const noexcept {
         return std::hash<unsigned long long> {}(id.get());
     }
 };
 
 template<>
-struct std::hash<kmm::CUDAStreamId> {
-    size_t operator()(const kmm::CUDAStreamId& id) const noexcept {
+struct std::hash<kmm::GPUStreamId> {
+    size_t operator()(const kmm::GPUStreamId& id) const noexcept {
         return std::hash<unsigned long long> {}(id.get());
     }
 };
 
 template<>
-struct fmt::formatter<kmm::CUDAStream>: fmt::ostream_formatter {};
+struct fmt::formatter<kmm::GPUStreamOwner>: fmt::ostream_formatter {};
 
 template<>
-struct fmt::formatter<kmm::CUDAStreamRef>: fmt::ostream_formatter {};
+struct fmt::formatter<kmm::GPUStreamRef>: fmt::ostream_formatter {};
 
 template<>
-struct fmt::formatter<kmm::CUDAStreamId>: fmt::ostream_formatter {};
+struct fmt::formatter<kmm::GPUStreamId>: fmt::ostream_formatter {};
 
 template<>
-struct fmt::formatter<kmm::CUDAContextId>: fmt::ostream_formatter {};
+struct fmt::formatter<kmm::GPUContextId>: fmt::ostream_formatter {};

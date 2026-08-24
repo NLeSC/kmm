@@ -10,17 +10,17 @@
 namespace kmm {
 
 DevicePoolAllocator::DevicePoolAllocator(
-    CUcontext context,
+    GPUContext context,
     DevicePoolKind kind,
     size_t max_size
 ) :
     m_context(context),
     m_pool(nullptr),
     m_kind(kind)  {
-    CUDAContextGuard guard {m_context};
+    GPUContextGuard guard {m_context};
 
-    CUdevice device;
-    KMM_CUDA_CHECK(cuCtxGetDevice(&device));
+    GPUDevice device;
+    KMM_GPU_CHECK(gpuCtxGetDevice(&device));
 
     // CUDA assumes maxSize is ignored if its zero, while this constructor uses max_size==MAX
     if (max_size == std::numeric_limits<size_t>::max()) {
@@ -29,10 +29,11 @@ DevicePoolAllocator::DevicePoolAllocator(
 
     switch (m_kind) {
         case DevicePoolKind::Default:
-            KMM_CUDA_CHECK(cuDeviceGetDefaultMemPool(&m_pool, device));
+            KMM_GPU_CHECK(gpuDeviceGetDefaultMemPool(&m_pool, device));
             break;
 
         case DevicePoolKind::Create:
+#if defined(KMM_USE_CUDA)
             CUmemPoolProps props;
             ::memset(&props, 0, sizeof(CUmemPoolProps));
 
@@ -42,20 +43,23 @@ DevicePoolAllocator::DevicePoolAllocator(
             props.maxSize = max_size;
             props.location.id = device;
 
-            KMM_CUDA_CHECK(cuMemPoolCreate(&m_pool, &props));
+            KMM_GPU_CHECK(gpuMemPoolCreate(&m_pool, &props));
+#else
+            throw std::runtime_error("memory pool is only supported with CUDA backend");
+#endif
             break;
     }
 }
 
 DevicePoolAllocator::~DevicePoolAllocator() {
-    CUDAContextGuard guard {m_context};
+    GPUContextGuard guard {m_context};
 
     switch (m_kind) {
         case DevicePoolKind::Default:
             // No need to destroy the default pool
             break;
         case DevicePoolKind::Create:
-            KMM_CUDA_CHECK(cuMemPoolDestroy(m_pool));
+            KMM_GPU_CHECK(gpuMemPoolDestroy(m_pool));
             break;
     }
 }
@@ -65,17 +69,17 @@ AllocResult DevicePoolAllocator::allocate_async(
     BufferLayout layout,
     void** addr_out
 ) {
-    CUdeviceptr device_ptr;
-    CUresult result;
+    GPUDeviceptr device_ptr;
+    GPUResult result;
 
-    CUDAContextGuard guard {m_context};
-    result = cuMemAllocFromPoolAsync(&device_ptr, layout.size_in_bytes, m_pool, stream);
+    GPUContextGuard guard {m_context};
+    result = gpuMemAllocFromPoolAsync(&device_ptr, layout.size_in_bytes, m_pool, stream);
 
-    if (result == CUDA_ERROR_OUT_OF_MEMORY) {
+    if (result == GPU_ERROR_OUT_OF_MEMORY) {
         return AllocResult::ErrorOutOfMemory;
     }
 
-    KMM_CUDA_CHECK(result);
+    KMM_GPU_CHECK(result);
     *addr_out = (void*)device_ptr;
     spdlog::trace("allocate {} bytes of device memory on stream {} (addr: {})", layout.size_in_bytes, stream.id(), *addr_out);
     return AllocResult::Success;
@@ -86,30 +90,29 @@ void DevicePoolAllocator::deallocate_async(
     void* addr,
     BufferLayout layout
 ) {
-    CUdeviceptr device_ptr = (CUdeviceptr)addr;
+    GPUDeviceptr device_ptr = (GPUDeviceptr)addr;
     spdlog::trace("deallocate {} bytes of device memory on stream {} (addr: {})", layout.size_in_bytes, stream.id(), addr);
 
-    CUDAContextGuard guard {m_context};
-    KMM_CUDA_CHECK(cuMemFreeAsync(device_ptr, stream));
+    GPUContextGuard guard {m_context};
+    KMM_GPU_CHECK(gpuMemFreeAsync(device_ptr, stream));
 }
 
-
 AllocResult DevicePoolAllocator::allocate(BufferLayout layout, void** addr_out) {
-    CUdeviceptr device_ptr;
-    CUresult result;
+    GPUDeviceptr device_ptr;
+    GPUResult result;
 
-    CUDAContextGuard guard {m_context};
+    GPUContextGuard guard {m_context};
 
-    // Route through the pool (via the legacy default stream) rather than `cuMemAlloc`, so
+    // Route through the pool (via the legacy default stream) rather than `gpuMemAlloc`, so
     // this allocation is still subject to the pool's `maxSize` and gets reclaimed by `trim`.
-    result = cuMemAllocFromPoolAsync(&device_ptr, layout.size_in_bytes, m_pool, nullptr);
+    result = gpuMemAllocFromPoolAsync(&device_ptr, layout.size_in_bytes, m_pool, nullptr);
 
-    if (result == CUDA_ERROR_OUT_OF_MEMORY) {
+    if (result == GPU_ERROR_OUT_OF_MEMORY) {
         return AllocResult::ErrorOutOfMemory;
     }
 
-    KMM_CUDA_CHECK(result);
-    KMM_CUDA_CHECK(cuStreamSynchronize(nullptr));
+    KMM_GPU_CHECK(result);
+    KMM_GPU_CHECK(gpuStreamSynchronize(nullptr));
 
     spdlog::trace("allocate {} bytes of device memory on stream NULL (addr: {})", layout.size_in_bytes, *addr_out);
     *addr_out = (void*)device_ptr;
@@ -117,17 +120,17 @@ AllocResult DevicePoolAllocator::allocate(BufferLayout layout, void** addr_out) 
 }
 
 void DevicePoolAllocator::deallocate(void* addr, BufferLayout layout) {
-    CUdeviceptr device_ptr = (CUdeviceptr)addr;
+    GPUDeviceptr device_ptr = (GPUDeviceptr)addr;
     spdlog::trace("deallocate {} bytes of device memory on stream NULL (addr: {})", layout.size_in_bytes, addr);
 
-    CUDAContextGuard guard {m_context};
-    KMM_CUDA_CHECK(cuMemFreeAsync(device_ptr, nullptr));
-    KMM_CUDA_CHECK(cuStreamSynchronize(nullptr));
+    GPUContextGuard guard {m_context};
+    KMM_GPU_CHECK(gpuMemFreeAsync(device_ptr, nullptr));
+    KMM_GPU_CHECK(gpuStreamSynchronize(nullptr));
 }
 
 void DevicePoolAllocator::trim(size_t nbytes_remaining) {
-    CUDAContextGuard guard {m_context};
-    KMM_CUDA_CHECK(cuMemPoolTrimTo(m_pool, nbytes_remaining));
+    GPUContextGuard guard {m_context};
+    KMM_GPU_CHECK(gpuMemPoolTrimTo(m_pool, nbytes_remaining));
 }
 
 }  // namespace kmm

@@ -1,7 +1,6 @@
 #pragma once
 
 #include <cstddef>
-#include <cuda_runtime.h>
 #include <string>
 #include <utility>
 #include <vector>
@@ -16,9 +15,9 @@ namespace kmm {
 /// a "device" and its primary CUDA context are the same thing.
 class DeviceInfo {
   public:
-    static constexpr size_t NUM_ATTRIBUTES = CU_DEVICE_ATTRIBUTE_MAX;
+    static constexpr size_t NUM_ATTRIBUTES = GPU_DEVICE_ATTRIBUTE_MAX;
 
-    DeviceInfo(DeviceId id, CUcontext context);
+    DeviceInfo(DeviceId id, GPUContext context);
 
     /**
      * Returns the name of the device as provided by `gpuDeviceGetName`.
@@ -44,21 +43,21 @@ class DeviceInfo {
     /**
      * Return this device as a `GPUdevice`.
      */
-    CUdevice device_ordinal() const {
+    GPUDevice device_ordinal() const {
         return m_device;
     }
 
     /**
      * Return the (primary) CUDA context of this device.
      */
-    CUcontext context() const {
+    GPUContext context() const {
         return m_context;
     }
 
     /**
      * Return the (primary) CUDA context of this device.
      */
-    CUDAContextId context_id() const {
+    GPUContextId context_id() const {
         return m_context_id;
     }
 
@@ -92,13 +91,13 @@ class DeviceInfo {
     /**
      * Returns the value of the provided attribute.
      */
-    int attribute(CUdevice_attribute attrib) const;
+    int attribute(GPUDeviceAttribute attrib) const;
 
   private:
     DeviceId m_id;
-    CUdevice m_device;
-    CUcontext m_context;
-    CUDAContextId m_context_id;
+    GPUDevice m_device;
+    GPUContext m_context;
+    GPUContextId m_context_id;
     std::string m_name;
     size_t m_memory_capacity;
     size_t m_total_memory;
@@ -135,7 +134,7 @@ class SystemInfo {
     /**
      * Find the device that has the given device ordinal.
      */
-    const DeviceInfo& device_by_ordinal(CUdevice ordinal) const;
+    const DeviceInfo& device_by_ordinal(GPUDevice ordinal) const;
 
     /**
      * Returns the highest affinity memory for the given device.
@@ -145,12 +144,12 @@ class SystemInfo {
     /**
      * Returns the device belonging to the given context.
      */
-    const DeviceInfo& device_from_context(CUcontext context) const;
+    const DeviceInfo& device_from_context(GPUContext context) const;
 
     /**
      * Returns the device belonging to the given stream.
      */
-    const DeviceInfo& device_from_stream(CUstream stream) const;
+    const DeviceInfo& device_from_stream(GPUStream stream) const;
 
   private:
     std::vector<DeviceInfo> m_devices;

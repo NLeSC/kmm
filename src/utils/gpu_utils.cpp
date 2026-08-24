@@ -4,90 +4,115 @@
 
 namespace kmm {
 
-void cuda_throw_exception(CUresult result, const char* file, int line, const char* expression) {
+void gpu_throw_exception(GPUResult result, const char* file, int line, const char* expression) {
     const char* name = "UNKNOWN_ERROR";
     const char* description = "unknown error";
-    cuGetErrorName(result, &name);
-    cuGetErrorString(result, &description);
+    gpuGetErrorName(result, &name);
+    gpuGetErrorString(result, &description);
 
-    throw CUDAException(
-        fmt::format("CUDA error: {} ({}) at {}:{}: {}", name, description, file, line, expression)
+    throw GPUException(
+        fmt::format("GPU error: {} ({}) at {}:{}: {}", name, description, file, line, expression)
     );
 }
 
-CUDAContextGuard::CUDAContextGuard(CUcontext context) : m_context(context) {
-    KMM_CUDA_CHECK(cuCtxPushCurrent(context));
+GPUContextGuard::GPUContextGuard(GPUContext context) : m_context(context) {
+    KMM_GPU_CHECK(gpuCtxPushCurrent(context));
 }
 
-CUDAContextGuard::~CUDAContextGuard() {
+GPUContextGuard::~GPUContextGuard() {
     // Destructors must not throw, so the pop result is discarded rather than checked.
-    CUcontext popped = nullptr;
-    cuCtxPopCurrent(&popped);
+    GPUContext popped = nullptr;
+    gpuCtxPopCurrent(&popped);
 }
 
-CUDAContextId::CUDAContextId(CUcontext context) {
-    KMM_CUDA_CHECK(cuCtxGetId(context, &m_id));
+GPUContextId::GPUContextId(GPUContext context) {
+#if defined(KMM_USE_HIP)
+    // HIP has no equivalent of `cuCtxGetId`. The context handle itself is
+    // already a stable, unique identity, so it is used directly.
+    m_id = reinterpret_cast<unsigned long long>(context);
+#else
+    KMM_GPU_CHECK(gpuCtxGetId(context, &m_id));
+#endif
 }
 
-CUcontext context_from_stream(CUstream stream) {
-    CUcontext context;
-    KMM_CUDA_CHECK(cuStreamGetCtx(stream, &context));
+GPUContext context_from_stream(GPUStream stream) {
+    GPUContext context;
+#if defined(KMM_USE_HIP)
+    // HIP has no equivalent of `cuStreamGetCtx`. Instead, resolve the device
+    // the stream was created on and reuse its primary context, which is what
+    // `SystemInfo` already treats as "the" context for that device. The
+    // primary context is retained for the lifetime of the process (see
+    // `system_info.cpp`), so this extra retain/release pair only needs the
+    // handle value, not a lasting reference.
+    GPUDevice device;
+    KMM_GPU_CHECK(gpuStreamGetDevice(stream, &device));
+    KMM_GPU_CHECK(gpuDevicePrimaryCtxRetain(&context, device));
+    gpuDevicePrimaryCtxRelease(device);
+#else
+    KMM_GPU_CHECK(gpuStreamGetCtx(stream, &context));
+#endif
     return context;
 }
 
-CUDAStreamId::CUDAStreamId(CUstream stream) : CUDAStreamId(stream, context_from_stream(stream)) {}
+GPUStreamId::GPUStreamId(GPUStream stream) : GPUStreamId(stream, context_from_stream(stream)) {}
 
-CUDAStreamId::CUDAStreamId(CUstream stream, CUcontext context) : m_context_id(context) {
-    KMM_CUDA_CHECK(cuStreamGetId(stream, &m_id));
+GPUStreamId::GPUStreamId(GPUStream stream, GPUContext context) : m_context_id(context) {
+#if defined(KMM_USE_HIP)
+    // HIP has no equivalent of `cuStreamGetId`. The stream handle itself is
+    // already a stable, unique identity, so it is used directly.
+    m_id = reinterpret_cast<unsigned long long>(stream);
+#else
+    KMM_GPU_CHECK(gpuStreamGetId(stream, &m_id));
+#endif
 }
 
-CUDAStreamId::CUDAStreamId(const CUDAStreamRef& stream) : CUDAStreamId(stream.stream_id()) {}
+GPUStreamId::GPUStreamId(const GPUStreamRef& stream) : GPUStreamId(stream.stream_id()) {}
 
-CUDAStreamId::CUDAStreamId(const CUDAStream& stream) :
-    CUDAStreamId(static_cast<CUDAStreamRef>(stream)) {}
+GPUStreamId::GPUStreamId(const GPUStreamOwner& stream) :
+    GPUStreamId(static_cast<GPUStreamRef>(stream)) {}
 
-CUDAStreamRef::CUDAStreamRef(CUstream stream) :
+GPUStreamRef::GPUStreamRef(GPUStream stream) :
     m_context(context_from_stream(stream)),
     m_stream(stream),
     m_stream_id(stream, m_context) {}
 
-CUDAStream::CUDAStream(CUcontext context, unsigned int flags) :
+GPUStreamOwner::GPUStreamOwner(GPUContext context, unsigned int flags) :
     m_stream([&]() {
-        CUstream result;
-        CUDAContextGuard guard(context);
-        KMM_CUDA_CHECK(cuStreamCreate(&result, flags));
+        GPUStream result;
+        GPUContextGuard guard(context);
+        KMM_GPU_CHECK(gpuStreamCreate(&result, flags));
         return result;
     }()) {}
 
-CUDAStream::~CUDAStream() {
+GPUStreamOwner::~GPUStreamOwner() {
     destroy();
 }
 
-void CUDAStream::destroy() noexcept {
+void GPUStreamOwner::destroy() noexcept {
     if (m_stream != nullptr) {
-        cuStreamDestroy(m_stream);
+        gpuStreamDestroy(m_stream);
         m_stream = nullptr;
     }
 }
 
-std::ostream& operator<<(std::ostream& stream, const CUDAStream& self) {
+std::ostream& operator<<(std::ostream& stream, const GPUStreamOwner& self) {
     if (self.m_stream == nullptr) {
-        return stream << "CUDA-stream: none";
+        return stream << "GPU-stream: none";
     }
 
-    return stream << CUDAStreamRef(self.m_stream);
+    return stream << GPUStreamRef(self.m_stream);
 }
 
-std::ostream& operator<<(std::ostream& stream, const CUDAStreamRef& self) {
+std::ostream& operator<<(std::ostream& stream, const GPUStreamRef& self) {
     return stream << self.m_stream_id;
 }
 
-std::ostream& operator<<(std::ostream& stream, const CUDAStreamId& self) {
-    return stream << "CUDA-stream:" << self.m_id;
+std::ostream& operator<<(std::ostream& stream, const GPUStreamId& self) {
+    return stream << "GPU-stream:" << self.m_id;
 }
 
-std::ostream& operator<<(std::ostream& stream, const CUDAContextId& self) {
-    return stream << "CUDA-context:" << self.m_id;
+std::ostream& operator<<(std::ostream& stream, const GPUContextId& self) {
+    return stream << "GPU-context:" << self.m_id;
 }
 
 }  // namespace kmm

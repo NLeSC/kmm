@@ -17,7 +17,7 @@ class ScopeImpl {
     ScopeImpl(
         Runtime& runtime,
         MemoryId memory_id,
-        std::optional<CUDAStreamRef> stream,
+        std::optional<GPUStreamRef> stream,
         MemoryTransaction parent,
         Args... args
     ) :

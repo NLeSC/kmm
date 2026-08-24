@@ -16,11 +16,11 @@
 namespace kmm {
 
 struct MemorySystem::DeviceState {
-    DeviceState(CUcontext context, std::unique_ptr<Allocator> allocator) :
+    DeviceState(GPUContext context, std::unique_ptr<Allocator> allocator) :
         context(context),
         allocator(std::move(allocator)) {}
 
-    CUcontext context;
+    GPUContext context;
     std::unique_ptr<Allocator> allocator;
 
     MemoryStats stats;
@@ -37,7 +37,7 @@ struct MemorySystem::DeviceState {
 static std::unique_ptr<Allocator> make_host_allocator(
     const RuntimeConfig& config,
     DeviceEventRegistry events,
-    CUcontext context
+    GPUContext context
 ) {
     std::unique_ptr<Allocator> allocator;
     allocator = std::make_unique<PinnedMemoryAllocator>(context);
@@ -61,7 +61,7 @@ static std::unique_ptr<Allocator> make_host_allocator(
 static std::unique_ptr<Allocator> make_device_allocator(
     const RuntimeConfig& config,
     DeviceEventRegistry events,
-    CUcontext context,
+    GPUContext context,
     size_t device_memory_size
 ) {
     std::unique_ptr<Allocator> allocator;
@@ -121,7 +121,7 @@ MemorySystem::MemorySystem(
     m_num_devices(system_info.num_devices()) {
     spdlog::info("initializing memory system with {} device(s)", m_num_devices);
 
-    CUcontext host_context =
+    GPUContext host_context =
         m_num_devices > 0 ? system_info.device(DeviceId(0)).context() : nullptr;
     m_host_allocator = make_host_allocator(config, events, host_context);
 
@@ -134,6 +134,8 @@ MemorySystem::MemorySystem(
         );
     }
 
+    static auto GPU_ERROR_PEER_ACCESS_ALREADY_ENABLED = CUDA_ERROR_PEER_ACCESS_ALREADY_ENABLED;
+
     // Determine, and where possible enable, peer-to-peer access between every device pair.
     for (size_t i = 0; i < m_num_devices; i++) {
         m_peer_access[i][i] = true;
@@ -142,13 +144,13 @@ MemorySystem::MemorySystem(
             int i_can_access_j = 0;
             int j_can_access_i = 0;
 
-            KMM_CUDA_CHECK(cuDeviceCanAccessPeer(
+            KMM_GPU_CHECK(gpuDeviceCanAccessPeer(
                 &i_can_access_j,
                 system_info.device(DeviceId(i)).device_ordinal(),
                 system_info.device(DeviceId(j)).device_ordinal()
             ));
 
-            KMM_CUDA_CHECK(cuDeviceCanAccessPeer(
+            KMM_GPU_CHECK(gpuDeviceCanAccessPeer(
                 &j_can_access_i,
                 system_info.device(DeviceId(j)).device_ordinal(),
                 system_info.device(DeviceId(i)).device_ordinal()
@@ -158,20 +160,20 @@ MemorySystem::MemorySystem(
             m_peer_access[j][i] = j_can_access_i != 0;
 
             if (i_can_access_j) {
-                CUDAContextGuard guard {m_devices[i]->context};
-                CUresult result = cuCtxEnablePeerAccess(m_devices[j]->context, 0);
+                GPUContextGuard guard {m_devices[i]->context};
+                GPUResult result = gpuCtxEnablePeerAccess(m_devices[j]->context);
 
-                if (result != CUDA_ERROR_PEER_ACCESS_ALREADY_ENABLED) {
-                    KMM_CUDA_CHECK(result);
+                if (result != GPU_ERROR_PEER_ACCESS_ALREADY_ENABLED) {
+                    KMM_GPU_CHECK(result);
                 }
             }
 
             if (j_can_access_i) {
-                CUDAContextGuard guard {m_devices[j]->context};
-                CUresult result = cuCtxEnablePeerAccess(m_devices[i]->context, 0);
+                GPUContextGuard guard {m_devices[j]->context};
+                GPUResult result = gpuCtxEnablePeerAccess(m_devices[i]->context);
 
-                if (result != CUDA_ERROR_PEER_ACCESS_ALREADY_ENABLED) {
-                    KMM_CUDA_CHECK(result);
+                if (result != GPU_ERROR_PEER_ACCESS_ALREADY_ENABLED) {
+                    KMM_GPU_CHECK(result);
                 }
             }
 
@@ -353,7 +355,7 @@ bool MemorySystem::same_context(kmm::DeviceId device_id, const kmm::DeviceStream
 AllocResult MemorySystem::allocate_device(
     DeviceId device_id,
     BufferLayout layout,
-    CUdeviceptr* ptr_out,
+    GPUDeviceptr* ptr_out,
     const DeviceStreamId& stream_hint,
     DeviceEventSet& deps_out
 ) {
@@ -375,7 +377,7 @@ AllocResult MemorySystem::allocate_device(
     );
 
     deps_out.insert(event);
-    *ptr_out = reinterpret_cast<CUdeviceptr>(addr);
+    *ptr_out = reinterpret_cast<GPUDeviceptr>(addr);
 
     if (result == AllocResult::Success) {
         device_state(device_id).record_allocation(layout.size_in_bytes);
@@ -394,7 +396,7 @@ AllocResult MemorySystem::allocate_device(
 
 void MemorySystem::deallocate_device(
     DeviceId device_id,
-    CUdeviceptr ptr,
+    GPUDeviceptr ptr,
     BufferLayout layout,
     const DeviceStreamId& stream_hint,
     const DeviceEventSet& deps_in
@@ -428,7 +430,7 @@ void MemorySystem::deallocate_device(
 DeviceEvent MemorySystem::copy_host_to_device(
     DeviceId device_id,
     const void* src_addr,
-    CUdeviceptr dst_addr,
+    GPUDeviceptr dst_addr,
     size_t nbytes,
     const DeviceStreamId& stream_hint,
     const DeviceEventSet& deps_in
@@ -452,8 +454,8 @@ DeviceEvent MemorySystem::copy_host_to_device(
         StreamKind::HostToDevice,
         stream_hint,
         deps_in,
-        [&](CUstream stream) {
-            KMM_CUDA_CHECK(cuMemcpyHtoDAsync(dst_addr, src_addr, nbytes, (CUstream)stream));
+        [&](GPUStream stream) {
+            KMM_GPU_CHECK(gpuMemcpyHtoDAsync(dst_addr, src_addr, nbytes, (GPUStream)stream));
             return nbytes;
         }
     );
@@ -464,7 +466,7 @@ DeviceEvent MemorySystem::copy_host_to_device(
 
 DeviceEvent MemorySystem::copy_device_to_host(
     DeviceId device_id,
-    CUdeviceptr src_addr,
+    GPUDeviceptr src_addr,
     void* dst_addr,
     size_t nbytes,
     const DeviceStreamId& stream_hint,
@@ -489,8 +491,8 @@ DeviceEvent MemorySystem::copy_device_to_host(
         StreamKind::DeviceToHost,
         stream_hint,
         deps_in,
-        [&](CUstream stream) {
-            KMM_CUDA_CHECK(cuMemcpyDtoHAsync(dst_addr, src_addr, nbytes, (CUstream)stream));
+        [&](GPUStream stream) {
+            KMM_GPU_CHECK(gpuMemcpyDtoHAsync(dst_addr, src_addr, nbytes, (GPUStream)stream));
             return nbytes;
         }
     );
@@ -502,8 +504,8 @@ DeviceEvent MemorySystem::copy_device_to_host(
 DeviceEvent MemorySystem::copy_device_to_device(
     DeviceId src_device,
     DeviceId dst_device,
-    CUdeviceptr src_addr,
-    CUdeviceptr dst_addr,
+    GPUDeviceptr src_addr,
+    GPUDeviceptr dst_addr,
     size_t nbytes,
     const DeviceStreamId& stream_hint,
     const DeviceEventSet& deps_in
@@ -522,7 +524,7 @@ DeviceEvent MemorySystem::copy_device_to_device(
         StreamKind::DeviceToDevice,
         deps_in,
         [&](auto stream_id) -> uint64_t {
-            KMM_CUDA_CHECK(cuMemcpyPeerAsync(
+            KMM_GPU_CHECK(gpuMemcpyPeerAsync(
                 dst_addr,
                 device_state(dst_device).context,
                 src_addr,
@@ -543,7 +545,7 @@ AllocResult MemorySystem::allocate_host_and_copy_from_device(
     BufferLayout layout,
     void** dst_addr,
     DeviceId device_id,
-    CUdeviceptr src_addr,
+    GPUDeviceptr src_addr,
     const DeviceStreamId& stream_hint,
     const DeviceEventSet& deps_in,
     DeviceEvent& dep_out
@@ -572,8 +574,8 @@ AllocResult MemorySystem::allocate_host_and_copy_from_device(
             *dst_addr = addr;
 
             try {
-                KMM_CUDA_CHECK(
-                    cuMemcpyDtoHAsync(*dst_addr, src_addr, layout.size_in_bytes, (CUstream)stream)
+                KMM_GPU_CHECK(
+                    gpuMemcpyDtoHAsync(*dst_addr, src_addr, layout.size_in_bytes, (GPUStream)stream)
                 );
                 return layout.size_in_bytes;
             } catch (...) {
@@ -593,7 +595,7 @@ AllocResult MemorySystem::allocate_host_and_copy_from_device(
 AllocResult MemorySystem::allocate_device_and_copy_from_host(
     DeviceId device_id,
     BufferLayout layout,
-    CUdeviceptr* dst_addr,
+    GPUDeviceptr* dst_addr,
     const void* src_addr,
     const DeviceStreamId& stream_hint,
     const DeviceEventSet& deps_in,
@@ -620,7 +622,7 @@ AllocResult MemorySystem::allocate_device_and_copy_from_host(
                 return size_t(0);
             }
 
-            *dst_addr = reinterpret_cast<CUdeviceptr>(addr);
+            *dst_addr = reinterpret_cast<GPUDeviceptr>(addr);
 
             try {
                 spdlog::trace(
@@ -630,8 +632,8 @@ AllocResult MemorySystem::allocate_device_and_copy_from_host(
                     src_addr,
                     *dst_addr
                 );
-                KMM_CUDA_CHECK(
-                    cuMemcpyHtoDAsync(*dst_addr, src_addr, layout.size_in_bytes, (CUstream)stream)
+                KMM_GPU_CHECK(
+                    gpuMemcpyHtoDAsync(*dst_addr, src_addr, layout.size_in_bytes, (GPUStream)stream)
                 );
                 return layout.size_in_bytes;
             } catch (...) {
@@ -651,7 +653,7 @@ AllocResult MemorySystem::allocate_device_and_copy_from_host(
 
 DeviceEvent MemorySystem::fill_device(
     DeviceId device_id,
-    CUdeviceptr addr,
+    GPUDeviceptr addr,
     const FillDescription& description,
     const DeviceStreamId& stream_hint,
     const DeviceEventSet& deps_in
@@ -666,7 +668,7 @@ DeviceEvent MemorySystem::fill_device(
         StreamKind::DeviceToDevice,
         stream_hint,
         deps_in,
-        [&](CUstream stream) {
+        [&](GPUStream stream) {
             fill_async(stream, reinterpret_cast<void*>(addr), description);
             return checked_mul<size_t>(description.num_elements(), description.value.length);
         }
@@ -675,8 +677,8 @@ DeviceEvent MemorySystem::fill_device(
 
 DeviceEvent MemorySystem::reduce_device(
     DeviceId device_id,
-    CUdeviceptr src_addr,
-    CUdeviceptr dst_addr,
+    GPUDeviceptr src_addr,
+    GPUDeviceptr dst_addr,
     const ReductionDescription& description,
     const DeviceStreamId& stream_hint,
     const DeviceEventSet& deps_in
@@ -696,7 +698,7 @@ DeviceEvent MemorySystem::reduce_device(
         StreamKind::DeviceToDevice,
         stream_hint,
         deps_in,
-        [&](CUstream stream) {
+        [&](GPUStream stream) {
             reduce_async(
                 stream,
                 reinterpret_cast<void*>(src_addr),

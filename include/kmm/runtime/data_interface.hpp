@@ -172,7 +172,7 @@ class FlatDataInterface final: public DataInterface {
     DeviceEventRegistry m_events;
     FillValue m_fill_value;
     void* m_host_ptr = nullptr;
-    CUdeviceptr m_device_ptrs[MAX_DEVICES] {};
+    GPUDeviceptr m_device_ptrs[MAX_DEVICES] {};
 };
 
 /// A `DataInterface` that always lives in a single pinned host allocation

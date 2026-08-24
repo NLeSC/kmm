@@ -58,7 +58,7 @@ void fill(void* dst_addr, const FillDescription& description) {
 }
 
 void fill_async(
-    CUstream stream,
+    GPUStream stream,
     void* dst_addr,
     const FillDescription& description
 ) {
@@ -69,7 +69,7 @@ void fill_async(
     size_t element_size = description.value.length;
 
     // The driver API only offers native (strided) memset support for 1/2/4-byte elements,
-    // and only up to one strided axis (`cuMemsetD2D*Async`). Anything wider, or with more
+    // and only up to one strided axis (`gpuMemsetD2D*Async`). Anything wider, or with more
     // than one strided batch axis, requires a small fill kernel, which is not implemented
     // yet.
     if (element_size == 1) {
@@ -77,20 +77,20 @@ void fill_async(
         std::memcpy(&value, fill_value, sizeof(value));
 
         if (n == 0) {
-            KMM_CUDA_CHECK(cuMemsetD8Async((CUdeviceptr)dst_addr, value, 1, stream));
+            KMM_GPU_CHECK(gpuMemsetD8Async((GPUDeviceptr)dst_addr, value, 1, stream));
         } else if (n == 1) {
             const FillDim& dim = description.dims[0];
 
             if (dim.stride == static_cast<memops_stride_type>(element_size)) {
-                KMM_CUDA_CHECK(cuMemsetD8Async(
-                    (CUdeviceptr)dst_addr,
+                KMM_GPU_CHECK(gpuMemsetD8Async(
+                    (GPUDeviceptr)dst_addr,
                     value,
                     static_cast<size_t>(dim.extent),
                     stream
                 ));
             } else {
-                KMM_CUDA_CHECK(cuMemsetD2D8Async(
-                    (CUdeviceptr)dst_addr,
+                KMM_GPU_CHECK(gpuMemsetD2D8Async(
+                    (GPUDeviceptr)dst_addr,
                     static_cast<size_t>(dim.stride),
                     value,
                     1,
@@ -106,20 +106,20 @@ void fill_async(
         std::memcpy(&value, fill_value, sizeof(value));
 
         if (n == 0) {
-            KMM_CUDA_CHECK(cuMemsetD16Async((CUdeviceptr)dst_addr, value, 1, stream));
+            KMM_GPU_CHECK(gpuMemsetD16Async((GPUDeviceptr)dst_addr, value, 1, stream));
         } else if (n == 1) {
             const FillDim& dim = description.dims[0];
 
             if (dim.stride == static_cast<memops_stride_type>(element_size)) {
-                KMM_CUDA_CHECK(cuMemsetD16Async(
-                    (CUdeviceptr)dst_addr,
+                KMM_GPU_CHECK(gpuMemsetD16Async(
+                    (GPUDeviceptr)dst_addr,
                     value,
                     static_cast<size_t>(dim.extent),
                     stream
                 ));
             } else {
-                KMM_CUDA_CHECK(cuMemsetD2D16Async(
-                    (CUdeviceptr)dst_addr,
+                KMM_GPU_CHECK(gpuMemsetD2D16Async(
+                    (GPUDeviceptr)dst_addr,
                     static_cast<size_t>(dim.stride),
                     value,
                     1,
@@ -135,20 +135,20 @@ void fill_async(
         std::memcpy(&value, fill_value, sizeof(value));
 
         if (n == 0) {
-            KMM_CUDA_CHECK(cuMemsetD32Async((CUdeviceptr)dst_addr, value, 1, stream));
+            KMM_GPU_CHECK(gpuMemsetD32Async((GPUDeviceptr)dst_addr, value, 1, stream));
         } else if (n == 1) {
             const FillDim& dim = description.dims[0];
 
             if (dim.stride == static_cast<memops_stride_type>(element_size)) {
-                KMM_CUDA_CHECK(cuMemsetD32Async(
-                    (CUdeviceptr)dst_addr,
+                KMM_GPU_CHECK(gpuMemsetD32Async(
+                    (GPUDeviceptr)dst_addr,
                     value,
                     static_cast<size_t>(dim.extent),
                     stream
                 ));
             } else {
-                KMM_CUDA_CHECK(cuMemsetD2D32Async(
-                    (CUdeviceptr)dst_addr,
+                KMM_GPU_CHECK(gpuMemsetD2D32Async(
+                    (GPUDeviceptr)dst_addr,
                     static_cast<size_t>(dim.stride),
                     value,
                     1,

@@ -48,7 +48,7 @@ class ParallelFor {
         m_block_size(block_size) {}
 
     template<typename... Args>
-    void operator()(CUstream context, Args&&... args) const {
+    void operator()(GPUStream context, Args&&... args) const {
         auto n = checked_cast<int>(m_shape.volume());
 
         if (n == 0) {

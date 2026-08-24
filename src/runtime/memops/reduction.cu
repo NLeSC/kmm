@@ -8,18 +8,15 @@
 #include "kmm/runtime/memops/reduction.hpp"
 #include "kmm/utils/gpu_utils.hpp"
 
-// Checks the `cudaError_t` returned by a CUB/CUDA-runtime call. Distinct from `KMM_CUDA_CHECK`
-// (kmm/utils/gpu_utils.hpp), which only understands `CUresult` (the driver API's error type);
-// CUB is built on top of the runtime API and reports errors as `cudaError_t` instead.
-#define KMM_CUB_CHECK(...)                                                                        \
-    do {                                                                                          \
-        cudaError_t __cub_code = (__VA_ARGS__);                                                   \
-        if (KMM_UNLIKELY(__cub_code != cudaSuccess)) {                                            \
-            throw ::kmm::CUDAException(                                                           \
-                std::string("CUDA runtime error at ") + __FILE__ + ":" + std::to_string(__LINE__) \
-                + " (" #__VA_ARGS__ "): " + cudaGetErrorString(__cub_code)                        \
-            );                                                                                    \
-        }                                                                                         \
+#define KMM_CUB_CHECK(...)                                                                      \
+    do {                                                                                        \
+        auto __cub_code = (__VA_ARGS__);                                            \
+        if (KMM_UNLIKELY(__cub_code != cudaSuccess)) {                                  \
+            throw ::kmm::GPUException(                                                          \
+                std::string("GPU runtime error at ") + __FILE__ + ":" + std::to_string(__LINE__) \
+                + " (" #__VA_ARGS__ "): " + gpuGetErrorStringRuntime(__cub_code)                 \
+            );                                                                                   \
+        }                                                                                        \
     } while (0)
 
 namespace kmm {
@@ -145,7 +142,7 @@ T identity_for(ReductionOp op) {
 
 template<typename T, typename ReduceOp>
 void run_reduce(
-    CUstream stream,
+    GPUStream stream,
     const void* src_addr,
     void* dst_addr,
     const ReductionDescription& description,
@@ -187,9 +184,9 @@ void run_reduce(
     auto reduction_extent = static_cast<long long>(description.reduction_extent);
     bool accumulate = description.accumulate;
 
-    CUdeviceptr scratch_ptr = 0;
-    KMM_CUDA_CHECK(
-        cuMemAllocAsync(&scratch_ptr, sizeof(T) * static_cast<size_t>(num_outputs), stream)
+    GPUDeviceptr scratch_ptr = 0;
+    KMM_GPU_CHECK(
+        gpuMemAllocAsync(&scratch_ptr, sizeof(T) * static_cast<size_t>(num_outputs), stream)
     );
     T* d_scratch = reinterpret_cast<T*>(scratch_ptr);
     const T* d_in = static_cast<const T*>(src_addr);
@@ -217,10 +214,10 @@ void run_reduce(
         stream
     ));
 
-    CUdeviceptr temp_ptr = 0;
+    GPUDeviceptr temp_ptr = 0;
 
     if (temp_storage_bytes > 0) {
-        KMM_CUDA_CHECK(cuMemAllocAsync(&temp_ptr, temp_storage_bytes, stream));
+        KMM_GPU_CHECK(gpuMemAllocAsync(&temp_ptr, temp_storage_bytes, stream));
         d_temp_storage = reinterpret_cast<void*>(temp_ptr);
     }
 
@@ -238,7 +235,7 @@ void run_reduce(
     ));
 
     if (temp_ptr != 0) {
-        KMM_CUDA_CHECK(cuMemFreeAsync(temp_ptr, stream));
+        KMM_GPU_CHECK(gpuMemFreeAsync(temp_ptr, stream));
     }
 
     int blocks = (num_outputs + REDUCE_THREADS_PER_BLOCK - 1) / REDUCE_THREADS_PER_BLOCK;
@@ -250,14 +247,14 @@ void run_reduce(
         accumulate,
         op
     );
-    KMM_CUB_CHECK(cudaGetLastError());
+    KMM_CUB_CHECK(gpuGetLastError());
 
-    KMM_CUDA_CHECK(cuMemFreeAsync(scratch_ptr, stream));
+    KMM_GPU_CHECK(gpuMemFreeAsync(scratch_ptr, stream));
 }
 
 template<typename T>
 void reduce_typed_async(
-    CUstream stream,
+    GPUStream stream,
     const void* src_addr,
     void* dst_addr,
     const ReductionDescription& description
@@ -307,7 +304,7 @@ void reduce_typed_async(
 }  // namespace
 
 void reduce_async(
-    CUstream stream,
+    GPUStream stream,
     const void* src_addr,
     void* dst_addr,
     const ReductionDescription& description

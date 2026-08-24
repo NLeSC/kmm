@@ -27,7 +27,7 @@ class DeviceContext: public Context {
 
     DeviceStream stream() const noexcept;
 
-    operator CUstream() const noexcept {
+    operator GPUStream() const noexcept {
         return *m_stream;
     }
 
@@ -64,7 +64,7 @@ class DeviceContext: public Context {
 
   private:
     DeviceId m_device_id;
-    std::shared_ptr<CUDAStream> m_stream;
+    std::shared_ptr<GPUStreamOwner> m_stream;
 };
 
 template<>
@@ -72,15 +72,27 @@ struct scope_invoke<DeviceContext> {
     template<typename ScopeT, typename F>
     void operator()(DeviceContext& context, ScopeT& scope, DeviceEventSet& deps, F&& fun) const {
         auto strm = context.stream();
-        auto& events = context.runtime().event_registry();
+        GPUContextGuard guard(strm.context());
 
-        CUDAContextGuard guard(strm.context());
+        // block stream until dependencies complete.
         strm.wait_on_event(scope.dependencies());
 
-        scope.apply(std::forward<F>(fun), context);
+        try {
+            // call the callback
+            scope.apply(std::forward<F>(fun), context);
 
-        events.wait_on_default_stream(strm.id());
-        deps.insert(events.record(strm.id()));
+            // sometimes, work is accidentally submitted on the default stream. Sync with the default
+            // stream to make sure
+            strm.wait_on_default_stream();
+
+            // record an event and add it as output dependency.
+            deps.insert(strm.record_event());
+        } catch (...) {
+            // If an error ocurrs, we do not know how much work has been submitted. We block
+            // until the stream completes to make sure no work is half-finished
+            strm.synchronize();
+            throw;
+        }
     }
 };
 

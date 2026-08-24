@@ -73,7 +73,7 @@ struct StreamState {
     KMM_NOT_COPYABLE_OR_MOVABLE(StreamState)
 
   public:
-    StreamState(DeviceStreamId id, CUDAStreamRef stream_ref, std::string name) :
+    StreamState(DeviceStreamId id, GPUStreamRef stream_ref, std::string name) :
         id(id),
         context(stream_ref.context()),
         stream(stream_ref.stream()),
@@ -91,15 +91,15 @@ struct StreamState {
     }
 
     ~StreamState() {
-        CUDAContextGuard guard {context};
+        GPUContextGuard guard {context};
 
         for (const auto& entry : pending_events) {
-            KMM_CUDA_CHECK(cuEventSynchronize(entry.second));
-            KMM_CUDA_CHECK(cuEventDestroy(entry.second));
+            KMM_GPU_CHECK(gpuEventSynchronize(entry.second));
+            KMM_GPU_CHECK(gpuEventDestroy(entry.second));
         }
 
-        for (CUevent event : free_events) {
-            KMM_CUDA_CHECK(cuEventDestroy(event));
+        for (GPUEvent event : free_events) {
+            KMM_GPU_CHECK(gpuEventDestroy(event));
         }
 
         while (!callbacks.empty()) {
@@ -110,21 +110,21 @@ struct StreamState {
     }
 
     // Precondition: caller holds `mutex`.
-    CUevent pop_event_locked() {
+    GPUEvent pop_event_locked() {
         if (!free_events.empty()) {
-            CUevent event = free_events.back();
+            GPUEvent event = free_events.back();
             free_events.pop_back();
             return event;
         }
 
-        CUDAContextGuard guard {context};
-        CUevent event;
-        KMM_CUDA_CHECK(cuEventCreate(&event, CU_EVENT_DISABLE_TIMING));
+        GPUContextGuard guard {context};
+        GPUEvent event;
+        KMM_GPU_CHECK(gpuEventCreate(&event));
         return event;
     }
 
     // Precondition: caller holds `mutex`.
-    CUevent try_resolve_event_locked(uint64_t event_id) const {
+    GPUEvent try_resolve_event_locked(uint64_t event_id) const {
         uint64_t first_pending = first_pending_event.load(std::memory_order_acquire);
 
         if (event_id < first_pending) {
@@ -154,10 +154,10 @@ struct StreamState {
             );
         }
 
-        CUevent event = pop_event_locked();
+        GPUEvent event = pop_event_locked();
 
         try {
-            KMM_CUDA_CHECK(cuEventRecord(event, stream));
+            KMM_GPU_CHECK(gpuEventRecord(event, stream));
         } catch (...) {
             // don't leak the event!
             free_events.push_back(event);
@@ -169,7 +169,7 @@ struct StreamState {
 
         // if there are not pending events, we can quickly check if this new event also completed
         // immediately. This is possible if the stream is idle, and we just recorded after nothing.
-        bool is_complete = pending_events.empty() && cuEventQuery(event) == CUDA_SUCCESS && false;
+        bool is_complete = pending_events.empty() && gpuEventQuery(event) == GPU_SUCCESS && false;
 
         if (is_complete) {
             free_events.push_back(event);
@@ -194,13 +194,13 @@ struct StreamState {
     void make_progress() {
         while (!pending_events.empty()) {
             auto [completed_id, event] = pending_events.front();
-            CUresult result = cuEventQuery(event);
+            GPUResult result = gpuEventQuery(event);
 
-            if (result == CUDA_ERROR_NOT_READY) {
+            if (result == GPU_ERROR_NOT_READY) {
                 break;
             }
 
-            KMM_CUDA_CHECK(result);
+            KMM_GPU_CHECK(result);
 
             pending_events.pop_front();
             free_events.push_back(event);
@@ -220,32 +220,32 @@ struct StreamState {
     }
 
     void trim_event_pool_locked() {
-        CUDAContextGuard context_guard {context};
+        GPUContextGuard context_guard {context};
 
-        for (CUevent event : free_events) {
-            KMM_CUDA_CHECK(cuEventSynchronize(event));
-            KMM_CUDA_CHECK(cuEventDestroy(event));
+        for (GPUEvent event : free_events) {
+            KMM_GPU_CHECK(gpuEventSynchronize(event));
+            KMM_GPU_CHECK(gpuEventDestroy(event));
         }
 
         free_events.clear();
     }
 
     const DeviceStreamId id;
-    const CUcontext context;
-    const CUstream stream;
+    const GPUContext context;
+    const GPUStream stream;
 
     // Canonical driver-level identity of `stream`, cached at registration time so that
-    // `lookup_stream` can compare against it without a fresh `cuStreamGetId` call per candidate.
-    const CUDAStreamId stream_key;
+    // `lookup_stream` can compare against it without a fresh `gpuStreamGetId` call per candidate.
+    const GPUStreamId stream_key;
 
     // Optional human-readable name, included in log messages that refer to this stream.
     const std::string name;
 
     mutable std::mutex mutex;
-    std::vector<CUevent> free_events;
-    // Pairs of (globally unique event id, CUevent), ordered by id (equivalently, by the order
+    std::vector<GPUEvent> free_events;
+    // Pairs of (globally unique event id, GPUEvent), ordered by id (equivalently, by the order
     // in which they were recorded on this stream).
-    std::deque<std::pair<uint64_t, CUevent>> pending_events;
+    std::deque<std::pair<uint64_t, GPUEvent>> pending_events;
     std::priority_queue<EventCallback> callbacks;
 
     std::atomic<uint64_t> first_pending_event {1};
@@ -301,7 +301,7 @@ KMM_REFCNT_TRAITS_IMPL(DeviceEventRegistry::Impl)
 
 DeviceEventRegistry::DeviceEventRegistry() : m_impl(make_refcnt<Impl>()) {}
 
-DeviceStreamId DeviceEventRegistry::register_stream(CUDAStreamRef stream_ref, std::string name)
+DeviceStreamId DeviceEventRegistry::register_stream(GPUStreamRef stream_ref, std::string name)
     const {
     for (uint64_t i = 0; i < MAX_DEVICE_STREAMS; i++) {
         auto id = DeviceStreamId(i);
@@ -345,7 +345,7 @@ void DeviceEventRegistry::unregister_stream(DeviceStreamId stream_id) const {
     // returns, nothing is still relying on the stream being alive. Held under `mutex` for the
     // whole check-and-act so a concurrent call for the same stream either blocks here and then
     // observes `released` and returns, or never gets in until this one has fully finished.
-    KMM_CUDA_CHECK(cuStreamSynchronize(state->stream));
+    KMM_GPU_CHECK(gpuStreamSynchronize(state->stream));
 
     state->make_progress();
     state->trim_event_pool_locked();
@@ -354,7 +354,7 @@ void DeviceEventRegistry::unregister_stream(DeviceStreamId stream_id) const {
     spdlog::debug("unregistered new stream {} from GPU stream {}", state->id, state->stream_key);
 }
 
-std::optional<DeviceStreamId> DeviceEventRegistry::lookup_stream(CUDAStreamId target) const {
+std::optional<DeviceStreamId> DeviceEventRegistry::lookup_stream(GPUStreamId target) const {
     for (uint64_t i = 0; i < MAX_DEVICE_STREAMS; i++) {
         StreamState* state = m_impl->streams[i].load(std::memory_order_acquire);
 
@@ -366,8 +366,8 @@ std::optional<DeviceStreamId> DeviceEventRegistry::lookup_stream(CUDAStreamId ta
     return std::nullopt;
 }
 
-DeviceStreamId DeviceEventRegistry::lookup_or_register_stream(CUDAStreamRef stream_ref) const {
-    CUDAStreamId target = stream_ref.stream_id();
+DeviceStreamId DeviceEventRegistry::lookup_or_register_stream(GPUStreamRef stream_ref) const {
+    GPUStreamId target = stream_ref.stream_id();
 
     for (uint64_t i = 0; i < MAX_DEVICE_STREAMS; i++) {
         StreamState* state = m_impl->streams[i].load(std::memory_order_acquire);
@@ -407,11 +407,11 @@ void DeviceEventRegistry::shutdown() const {
     }
 }
 
-CUstream DeviceEventRegistry::get(DeviceStreamId stream_id) const {
+GPUStream DeviceEventRegistry::get(DeviceStreamId stream_id) const {
     return m_impl->stream(stream_id).stream;
 }
 
-CUcontext DeviceEventRegistry::context(DeviceStreamId stream_id) const {
+GPUContext DeviceEventRegistry::context(DeviceStreamId stream_id) const {
     return m_impl->stream(stream_id).context;
 }
 
@@ -419,7 +419,7 @@ DeviceStream DeviceEventRegistry::stream(DeviceStreamId stream_id) const {
     return DeviceStream(*this, stream_id);
 }
 
-bool DeviceEventRegistry::has_context(DeviceStreamId stream_id, CUDAContextId context_id) const {
+bool DeviceEventRegistry::has_context(DeviceStreamId stream_id, GPUContextId context_id) const {
     if (auto* state = m_impl->stream_opt(stream_id)) {
         return state->stream_key.context() == context_id;
     } else {
@@ -457,13 +457,13 @@ void DeviceEventRegistry::wait_on_event(DeviceStreamId stream_id, DeviceEvent ev
         return;
     }
 
-    CUevent handle = src.try_resolve_event_locked(src_event);
+    GPUEvent handle = src.try_resolve_event_locked(src_event);
 
     if (handle == nullptr) {
         return;
     }
 
-    KMM_CUDA_CHECK(cuStreamWaitEvent(dst.stream, handle, 0));
+    KMM_GPU_CHECK(gpuStreamWaitEvent(dst.stream, handle));
     spdlog::debug("stream {} must wait on event {}", dst.id, event);
 
     // This stream now directly waits on `src_event`, so it is always a valid predecessor of
@@ -490,7 +490,7 @@ void DeviceEventRegistry::wait_on_event(DeviceStreamId stream_id, const DeviceEv
     }
 }
 
-void DeviceEventRegistry::wait_on_event(CUstream stream, DeviceEvent event) const {
+void DeviceEventRegistry::wait_on_event(GPUStream stream, DeviceEvent event) const {
     if (event.is_null()) {
         return;
     }
@@ -499,16 +499,16 @@ void DeviceEventRegistry::wait_on_event(CUstream stream, DeviceEvent event) cons
     uint64_t src_event = event.index();
 
     std::scoped_lock guard {src.mutex};
-    CUevent handle = src.try_resolve_event_locked(src_event);
+    GPUEvent handle = src.try_resolve_event_locked(src_event);
 
     if (handle == nullptr) {
         return;
     }
 
-    KMM_CUDA_CHECK(cuStreamWaitEvent(stream, handle, 0));
+    KMM_GPU_CHECK(gpuStreamWaitEvent(stream, handle));
 }
 
-void DeviceEventRegistry::wait_on_event(CUstream stream, const DeviceEventSet& events) const {
+void DeviceEventRegistry::wait_on_event(GPUStream stream, const DeviceEventSet& events) const {
     for (const auto& event : events) {
         wait_on_event(stream, event);
     }
@@ -516,21 +516,21 @@ void DeviceEventRegistry::wait_on_event(CUstream stream, const DeviceEventSet& e
 
 void DeviceEventRegistry::wait_on_default_stream(DeviceStreamId stream_id) const {
     StreamState& dst = m_impl->stream(stream_id);
-    CUDAContextGuard guard {dst.context};
+    GPUContextGuard guard {dst.context};
 
-    CUevent event;
-    KMM_CUDA_CHECK(cuEventCreate(&event, CU_EVENT_DISABLE_TIMING));
+    GPUEvent event;
+    KMM_GPU_CHECK(gpuEventCreate(&event));
 
     try {
         // `nullptr` refers to the CUDA legacy default stream in the current context.
-        KMM_CUDA_CHECK(cuEventRecord(event, nullptr));
-        KMM_CUDA_CHECK(cuStreamWaitEvent(dst.stream, event, 0));
+        KMM_GPU_CHECK(gpuEventRecord(event, nullptr));
+        KMM_GPU_CHECK(gpuStreamWaitEvent(dst.stream, event));
     } catch (...) {
-        KMM_CUDA_CHECK(cuEventDestroy(event));
+        KMM_GPU_CHECK(gpuEventDestroy(event));
         throw;
     }
 
-    KMM_CUDA_CHECK(cuEventDestroy(event));
+    KMM_GPU_CHECK(gpuEventDestroy(event));
 }
 
 bool DeviceEventRegistry::is_ready(DeviceStreamId stream_id) const {
@@ -539,13 +539,13 @@ bool DeviceEventRegistry::is_ready(DeviceStreamId stream_id) const {
     }
 
     StreamState& state = m_impl->stream(stream_id);
-    CUresult result = cuStreamQuery(state.stream);
+    GPUResult result = gpuStreamQuery(state.stream);
 
-    if (result == CUDA_ERROR_NOT_READY) {
+    if (result == GPU_ERROR_NOT_READY) {
         return false;
     }
 
-    KMM_CUDA_CHECK(result);
+    KMM_GPU_CHECK(result);
     return true;
 }
 
@@ -626,7 +626,7 @@ void DeviceEventRegistry::synchronize(DeviceStreamId stream_id) const {
     StreamState& state = m_impl->stream(stream_id);
 
     auto before = std::chrono::system_clock::now();
-    KMM_CUDA_CHECK(cuStreamSynchronize(state.stream));
+    KMM_GPU_CHECK(gpuStreamSynchronize(state.stream));
     auto after = std::chrono::system_clock::now();
 
     auto duration = after - before;
@@ -644,7 +644,7 @@ void DeviceEventRegistry::synchronize(DeviceEvent event) const {
     }
 
     StreamState& state = m_impl->stream(event.stream());
-    CUevent handle = nullptr;
+    GPUEvent handle = nullptr;
 
     {
         std::lock_guard<std::mutex> guard(state.mutex);
@@ -659,7 +659,7 @@ void DeviceEventRegistry::synchronize(DeviceEvent event) const {
     }
 
     auto before = std::chrono::system_clock::now();
-    KMM_CUDA_CHECK(cuEventSynchronize(handle));
+    KMM_GPU_CHECK(gpuEventSynchronize(handle));
     auto after = std::chrono::system_clock::now();
 
     auto duration = after - before;

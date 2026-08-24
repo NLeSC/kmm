@@ -162,7 +162,7 @@ class Runtime {
      */
     void submit(
         Requisition& req,
-        std::optional<CUDAStreamRef> stream = std::nullopt,
+        std::optional<GPUStreamRef> stream = std::nullopt,
         MemoryTransaction parent = nullptr
     );
 

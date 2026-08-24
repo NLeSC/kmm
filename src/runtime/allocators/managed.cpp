@@ -8,19 +8,19 @@
 
 namespace kmm {
 
-ManagedMemoryAllocator::ManagedMemoryAllocator(CUcontext context) :
+ManagedMemoryAllocator::ManagedMemoryAllocator(GPUContext context) :
     m_context(context) {}
 
 AllocResult ManagedMemoryAllocator::allocate(BufferLayout layout, void** addr_out) {
-    CUDAContextGuard guard {m_context};
-    CUdeviceptr ptr;
-    CUresult result = cuMemAllocManaged(&ptr, layout.size_in_bytes, CU_MEM_ATTACH_GLOBAL);
+    GPUContextGuard guard {m_context};
+    GPUDeviceptr ptr;
+    GPUResult result = gpuMemAllocManaged(&ptr, layout.size_in_bytes);
 
-    if (result == CUDA_ERROR_OUT_OF_MEMORY) {
+    if (result == GPU_ERROR_OUT_OF_MEMORY) {
         return AllocResult::ErrorOutOfMemory;
     }
 
-    KMM_CUDA_CHECK(result);
+    KMM_GPU_CHECK(result);
     *addr_out = (void*)ptr;
     spdlog::trace("allocate {} bytes of managed memory (addr: {})", layout.size_in_bytes, *addr_out);
     return AllocResult::Success;
@@ -29,8 +29,8 @@ AllocResult ManagedMemoryAllocator::allocate(BufferLayout layout, void** addr_ou
 void ManagedMemoryAllocator::deallocate(void* addr, BufferLayout layout) {
     spdlog::trace("deallocate {} bytes of managed memory (addr: {})", layout.size_in_bytes, addr);
 
-    CUDAContextGuard guard {m_context};
-    KMM_CUDA_CHECK(cuMemFree(CUdeviceptr(addr)));
+    GPUContextGuard guard {m_context};
+    KMM_GPU_CHECK(gpuMemFree(GPUDeviceptr(addr)));
 }
 
 }  // namespace kmm

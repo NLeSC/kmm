@@ -8,22 +8,18 @@
 
 namespace kmm {
 
-PinnedMemoryAllocator::PinnedMemoryAllocator(CUcontext context) :
+PinnedMemoryAllocator::PinnedMemoryAllocator(GPUContext context) :
     m_context(context) {}
 
 AllocResult PinnedMemoryAllocator::allocate(BufferLayout layout, void** addr_out) {
-    CUDAContextGuard guard {m_context};
-    CUresult result = cuMemHostAlloc(  //
-        addr_out,
-        layout.size_in_bytes,
-        CU_MEMHOSTALLOC_PORTABLE | CU_MEMHOSTALLOC_DEVICEMAP
-    );
+    GPUContextGuard guard {m_context};
+    GPUResult result = gpuMemHostAlloc(addr_out, layout.size_in_bytes);
 
-    if (result == CUDA_ERROR_OUT_OF_MEMORY) {
+    if (result == GPU_ERROR_OUT_OF_MEMORY) {
         return AllocResult::ErrorOutOfMemory;
     }
 
-    KMM_CUDA_CHECK(result);
+    KMM_GPU_CHECK(result);
     spdlog::trace("allocate {} bytes of pinned memory (addr: {})", layout.size_in_bytes, *addr_out);
     return AllocResult::Success;
 }
@@ -31,8 +27,8 @@ AllocResult PinnedMemoryAllocator::allocate(BufferLayout layout, void** addr_out
 void PinnedMemoryAllocator::deallocate(void* addr, BufferLayout layout) {
     spdlog::trace("deallocate {} bytes of pinned memory (addr: {})", layout.size_in_bytes, addr);
 
-    CUDAContextGuard guard {m_context};
-    KMM_CUDA_CHECK(cuMemFreeHost(addr));
+    GPUContextGuard guard {m_context};
+    KMM_GPU_CHECK(gpuMemFreeHost(addr));
 }
 
 }  // namespace kmm

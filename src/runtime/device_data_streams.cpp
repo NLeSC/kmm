@@ -19,14 +19,14 @@ static constexpr size_t MAX_KINDS = 3;
 struct StreamSlot {
     StreamKind kind;
     DeviceStreamId id;
-    CUDAStream native_stream;
+    GPUStreamOwner native_stream;
     uint64_t estimated_finish_time = 0;
     DeviceEventSet last_preds {};
     DeviceEvent last_event {};
     size_t active_users = 0;
     uint64_t last_acquired = 0;
 
-    StreamSlot(StreamKind kind, DeviceStreamId id, CUDAStream native_stream) :
+    StreamSlot(StreamKind kind, DeviceStreamId id, GPUStreamOwner native_stream) :
         kind(kind),
         id(id),
         native_stream(std::move(native_stream)) {}
@@ -67,7 +67,7 @@ DeviceDataStreams::DeviceDataStreams(
             for (size_t j = 0; j < n; j++) {
                 auto label = fmt::format("gpu{}-{}-{}", i, name, j);
 
-                auto stream = CUDAStream {context};
+                auto stream = GPUStreamOwner {context};
                 auto id = events.register_stream(stream, label);
                 slots.emplace_back(kind, id, std::move(stream));
             }

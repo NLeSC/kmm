@@ -25,11 +25,11 @@ class DeviceStream {
         return m_stream_id;
     }
 
-    CUcontext context() const noexcept {
+    GPUContext context() const noexcept {
         return m_context;
     }
 
-    operator CUstream() const noexcept {
+    operator GPUStream() const noexcept {
         return m_stream;
     }
 
@@ -76,8 +76,8 @@ class DeviceStream {
   private:
     DeviceEventRegistry m_manager;
     DeviceStreamId m_stream_id;
-    CUstream m_stream = nullptr;
-    CUcontext m_context = nullptr;
+    GPUStream m_stream = nullptr;
+    GPUContext m_context = nullptr;
 };
 
 }  // namespace kmm

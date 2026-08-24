@@ -1,9 +1,6 @@
 #pragma once
 
 #include <cstdint>
-#include <cuda.h>
-#include <cuda_runtime.h>
-#include <cuda_runtime_api.h>
 #include <optional>
 #include <string>
 #include <utility>
@@ -30,7 +27,7 @@ class DeviceEventRegistry {
      * to register events or block the stream on existing events. The optional `name` is
      * included in log messages that refer to this stream.
      */
-    DeviceStreamId register_stream(CUDAStreamRef stream_ref, std::string name = "") const;
+    DeviceStreamId register_stream(GPUStreamRef stream_ref, std::string name = "") const;
 
     /**
      * Unregister a stream that was previously registered. After this call, no more events
@@ -41,12 +38,12 @@ class DeviceEventRegistry {
     /**
      * Returns the id of the given stream, or `std::nullopt` if it was not registered.
      */
-    std::optional<DeviceStreamId> lookup_stream(CUDAStreamId target) const;
+    std::optional<DeviceStreamId> lookup_stream(GPUStreamId target) const;
 
     /**
      * Returns the id of the given stream, or `std::nullopt` if it was not registered.
      */
-    DeviceStreamId lookup_or_register_stream(CUDAStreamRef stream_ref) const;
+    DeviceStreamId lookup_or_register_stream(GPUStreamRef stream_ref) const;
 
     /**
      * Calls `unregister_stream` on all registered streams.
@@ -54,14 +51,14 @@ class DeviceEventRegistry {
     void shutdown() const;
 
     /**
-     * Get the CUstream associated with the given stream.
+     * Get the GPUStream associated with the given stream.
      */
-    CUstream get(DeviceStreamId stream_id) const;
+    GPUStream get(DeviceStreamId stream_id) const;
 
     /**
-     * Get the CUcontext associated with the given stream.
+     * Get the GPUContext associated with the given stream.
      */
-    CUcontext context(DeviceStreamId stream_id) const;
+    GPUContext context(DeviceStreamId stream_id) const;
 
     /**
      * Get a `DeviceStream` wrapping the given stream.
@@ -71,7 +68,7 @@ class DeviceEventRegistry {
     /**
      * Check if the given stream id matches the given context id.
      */
-    bool has_context(DeviceStreamId stream_id, CUDAContextId context_id) const;
+    bool has_context(DeviceStreamId stream_id, GPUContextId context_id) const;
 
     /**
      * Record a new event on the given stream.
@@ -104,12 +101,12 @@ class DeviceEventRegistry {
     /**
      * Let the given stream wait until the given event completes.
      */
-    void wait_on_event(CUstream stream, DeviceEvent event) const;
+    void wait_on_event(GPUStream stream, DeviceEvent event) const;
 
     /**
      * Let the given stream wait until all the given events completes.
      */
-    void wait_on_event(CUstream stream, const DeviceEventSet& events) const;
+    void wait_on_event(GPUStream stream, const DeviceEventSet& events) const;
 
     /**
      * Let the given stream wait until all work already enqueued on the CUDA legacy default
