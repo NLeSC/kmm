@@ -22,7 +22,7 @@ class Kernel {
         m_shared_mem(shared_mem) {}
 
     template<typename... Args>
-    void operator()(DeviceContext& context, Args&&... args) const {
+    void operator()(CUstream context, Args&&... args) const {
         m_fun<<<m_grid_dim, m_block_dim, m_shared_mem, context>>>(std::forward<Args>(args)...);
     }
 

@@ -49,9 +49,7 @@ class MemoryManager {
 
     void release_buffer(MemoryBuffer buffer);
 
-    /// Creates a new transaction, optionally as a child of `parent`. Requests created under the
-    /// same transaction are treated as concurrent siblings by out-of-memory detection, rather
-    /// than a chain that can deadlock against itself.
+    /// Creates a new transaction, optionally as a child of `parent`.
     MemoryTransaction create_transaction(MemoryTransaction parent = {});
 
     MemoryRequest create_request(
@@ -62,13 +60,10 @@ class MemoryManager {
         NotifyHandle callback = {}
     );
 
-    Poll poll_request(
-        const DeviceStreamId& stream_hint,
-        const MemoryRequest& request,
-        DeviceEventSet& deps_out
-    );
+    Poll poll_request(const DeviceStreamId& stream_hint, const MemoryRequest& request);
 
-    BufferAccessor access_request(const MemoryRequest& request);
+    /// Returns the accessor for a request that has reached `Ready` (see `poll_request`).
+    BufferAccessor access_request(const MemoryRequest& request, DeviceEventSet& deps_out);
 
     void release_request(MemoryRequest request, const DeviceEventSet& deps = {});
 

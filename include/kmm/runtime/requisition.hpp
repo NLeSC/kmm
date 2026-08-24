@@ -24,27 +24,35 @@ struct RequisitionDep {
     BufferId buffer_id;
     AccessMode mode;
     MemoryRequest request = nullptr;
+    BufferAccessor accessor {};
 };
 
 class Requisition {
-    KMM_NOT_COPYABLE_OR_MOVABLE(Requisition)
-
   public:
-    explicit Requisition(MemoryId memory_id, MemoryTransaction parent = {});
+    Requisition(const Requisition&) = delete;
+    Requisition& operator=(const Requisition&) = delete;
+
+    /// Moves `that`'s state into this object, leaving `that` in the `Released` state (so its
+    /// destructor is a no-op). Requisition owns no external resources and nothing else holds a
+    /// pointer into it, so this is a plain member-wise move plus a sentinel reset.
+    Requisition(Requisition&& that) noexcept;
+    Requisition& operator=(Requisition&& that) noexcept;
+
+    explicit Requisition();
     ~Requisition();
 
     /// Registers `buffer_id` for access with the given mode. Only valid while `Building`. Returns
     /// the index of this buffer's entry, valid for `accessor(index)` once `Ready`.
-    size_t add(BufferId buffer_id, AccessMode mode);
+    size_t add(MemoryId memory_id, BufferId buffer_id, AccessMode mode);
 
     /// Registers `buffer_id` for reduce-mode access. The buffer must already be in reduction
     /// mode (see `Runtime::begin_reduction`). Only valid while `Building`. Returns the index of
     /// this buffer's entry, valid for `accessor(index)` once `Ready`.
-    size_t add_reduction(BufferId buffer_id);
+    size_t add_reduction(MemoryId memory_id, BufferId buffer_id);
 
     /// The accessor for the buffer added at `index` (as returned by `add`). Only valid once
     /// `Ready`.
-    BufferAccessor accessor(Runtime& runtime, size_t index) const;
+    BufferAccessor accessor(size_t index) const;
 
     /// Poisons every buffer accessed by this requisition, so future accesses to them rethrow
     /// `reason` instead of succeeding. See `Runtime::poison_buffer`.
@@ -68,13 +76,10 @@ class Requisition {
   private:
     friend class Runtime;
 
-    MemoryId m_memory_id;
-    std::optional<DeviceStreamId> m_stream;
-    MemoryTransaction m_parent;
+    RequisitionState m_state = RequisitionState::Building;
     MemoryTransaction m_transaction;
     std::vector<RequisitionDep> m_entries;
     DeviceEventSet m_deps;
-    RequisitionState m_state = RequisitionState::Building;
 };
 
 }  // namespace kmm

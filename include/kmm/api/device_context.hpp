@@ -14,14 +14,12 @@
 
 namespace kmm {
 
-// Defined in `kmm/api/parallel_for.hpp`. Forward-declared here so `DeviceContext::parallel_for`
-// can build one without `device_context.hpp` having to include (and thus depend on) it back.
 template<typename F, size_t N>
 class ParallelFor;
 
 class DeviceContext: public Context {
   public:
-    explicit DeviceContext(Runtime runtime, DeviceId device_id, DeviceEventSet deps = {});
+    explicit DeviceContext(Runtime runtime, DeviceId device_id, MemoryTransaction transaction = {});
 
     DeviceId device_id() const noexcept {
         return m_device_id;
@@ -35,12 +33,16 @@ class DeviceContext: public Context {
 
     template<typename... Args>
     Scope<DeviceContext, Args...> scope(Args&&... args) {
-        return Scope<DeviceContext, Args...>(
-            *this,
+        auto scope = std::make_unique<ScopeImpl<Args...>>(
+            m_runtime,
             MemoryId::device(m_device_id),
-            transaction(),
+            *m_stream,
+            m_transaction,
             std::forward<Args>(args)...
         );
+        auto context =
+            std::make_unique<DeviceContext>(m_runtime, m_device_id, scope->transaction());
+        return Scope<DeviceContext, Args...>(std::move(scope), std::move(context));
     }
 
     /// Shorthand for `scope(args...).apply(fun)`.
@@ -61,33 +63,25 @@ class DeviceContext: public Context {
     }
 
   private:
-    template<typename, typename...>
-    friend class Scope;
-
-    template<typename...>
-    friend struct ScopeImpl;
-
-    // See `Context`'s protected rebind constructor.
-    DeviceContext(const DeviceContext& parent, MemoryTransaction transaction) :
-        Context(parent, std::move(transaction)),
-        m_device_id(parent.m_device_id),
-        m_stream(parent.m_stream) {}
-
-    std::optional<CUDAStreamRef> submit_stream() noexcept;
-
-    // Makes this device's CUDA context current on the calling thread for the duration of the
-    // guard. `Scope::apply` calls this before invoking user code, since kernel launches and other
-    // driver-API calls require the context to be active on whichever thread executes them.
-    CUDAContextGuard activate() const {
-        return CUDAContextGuard(runtime().system_info().device(m_device_id).context());
-    }
-
-    DeviceContext child(MemoryTransaction transaction) noexcept {
-        return DeviceContext(*this, std::move(transaction));
-    }
-
     DeviceId m_device_id;
     std::shared_ptr<CUDAStream> m_stream;
+};
+
+template<>
+struct scope_invoke<DeviceContext> {
+    template<typename ScopeT, typename F>
+    void operator()(DeviceContext& context, ScopeT& scope, DeviceEventSet& deps, F&& fun) const {
+        auto strm = context.stream();
+        auto& events = context.runtime().event_registry();
+
+        CUDAContextGuard guard(strm.context());
+        strm.wait_on_event(scope.dependencies());
+
+        scope.apply(std::forward<F>(fun), context);
+
+        events.wait_on_default_stream(strm.id());
+        deps.insert(events.record(strm.id()));
+    }
 };
 
 }  // namespace kmm

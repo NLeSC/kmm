@@ -26,7 +26,6 @@ class Context {
         PolicyT policy = {},
         std::optional<T> fill_value = {}
     ) {
-        KMM_ASSERT(!domain.is_empty());
         return DomainArray<T, DomainT, PolicyT>(
             runtime(),
             domain,
@@ -123,6 +122,15 @@ class Context {
         return from_host(data.data(), data.size());
     }
 
+    void prefetch(const Buffer& buffer, bool invalidate_others = false) {
+        buffer.prefetch(affinity_memory_id(), invalidate_others);
+    }
+
+    template<typename T, typename DomainT, typename PolicyT>
+    void prefetch(const DomainArray<T, DomainT, PolicyT>& src, bool invalidate_others = false) {
+        prefetch(src.buffer(), invalidate_others);
+    }
+
     const Runtime& runtime() const noexcept {
         return m_runtime;
     }
@@ -155,12 +163,15 @@ class Context {
 
     template<typename... Args>
     Scope<Context, Args...> host_scope(Args&&... args) {
-        return Scope<Context, Args...>(
-            *this,
+        auto scope = std::make_unique<ScopeImpl<Args...>>(
+            m_runtime,
             MemoryId::host(),
+            std::nullopt,
             m_transaction,
             std::forward<Args>(args)...
         );
+        auto context = std::make_unique<Context>(m_runtime, scope->transaction());
+        return Scope<Context, Args...>(std::move(scope), std::move(context));
     }
 
     /// Shorthand for `host_scope(args...).apply(fun)`.
@@ -173,39 +184,17 @@ class Context {
         return MemoryId::host();
     }
 
-  protected:
-    template<typename, typename...>
-    friend class Scope;
-
-    template<typename...>
-    friend struct ScopeImpl;
-
-    // Rebinds `parent` to a new transaction, sharing its runtime/memory_id. Used by `Scope` to
-    // give `apply`'s callback a context scoped to the requisition's own (child) transaction, and
-    // by derived classes (e.g. `DeviceContext`) to do the same for their own extra state.
-    Context(const Context& parent, MemoryTransaction transaction) :
-        m_runtime(parent.m_runtime),
-        m_transaction(std::move(transaction)) {}
-    std::optional<CUDAStreamRef> submit_stream() noexcept {
-        return std::nullopt;
-    }
-
-    // Hook for `Scope::apply`: makes this context's device "active" (e.g. current CUDA context)
-    // on the calling thread before user code runs. The host context has nothing to activate.
-    struct ActivateGuard {};
-    ActivateGuard activate() const noexcept {
-        return {};
-    }
-
-    // Returns a copy of this context scoped to `transaction`. `Scope` calls this (rather than
-    // constructing `Ctx` itself) so a context type is free to hand back a different type here --
-    // `Scope` deduces whatever this returns instead of assuming it matches `Ctx`.
-    Context child(MemoryTransaction transaction) noexcept {
-        return Context(*this, std::move(transaction));
-    }
-
     Runtime m_runtime;
     MemoryTransaction m_transaction;
+};
+
+template<>
+struct scope_invoke<Context> {
+    template<typename ScopeT, typename F>
+    void operator()(Context& context, ScopeT& scope, DeviceEventSet& deps, F&& fun) const {
+        context.runtime().synchronize(scope.dependencies());
+        scope.apply(std::forward<F>(fun), context);
+    }
 };
 
 }  // namespace kmm

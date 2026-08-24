@@ -72,11 +72,11 @@ void Buffer::copy_to(void* dest, size_t nbytes, size_t offset) const {
     assert_impl(m_impl);
     auto runtime = m_impl->runtime;
 
-    Requisition req {MemoryId::host()};
-    req.add(id(), AccessMode::Read);
-    runtime.submit(std::nullopt, req);
+    Requisition req;
+    req.add(MemoryId::host(), id(), AccessMode::Read);
+    runtime.submit(req);
 
-    auto accessor = req.accessor(runtime, 0);
+    auto accessor = req.accessor(0);
     KMM_ASSERT(accessor.memory_id == MemoryId::host());
     KMM_ASSERT(nbytes <= accessor.size_in_bytes);
     KMM_ASSERT(offset <= accessor.size_in_bytes - nbytes);
@@ -89,11 +89,11 @@ void Buffer::copy_to(void* dest, size_t nbytes, size_t offset) const {
 void Buffer::copy_from(const void* dest, size_t nbytes, size_t offset) const {
     auto runtime = m_impl->runtime;
 
-    Requisition req {MemoryId::host()};
-    req.add(id(), AccessMode::ReadWrite);
-    runtime.submit(std::nullopt, req);
+    Requisition req;
+    req.add(MemoryId::host(), id(), AccessMode::ReadWrite);
+    runtime.submit(req);
 
-    auto accessor = req.accessor(runtime, 0);
+    auto accessor = req.accessor(0);
     KMM_ASSERT(accessor.memory_id == MemoryId::host());
     KMM_ASSERT(nbytes <= accessor.size_in_bytes);
     KMM_ASSERT(offset <= accessor.size_in_bytes - nbytes);

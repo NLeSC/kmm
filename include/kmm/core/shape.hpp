@@ -39,12 +39,10 @@ class Shape: public Vec<T, N> {
 
     /// Create a shape from another shape. Throws on overflow.
     template<size_t M, typename U>
-    KMM_HOST_DEVICE constexpr Shape(const Shape<M, U>& that) {
+    KMM_HOST_DEVICE constexpr Shape(const Shape<M, U>& that) : storage_type(Shape::from(that)) {
         if (!that.template is_convertible_to<N, T>()) {
             throw_overflow_exception();
         }
-
-        *this = Shape::from(that);
     }
 
     /// Create a shape from another shape. Does not throw on overflow.

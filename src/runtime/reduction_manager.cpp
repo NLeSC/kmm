@@ -129,7 +129,7 @@ struct PartialFold {
             request = manager.create_request(buffer, memory_id, Access::ReadOnly, transaction);
         }
 
-        return manager.poll_request(DeviceStreamId::null(), request, request_deps);
+        return manager.poll_request(DeviceStreamId::null(), request);
     }
 
     void submit(
@@ -139,7 +139,7 @@ struct PartialFold {
         const ReductionDescription& description,
         const DeviceEventSet& home_deps
     ) {
-        void* local_addr = manager.access_request(request).address;
+        void* local_addr = manager.access_request(request, request_deps).address;
         request_deps.insert(home_deps);
 
         if (memory_id.is_host()) {
@@ -242,7 +242,16 @@ struct ReductionMemoryJob {
         }
 
         DeviceStream stream_hint = {};
-        Poll home_ready = manager.poll_request(DeviceStreamId::null(), home_req, home_deps);
+        Poll home_ready = manager.poll_request(DeviceStreamId::null(), home_req);
+
+        // Captured once: after the first partial folds into `home_buffer`, further partials
+        // must wait on `chain_deps` (the previous fold's completion) instead, so `home_deps` is
+        // deliberately left empty by `try_finalize_active` after that and never repopulated here.
+        if (home_ready == Poll::Ready && !home_deps_captured) {
+            home_accessor = manager.access_request(home_req, home_deps);
+            home_deps_captured = true;
+        }
+
         bool work_remaining = active_index.has_value();
 
         for (size_t i = 0; i < partials.size(); i++) {
@@ -275,13 +284,7 @@ struct ReductionMemoryJob {
                 home_buffer_initialized || folded_count > 0
             );
 
-            partial.submit(
-                manager,
-                system,
-                manager.access_request(home_req).address,
-                description,
-                chain_deps
-            );
+            partial.submit(manager, system, home_accessor.address, description, chain_deps);
 
             active_index = i;
 
@@ -322,6 +325,8 @@ struct ReductionMemoryJob {
     size_t folded_count = 0;
     MemoryRequest home_req;
     MemoryTransaction transaction;
+    BufferAccessor home_accessor {};
+    bool home_deps_captured = false;
     DeviceEventSet home_deps;
     DeviceEventSet chain_deps;
     std::vector<PartialFold> partials;

@@ -40,7 +40,7 @@ __global__ void parallel_for_kernel(Shape<N, IndexT> shape, F fun, Args... args)
 template<typename F, size_t N>
 class ParallelFor {
   public:
-    using index_type = default_index_type;
+    using index_type = int;
 
     explicit ParallelFor(Shape<N> shape, F fun, unsigned int block_size = 256) :
         m_shape(shape),
@@ -48,14 +48,14 @@ class ParallelFor {
         m_block_size(block_size) {}
 
     template<typename... Args>
-    void operator()(DeviceContext& context, Args&&... args) const {
-        auto n = static_cast<unsigned int>(m_shape.volume());
+    void operator()(CUstream context, Args&&... args) const {
+        auto n = checked_cast<int>(m_shape.volume());
 
         if (n == 0) {
             return;
         }
 
-        unsigned int grid_size = (n + m_block_size - 1) / m_block_size;
+        int grid_size = (n + m_block_size - 1) / m_block_size;
 
         Kernel<decltype(&detail::parallel_for_kernel<F, N, index_type, std::decay_t<Args>...>)>
             kernel(

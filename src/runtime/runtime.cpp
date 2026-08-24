@@ -316,7 +316,11 @@ void Runtime::release_buffer(BufferId id) {
     m_impl->buffers.erase(it);
 }
 
-void Runtime::submit(std::optional<CUDAStreamRef> stream, Requisition& req) {
+void Runtime::submit(
+    Requisition& req,
+    std::optional<CUDAStreamRef> stream,
+    MemoryTransaction parent
+) {
     std::unique_lock<std::mutex> guard(m_impl->mutex);
     KMM_ASSERT(req.m_state == RequisitionState::Building);
 
@@ -324,10 +328,9 @@ void Runtime::submit(std::optional<CUDAStreamRef> stream, Requisition& req) {
 
     if (stream.has_value()) {
         stream_id = m_impl->event_registry.lookup_or_register_stream(*stream);
-        req.m_stream = stream_id;
     }
 
-    req.m_transaction = m_impl->memory_manager.create_transaction(req.m_parent);
+    req.m_transaction = m_impl->memory_manager.create_transaction(parent);
 
     for (size_t i = 0; i < req.m_entries.size(); i++) {
         auto& it = req.m_entries[i];
@@ -391,14 +394,17 @@ void Runtime::submit(std::optional<CUDAStreamRef> stream, Requisition& req) {
         bool is_ready = true;
 
         for (auto& entry : req.m_entries) {
-            if (m_impl->memory_manager.poll_request(stream_id, entry.request, req.m_deps)
-                == Poll::Pending) {
+            if (m_impl->memory_manager.poll_request(stream_id, entry.request) == Poll::Pending) {
                 is_ready = false;
             }
         }
 
         return is_ready;
     });
+
+    for (auto& entry : req.m_entries) {
+        entry.accessor = m_impl->memory_manager.access_request(entry.request, req.m_deps);
+    }
 
     if (stream_id.is_null()) {
         for (const auto& dep : req.m_deps) {
@@ -413,11 +419,6 @@ void Runtime::submit(std::optional<CUDAStreamRef> stream, Requisition& req) {
     req.m_state = RequisitionState::Ready;
 }
 
-BufferAccessor Runtime::accessor(const kmm::RequisitionDep& dep) {
-    std::lock_guard<std::mutex> guard(m_impl->mutex);
-    return m_impl->memory_manager.access_request(dep.request);
-}
-
 void Runtime::release(Requisition& req, DeviceEventSet deps) {
     std::lock_guard<std::mutex> guard(m_impl->mutex);
     KMM_ASSERT(req.m_state != RequisitionState::Released);
@@ -425,17 +426,10 @@ void Runtime::release(Requisition& req, DeviceEventSet deps) {
 
     deps.insert(req.m_deps);
 
-    if (req.m_stream) {
-        m_impl->event_registry.wait_on_default_stream(*req.m_stream);
-        deps.insert(m_impl->event_registry.record(*req.m_stream));
-    }
-
     for (auto& entry : req.m_entries) {
         m_impl->find_entry(entry.buffer_id).record_access(entry.memory_id, entry.mode, deps);
         m_impl->memory_manager.release_request(std::move(entry.request), deps);
     }
-
-    req.m_stream = std::nullopt;
 }
 
 static DeviceEvent do_copy(
@@ -554,19 +548,15 @@ DeviceEvent Runtime::submit_copy(
 
     try {
         m_impl->poll_until_completion(guard, [&] {
-            auto dst_status = m_impl->memory_manager.poll_request(stream_hint, dst_req, deps);
-            auto src_status = m_impl->memory_manager.poll_request(stream_hint, src_req, deps);
+            auto dst_status = m_impl->memory_manager.poll_request(stream_hint, dst_req);
+            auto src_status = m_impl->memory_manager.poll_request(stream_hint, src_req);
             return src_status == Poll::Ready && dst_status == Poll::Ready;
         });
 
-        event = do_copy(
-            guard,
-            m_impl.get(),
-            m_impl->memory_manager.access_request(dst_req),
-            m_impl->memory_manager.access_request(src_req),
-            description,
-            deps
-        );
+        auto dst_accessor = m_impl->memory_manager.access_request(dst_req, deps);
+        auto src_accessor = m_impl->memory_manager.access_request(src_req, deps);
+
+        event = do_copy(guard, m_impl.get(), dst_accessor, src_accessor, description, deps);
     } catch (...) {
         if (!same_buffer) {
             m_impl->memory_manager.release_request(src_req);

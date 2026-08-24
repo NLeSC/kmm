@@ -119,14 +119,14 @@ class LaunchArg<Reduce<DomainArray<T, DomainT, PolicyT>>> {
 
     explicit LaunchArg(const Reduce<DomainArray<T, DomainT, PolicyT>>& array) : m_array(array) {}
 
-    void acquire(Runtime& runtime, Requisition& req) {
-        m_index = req.add_reduction(m_array.buffer().id());
+    void acquire(Runtime& runtime, Requisition& req, MemoryId memory_id) {
+        m_index = req.add_reduction(memory_id, m_array.buffer().id());
     }
 
     // Assumes `req` has already been polled to `Poll::Ready` by `Context::scope` -- see the
     // matching comment on `detail::LaunchArgArray::resolve`.
     resolve_type resolve(Runtime& runtime, Requisition& req) {
-        auto accessor = req.accessor(runtime, m_index);
+        auto accessor = req.accessor(m_index);
         auto* data = static_cast<typename resolve_type::pointer>(accessor.address);
         return resolve_type(data, m_array.layout());
     }

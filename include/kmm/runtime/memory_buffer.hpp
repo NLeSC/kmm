@@ -289,12 +289,7 @@ struct MemoryBufferImpl: reference_count<MemoryBufferImpl> {
 
     // Called once a request's location has been granted, right before the
     // caller is allowed to actually read/write through it.
-    Poll before_access(
-        const DeviceStreamId& stream_hint,
-        MemoryId memory_id,
-        Access mode,
-        DeviceEventSet& deps_out
-    );
+    Poll before_access(const DeviceStreamId& stream_hint, MemoryId memory_id, Access mode);
 
     // Called right after the caller is done reading/writing through a
     // granted location, recording the resulting dependencies.
@@ -304,7 +299,12 @@ struct MemoryBufferImpl: reference_count<MemoryBufferImpl> {
     // still being produced by an in-flight `pending_future`.
     Poll poll_copy(const DeviceStreamId& stream_hint, MemoryId src_id, MemoryId dst_id);
     void do_copy(const DeviceStreamId& stream_hint, MemoryId src_id, MemoryId dst_id);
-    BufferAccessor accessor(MemoryId memory_id, Access mode);
+
+    // Returns the accessor granting access to this buffer (once `before_access` has returned
+    // `Ready`), and inserts into `deps_out` the events that must complete before it is safe to
+    // read/write through it. Reads live off the location's current epoch/write/read events, so
+    // this may safely be called after `before_access` rather than only from within it.
+    BufferAccessor access(MemoryId memory_id, Access mode, DeviceEventSet& deps_out);
 
     const std::string name;
 

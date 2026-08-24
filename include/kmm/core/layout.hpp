@@ -384,7 +384,7 @@ class Layout {
     using domain_traits = detail::domain_traits<domain_type>;
     static constexpr size_t rank = domain_traits::rank;
     using index_type = typename domain_traits::index_type;
-    using ndindex_type = Vec<index_type, rank>;
+    using ndindex_type = Point<rank, index_type>;
     using shape_type = Shape<rank, index_type>;
     using range_type = Range<index_type>;
     using bounds_type = Bounds<rank, index_type>;
@@ -663,14 +663,9 @@ class Layout {
         return shift_offset(-offset_span().start);
     }
 
-    /// Returns whether this layout's mapping equals what `policy` would produce for this layout's
-    /// domain (`policy` defaults to a default-constructed `policy_type`). For a self-mapping
-    /// policy (i.e. `policy_type` is itself a `Strides<...>`, as used by `with_mapping`,
-    /// `drop_axis`, `zero_origin`, etc.), `apply` is the identity, so this is only meaningful if
-    /// `policy` is set to the mapping being checked against (e.g. `is_policy_mapping(mapping())`
-    /// is trivially true).
+    /// Returns whether the strides of this layout where produced by the given policy.
     template<typename OtherPolicyT = policy_type>
-    KMM_HOST_DEVICE bool is_policy_mapping(const OtherPolicyT& policy = {}) const noexcept {
+    KMM_HOST_DEVICE bool is_mapping_from_policy(const OtherPolicyT& policy = {}) const noexcept {
         return m_mapping
             == detail::policy_traits<OtherPolicyT, domain_type>::apply(policy, m_domain);
     }

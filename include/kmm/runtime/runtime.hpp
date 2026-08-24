@@ -18,7 +18,6 @@ namespace kmm {
 
 class RuntimeImpl;
 class Requisition;
-class RequisitionDep;
 
 /// Top-level handle to the KMM runtime: owns the system's `SystemInfo`, `DeviceStreamRegistry`,
 /// `MemorySystem`, and `MemoryManager`, and exposes the buffer/request operations built on top of
@@ -161,12 +160,11 @@ class Runtime {
      * the stream and this method returns immediately. If no stream is provided, the method blocks
      * until the dependencies are available.
      */
-    void submit(std::optional<CUDAStreamRef> stream, Requisition& req);
-
-    /**
-     * Returns the accessor granting access to the buffer targeted by a submitted memory request.
-     */
-    BufferAccessor accessor(const RequisitionDep& dep);
+    void submit(
+        Requisition& req,
+        std::optional<CUDAStreamRef> stream = std::nullopt,
+        MemoryTransaction parent = nullptr
+    );
 
     /**
      * Release a submitted requisition, allowing others to access its buffers once `deps` complete.

@@ -119,14 +119,14 @@ TEST_CASE("Layout::is_contiguous") {
     }
 }
 
-TEST_CASE("Layout::is_policy_mapping") {
+TEST_CASE("Layout::is_mapping_from_policy") {
     auto layout = make_layout<RowMajor>(Shape<2, int>(4, 5));
-    CHECK(layout.is_policy_mapping());
-    CHECK_FALSE(layout.is_policy_mapping<ColMajor>());
+    CHECK(layout.is_mapping_from_policy());
+    CHECK_FALSE(layout.is_mapping_from_policy<ColMajor>());
 
     using TestLayout = ::kmm::Layout<Shape<2, int>, Strided>;
     TestLayout mismatched(Shape<2, int>(4, 5), TestLayout::mapping_type(1, 1));
-    CHECK_FALSE(mismatched.is_policy_mapping());
+    CHECK_FALSE(mismatched.is_mapping_from_policy());
 }
 
 TEST_CASE("Layout::with_domain/with_mapping") {

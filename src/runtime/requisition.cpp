@@ -5,35 +5,51 @@
 
 namespace kmm {
 
-Requisition::Requisition(MemoryId memory_id, MemoryTransaction parent) :
-    m_memory_id(memory_id),
-    m_parent(std::move(parent)) {}
+Requisition::Requisition() {}
 
 Requisition::~Requisition() {
     KMM_ASSERT(m_state == RequisitionState::Released);
 }
 
-size_t Requisition::add(BufferId buffer_id, AccessMode mode) {
+Requisition::Requisition(Requisition&& that) noexcept :
+    m_state(std::exchange(that.m_state, RequisitionState::Released)),
+    m_transaction(std::move(that.m_transaction)),
+    m_entries(std::move(that.m_entries)),
+    m_deps(std::move(that.m_deps)) {}
+
+Requisition& Requisition::operator=(Requisition&& that) noexcept {
+    if (this != &that) {
+        KMM_ASSERT(m_state == RequisitionState::Released);
+        m_state = std::exchange(that.m_state, RequisitionState::Released);
+        m_transaction = std::move(that.m_transaction);
+        m_entries = std::move(that.m_entries);
+        m_deps = std::move(that.m_deps);
+    }
+
+    return *this;
+}
+
+size_t Requisition::add(MemoryId memory_id, BufferId buffer_id, AccessMode mode) {
     KMM_ASSERT(m_state == RequisitionState::Building);
 
     size_t index = m_entries.size();
-    m_entries.push_back({m_memory_id, buffer_id, mode});
+    m_entries.push_back({memory_id, buffer_id, mode});
 
     return index;
 }
 
-size_t Requisition::add_reduction(BufferId buffer_id) {
+size_t Requisition::add_reduction(MemoryId memory_id, BufferId buffer_id) {
     KMM_ASSERT(m_state == RequisitionState::Building);
 
     size_t index = m_entries.size();
-    m_entries.push_back({m_memory_id, buffer_id, AccessMode::Reduce});
+    m_entries.push_back({memory_id, buffer_id, AccessMode::Reduce});
 
     return index;
 }
 
-BufferAccessor Requisition::accessor(Runtime& runtime, size_t index) const {
+BufferAccessor Requisition::accessor(size_t index) const {
     KMM_ASSERT(m_state == RequisitionState::Ready);
-    return runtime.accessor(m_entries[index]);
+    return m_entries[index].accessor;
 }
 
 void Requisition::poison(Runtime& runtime, std::exception_ptr reason) const noexcept {

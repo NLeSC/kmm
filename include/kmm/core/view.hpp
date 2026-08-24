@@ -285,8 +285,7 @@ class DomainView: public detail::DomainViewBase<DomainView<T, LayoutT, AccessorT
         return m_accessor.dereference(data_at(index));
     }
 
-    template<typename IndexT = index_type>
-    KMM_HOST_DEVICE reference operator[](const Vec<IndexT, rank>& index) const noexcept {
+    KMM_HOST_DEVICE reference operator[](const ndindex_type& index) const noexcept {
         return access(index);
     }
 

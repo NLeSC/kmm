@@ -510,11 +510,7 @@ MemoryRequest MemoryManager::create_request(
     return req;
 }
 
-Poll MemoryManager::poll_request(
-    const DeviceStreamId& stream_hint,
-    const MemoryRequest& request,
-    DeviceEventSet& deps_out
-) {
+Poll MemoryManager::poll_request(const DeviceStreamId& stream_hint, const MemoryRequest& request) {
     MemoryManager::Impl& mgr = *m_impl;
     MemoryRequestImpl* req = request.get();
     auto* buf = req->buffer.get();
@@ -538,7 +534,7 @@ Poll MemoryManager::poll_request(
     }
 
     if (req->state == MemoryRequestImpl::State::Granted) {
-        if (buf->before_access(stream_hint, memory_id, req->mode, deps_out) == Poll::Pending) {
+        if (buf->before_access(stream_hint, memory_id, req->mode) == Poll::Pending) {
             return Poll::Pending;
         }
 
@@ -551,12 +547,15 @@ Poll MemoryManager::poll_request(
     return Poll::Ready;
 }
 
-BufferAccessor MemoryManager::access_request(const MemoryRequest& request) {
+BufferAccessor MemoryManager::access_request(
+    const MemoryRequest& request,
+    DeviceEventSet& deps_out
+) {
     auto* req = request.get();
     auto* buf = req->buffer.get();
 
     KMM_ASSERT(req->state == MemoryRequestImpl::State::Ready);
-    return buf->accessor(req->memory_id, req->mode);
+    return buf->access(req->memory_id, req->mode, deps_out);
 }
 
 void MemoryManager::release_request(MemoryRequest request, const DeviceEventSet& deps) {
@@ -612,9 +611,9 @@ void MemoryManager::prefetch_buffer(const MemoryBuffer& buffer, MemoryId memory_
     try {
         req = create_request(buffer, memory_id, mode);
 
-        if (poll_request(stream_hint, req, deps) == Poll::Ready) {
+        if (poll_request(stream_hint, req) == Poll::Ready) {
             // Say hi!
-            access_request(req);
+            access_request(req, deps);
         }
     } catch (const std::exception&) {
         // e.g. out of memory, drop the hint.

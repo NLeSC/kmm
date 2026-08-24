@@ -377,11 +377,24 @@ DeviceEventSet MemoryBufferImpl::invalidate_all() {
     return deps;
 }
 
+// wait for:
+// Exclusive waits for Exclusive, SharedWrite, ReadOnly
+// ReadOnly wait for Exclusive, SharedWrite
+// SharedWrite wait for Exclusive
+static Access waiting_mode_for(Access mode) {
+    if (mode == Access::Exclusive) {
+        return Access::ReadOnly;
+    } else if (mode == Access::ReadOnly) {
+        return Access::SharedWrite;
+    } else {
+        return Access::Exclusive;
+    }
+}
+
 Poll MemoryBufferImpl::before_access(
     const DeviceStreamId& stream_hint,
     MemoryId memory_id,
-    Access mode,
-    DeviceEventSet& deps_out
+    Access mode
 ) {
     // 1) ensure that the allocation contains valid data
     if (ensure_alloc_valid(stream_hint, memory_id) == Poll::Pending) {
@@ -393,26 +406,22 @@ Poll MemoryBufferImpl::before_access(
         invalidate_other_allocs(memory_id);
     }
 
-    // wait for:
-    // Exclusive waits for Exclusive, SharedWrite, ReadOnly
-    // ReadOnly wait for Exclusive, SharedWrite
-    // SharedWrite wait for Exclusive
-    Access waiting_mode;
-    if (mode == Access::Exclusive) {
-        waiting_mode = Access::ReadOnly;
-    } else if (mode == Access::ReadOnly) {
-        waiting_mode = Access::SharedWrite;
-    } else {
-        waiting_mode = Access::Exclusive;
-    }
-
-    // 3) collect the dependencies needed before the buffer can be accessed
+    // Hint the eventual access so the backend can prefetch, if it wants to.
     auto& loc = location(memory_id);
-    const auto& deps = loc.retrieve_access(waiting_mode);
-    data->hint_access(memory_id, stream_hint, deps);
-    deps_out.insert(deps);
+    data->hint_access(memory_id, stream_hint, loc.retrieve_access(waiting_mode_for(mode)));
 
     return Poll::Ready;
+}
+
+BufferAccessor MemoryBufferImpl::access(MemoryId memory_id, Access mode, DeviceEventSet& deps_out) {
+    auto& loc = location(memory_id);
+    deps_out.insert(loc.retrieve_access(waiting_mode_for(mode)));
+
+    return BufferAccessor {
+        memory_id,
+        size_in_bytes,
+        mode != Access::ReadOnly,
+        data->address(memory_id)};
 }
 
 void MemoryBufferImpl::after_access(MemoryId memory_id, Access mode, const DeviceEventSet& deps) {
@@ -459,14 +468,6 @@ void MemoryBufferImpl::do_copy(
 
     src_alloc.record_access(Access::ReadOnly, deps);
     dst_alloc.mark_valid(deps);
-}
-
-BufferAccessor MemoryBufferImpl::accessor(MemoryId memory_id, Access mode) {
-    return BufferAccessor {
-        memory_id,
-        size_in_bytes,
-        mode != Access::ReadOnly,
-        data->address(memory_id)};
 }
 
 }  // namespace kmm

@@ -32,12 +32,10 @@ class Point: public Vec<T, N> {
 
     /// Converts from a point of a different dimensionality/type, throwing on overflow.
     template<size_t M, typename U>
-    KMM_HOST_DEVICE constexpr Point(const Point<M, U>& that) {
+    KMM_HOST_DEVICE constexpr Point(const Point<M, U>& that) : storage_type(Point::from(that)) {
         if (!that.template is_convertible_to<N, T>()) {
             throw_overflow_exception();
         }
-
-        *this = Point::from(that);
     }
 
     /// Builds a point from a vector, padding any missing dimensions with zero.

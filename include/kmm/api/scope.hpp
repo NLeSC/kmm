@@ -1,177 +1,157 @@
 #pragma once
 
-#include <cstddef>
 #include <exception>
 #include <memory>
 #include <tuple>
-#include <type_traits>
 #include <utility>
 
 #include "kmm/api/launch_arg.hpp"
-#include "kmm/core/macros.hpp"
 #include "kmm/runtime/requisition.hpp"
-#include "kmm/runtime/runtime.hpp"
+#include "kmm/utils/gpu_utils.hpp"
 
 namespace kmm {
 
 template<typename... Args>
-struct ScopeImpl {
-    using args_tuple = std::tuple<LaunchArg<std::decay_t<Args>>...>;
-
-    template<typename ParentCtx>
-    explicit ScopeImpl(
-        ParentCtx& ctx,
-        MemoryId memory_id,
-        MemoryTransaction transaction,
-        Args&&... args
-    ) :
-        req(memory_id, std::move(transaction)),
-        args(LaunchArg<std::decay_t<Args>>(std::forward<Args>(args))...),
-        runtime(ctx.runtime()) {
-        acquire_and_submit(ctx);
-    }
-
-    ~ScopeImpl() {
-        std::apply([&](auto&... a) { (a.release(runtime, req), ...); }, args);
-        runtime.release(req);
-    }
-
-    template<typename ParentCtx>
-    void acquire_and_submit(ParentCtx& ctx) {
-        std::apply([&](auto&... a) { (a.acquire(ctx.runtime(), req), ...); }, args);
-        ctx.runtime().submit(ctx.submit_stream(), req);
-    }
-
-    Requisition req;
-    args_tuple args;
-    Runtime runtime;
-};
-
-template<typename Ctx, typename... Args>
-class Scope {
-    KMM_NOT_COPYABLE(Scope)
-
+class ScopeImpl {
   public:
-    template<typename ParentCtx>
-    explicit Scope(
-        ParentCtx& ctx,
+    ScopeImpl(
+        Runtime& runtime,
         MemoryId memory_id,
-        MemoryTransaction transaction,
-        Args&&... args
+        std::optional<CUDAStreamRef> stream,
+        MemoryTransaction parent,
+        Args... args
     ) :
-        m_state(std::make_unique<ScopeImpl<Args...>>(
-            ctx,
-            memory_id,
-            std::move(transaction),
-            std::forward<Args>(args)...
-        )),
-        m_ctx(ctx.child(m_state->req.transaction())) {}
-
-    void finish() {
-        m_state.reset();
+        m_args(args...),
+        m_runtime(runtime) {
+        acquire_impl(std::index_sequence_for<Args...> {}, runtime, memory_id);
+        m_runtime.submit(m_req, stream, parent);
     }
 
-    void poison(std::exception_ptr reason) {
-        m_state->req.poison(m_state->runtime, std::move(reason));
+    MemoryTransaction transaction() const noexcept {
+        return m_req.transaction();
+    }
+
+    const DeviceEventSet& dependencies() const noexcept {
+        return m_req.dependencies();
+    }
+
+    Runtime& runtime() noexcept {
+        return m_runtime;
     }
 
     template<size_t I>
     decltype(auto) get() {
-        return std::get<I>(m_state->args).resolve(m_state->runtime, m_state->req);
+        return std::get<I>(m_args).resolve(m_runtime, m_req);
     }
 
-    template<typename Launcher>
-    decltype(auto) apply(Launcher&& launcher) {
-        try {
-            return apply_impl(
-                std::forward<Launcher>(launcher),
-                std::make_index_sequence<sizeof...(Args)>()
-            );
-        } catch (...) {
-            poison(std::current_exception());
-            throw;
-        }
+    template<typename F, typename... Extra>
+    decltype(auto) apply(F&& fun, Extra&&... extra) {
+        return apply_impl(std::index_sequence_for<Args...> {}, fun, std::forward<Extra>(extra)...);
     }
 
-  private:
-    template<typename Launcher, size_t... Is>
-    decltype(auto) apply_impl(Launcher&& launcher, std::index_sequence<Is...>) {
-        auto guard = m_ctx.activate();
-        return launcher(
-            m_ctx,
-            std::get<Is>(m_state->args).resolve(m_state->runtime, m_state->req)...
-        );
-    }
-
-    std::unique_ptr<ScopeImpl<Args...>> m_state;
-    Ctx m_ctx;
-};
-
-template<typename Ctx, typename Arg>
-class Scope<Ctx, Arg> {
-    KMM_NOT_COPYABLE(Scope)
-
-    using view_type =
-        typename std::tuple_element_t<0, typename ScopeImpl<Arg>::args_tuple>::resolve_type;
-
-  public:
-    template<typename ParentCtx>
-    explicit Scope(ParentCtx& ctx, MemoryId memory_id, MemoryTransaction transaction, Arg&& arg) :
-        m_state(std::make_unique<ScopeImpl<Arg>>(
-            ctx,
-            memory_id,
-            std::move(transaction),
-            std::forward<Arg>(arg)
-        )),
-        m_ctx(ctx.child(m_state->req.transaction())) {}
-
-    void finish() {
-        m_state.reset();
+    void release(DeviceEventSet deps = {}) {
+        release_impl(std::index_sequence_for<Args...> {}, std::move(deps));
     }
 
     void poison(std::exception_ptr reason) {
-        m_state->req.poison(m_state->runtime, std::move(reason));
+        m_req.poison(m_runtime, std::move(reason));
     }
 
-    template<size_t I = 0>
-    view_type get() {
-        static_assert(I == 0, "Scope with a single argument only has index 0");
-        return std::get<I>(m_state->args).resolve(m_state->runtime, m_state->req);
+  private:
+    template<size_t... Is>
+    void acquire_impl(std::index_sequence<Is...>, Runtime& runtime, MemoryId memory_id) {
+        (std::get<Is>(m_args).acquire(m_runtime, m_req, memory_id), ...);
     }
 
-    operator view_type() {
-        return get();
+    template<size_t... Is, typename F, typename... Extra>
+    decltype(auto) apply_impl(std::index_sequence<Is...>, F&& fun, Extra&&... extra) {
+        return fun(
+            std::forward<Extra>(extra)...,
+            std::get<Is>(m_args).resolve(m_runtime, m_req)...
+        );
     }
 
-    template<typename Launcher>
-    decltype(auto) apply(Launcher&& launcher) {
+    template<size_t... Is>
+    void release_impl(std::index_sequence<Is...>, DeviceEventSet deps) {
+        (std::get<Is>(m_args).release(m_runtime, m_req), ...);
+        m_runtime.release(m_req, std::move(deps));
+    }
+
+    std::tuple<LaunchArg<Args>...> m_args;
+    Runtime m_runtime;
+    Requisition m_req;
+};
+
+template<typename ContextT>
+struct scope_invoke;
+
+template<typename ContextT, typename... Args>
+class Scope {
+  public:
+    Scope() = default;
+
+    Scope(std::unique_ptr<ScopeImpl<Args...>> scope, std::unique_ptr<ContextT> context) :
+        m_scope(std::move(scope)),
+        m_context(std::move(context)) {}
+
+    ~Scope() {
+        if (m_scope) {
+            release();
+        }
+    }
+
+    void release() {
+        m_scope->release(m_deps);
+        m_scope = nullptr;
+    }
+
+    MemoryTransaction transaction() const noexcept {
+        KMM_ASSERT(m_scope);
+        return m_scope->transaction();
+    }
+
+    const DeviceEventSet& dependencies() const noexcept {
+        KMM_ASSERT(m_scope);
+        return m_scope->dependencies();
+    }
+
+    Runtime& runtime() noexcept {
+        KMM_ASSERT(m_scope);
+        return m_scope->runtime();
+    }
+
+    ContextT& context() noexcept {
+        KMM_ASSERT(m_context);
+        return *m_context;
+    }
+
+    template<size_t I>
+    decltype(auto) get() {
+        KMM_ASSERT(m_scope);
+        return m_scope->template get<I>();
+    }
+
+    template<typename F>
+    void apply(F&& fun) {
+        KMM_ASSERT(m_scope);
+
         try {
-            auto guard = m_ctx.activate();
-            return launcher(
-                m_ctx,
-                std::get<0>(m_state->args).resolve(m_state->runtime, m_state->req)
-            );
+            scope_invoke<ContextT> {}(*m_context, *m_scope, m_deps, std::forward<F>(fun));
         } catch (...) {
-            poison(std::current_exception());
+            m_scope->poison(std::current_exception());
             throw;
         }
     }
 
-  private:
-    std::unique_ptr<ScopeImpl<Arg>> m_state;
-    Ctx m_ctx;
+    template<typename F>
+    void operator>>(F&& fun) {
+        apply(std::forward<F>(fun));
+    }
+
+  protected:
+    std::unique_ptr<ScopeImpl<Args...>> m_scope = nullptr;
+    std::unique_ptr<ContextT> m_context;
+    DeviceEventSet m_deps;
 };
-
-/// Shorthand for `scope.apply(fun)`.
-template<typename Ctx, typename... Args, typename Launcher>
-decltype(auto) operator>>(Scope<Ctx, Args...>& scope, Launcher&& launcher) {
-    return scope.apply(std::forward<Launcher>(launcher));
-}
-
-/// Shorthand for `scope.apply(fun)`, for temporary scopes.
-template<typename Ctx, typename... Args, typename Launcher>
-decltype(auto) operator>>(Scope<Ctx, Args...>&& scope, Launcher&& launcher) {
-    return scope.apply(std::forward<Launcher>(launcher));
-}
 
 }  // namespace kmm

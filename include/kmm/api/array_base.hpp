@@ -6,9 +6,6 @@
 
 namespace kmm {
 
-/// Base class shared by all `DomainArray` instantiations: wraps the `Buffer` backing the array's
-/// data. Domain/layout information is specific to each `DomainArray<T, LayoutT>` and lives there
-/// instead; actual data access goes through `Context::scope`, not through this class.
 class ArrayBase {
   public:
     ArrayBase() = default;

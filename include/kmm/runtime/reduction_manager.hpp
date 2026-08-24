@@ -33,11 +33,7 @@ class ReductionManager {
         size_t count
     );
 
-    /// Acquire a new partial buffer for the given reduction. The buffer holds `count *
-    /// replication` elements, laid out as `count` contiguous groups of `replication` elements
-    /// each (group `i` occupies elements `[i * replication, (i + 1) * replication)`). Each group
-    /// is folded down to a single value -- the partial's actual contribution to output slot `i`
-    /// -- before being combined with any other partial.
+    /// Acquire a new partial buffer for the given reduction.
     MemoryBuffer acquire_partial(
         ReductionState& reduction,
         MemoryId memory_id,
@@ -45,12 +41,9 @@ class ReductionManager {
     );
 
     /// Transition the reduction from open (i.e., partial buffers can still be acquired) to
-    /// active (i.e., the reduction will be performed). Use `is_done` to check when the reduction
-    /// is actually completed.
+    /// active (i.e., the reduction will be performed).
     void submit_reduction(ReductionState& reduction, MemoryId memory_id);
 
-    /// return `true` if the reduction has been finalized, i.e., acquire_partial can no longer
-    /// be called to acquire partial buffers.
     bool is_submitted(const ReductionState& reduction);
 
     Poll poll_reduction(ReductionState& reduction);

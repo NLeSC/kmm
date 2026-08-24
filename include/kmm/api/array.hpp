@@ -22,14 +22,8 @@ namespace kmm {
 
 template<typename T, typename DomainT, typename PolicyT = RowMajor>
 class DomainArray: public ArrayBase {
-    // Grants every `DomainArray` instantiation access to every other's private constructor.
     template<typename, typename, typename>
     friend class DomainArray;
-
-    // Grants `Reduce<DomainArray<T, DomainT, PolicyT>>::finalize()` access to the private raw
-    // constructor, so it can hand back a `DomainArray` without going through a public constructor
-    // that would (re-)trigger `Runtime::begin_reduction`.
-    friend class Reduce<DomainArray<T, DomainT, PolicyT>>;
 
   public:
     using self_type = DomainArray<T, DomainT, PolicyT>;
@@ -343,22 +337,20 @@ class LaunchArgArray {
 
     explicit LaunchArgArray(const DomainArray<T, DomainT, PolicyT>& array) : m_array(array) {}
 
-    void acquire(Runtime& runtime, Requisition& req) {
-        m_index = req.add(m_array.buffer().id(), Mode);
+    void acquire(Runtime& runtime, Requisition& req, MemoryId memory_id) {
+        m_index = req.add(memory_id, m_array.buffer().id(), Mode);
     }
 
     resolve_type resolve(Runtime& runtime, Requisition& req) {
-        auto accessor = req.accessor(runtime, m_index);
+        auto accessor = req.accessor(m_index);
         auto* data = static_cast<typename resolve_type::pointer>(accessor.address);
         return resolve_type(data, m_array.layout());
     }
 
     void release(Runtime& runtime, Requisition& req) {}
 
-  protected:
-    DomainArray<T, DomainT, PolicyT> m_array;
-
   private:
+    DomainArray<T, DomainT, PolicyT> m_array;
     size_t m_index = 0;
 };
 
@@ -392,13 +384,17 @@ class LaunchArg<Write<DomainArray<T, DomainT, PolicyT>>>:
         detail::LaunchArgArray<T, DomainT, PolicyT, AccessMode::ReadWrite>(arg.value),
         m_target(&arg.value) {}
 
-    void acquire(Runtime& runtime, Requisition& req) {
+    void acquire(Runtime& runtime, Requisition& req, MemoryId memory_id) {
         if (!*m_target) {
             *m_target = DomainArray<T, DomainT, PolicyT>(runtime, m_target->layout());
-            this->m_array = *m_target;
+            *this = LaunchArg(write(*m_target));
         }
 
-        detail::LaunchArgArray<T, DomainT, PolicyT, AccessMode::ReadWrite>::acquire(runtime, req);
+        detail::LaunchArgArray<T, DomainT, PolicyT, AccessMode::ReadWrite>::acquire(
+            runtime,
+            req,
+            memory_id
+        );
     }
 
   private:

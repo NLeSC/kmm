@@ -55,7 +55,7 @@ class LaunchArg {
 
     explicit LaunchArg(T value) : m_value(std::move(value)) {}
 
-    void acquire(Runtime& runtime, Requisition& req) {}
+    void acquire(Runtime& runtime, Requisition& req, MemoryId memory_id) {}
 
     resolve_type resolve(Runtime& runtime, Requisition& req) {
         return m_value;

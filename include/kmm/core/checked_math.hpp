@@ -38,6 +38,17 @@ struct checked_add_impl {
 
         bool is_valid = int(carry) - int(left_negative) - int(right_negative) == -int(sum_negative);
 
+        // if all are signed, the above can be simplified to just this:
+        // same-sign operands overflow iff the result's sign differs from both.
+        if constexpr (numeric_type_traits<L>::is_signed && //
+                      numeric_type_traits<R>::is_signed && //
+                      numeric_type_traits<O>::is_signed) {
+            int64_t l = static_cast<int64_t>(left);
+            int64_t r = static_cast<int64_t>(right);
+            int64_t s = static_cast<int64_t>(sum);
+            is_valid = ((s ^ l) & (s ^ r)) >= 0;
+        }
+
         return is_valid && is_convertible_impl<wider_t<O>, O>::apply(sum);
     }
 };
@@ -58,6 +69,18 @@ struct checked_sub_impl {
 
         bool is_valid =
             int(borrow) - int(right_negative) - int(diff_negative) == -int(left_negative);
+
+        // if all are signed, the above can be simplified to just this:
+        // same-sign operands never overflow; for mixed signs, overflow iff the result's
+        // sign differs from `left`.
+        if constexpr (numeric_type_traits<L>::is_signed && //
+                      numeric_type_traits<R>::is_signed && //
+                      numeric_type_traits<O>::is_signed) {
+            int64_t l = static_cast<int64_t>(left);
+            int64_t r = static_cast<int64_t>(right);
+            int64_t d = static_cast<int64_t>(diff);
+            is_valid = ((l ^ r) & (l ^ d)) >= 0;
+        }
 
         return is_valid && is_convertible_impl<wider_t<O>, O>::apply(diff);
     }
