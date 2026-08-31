@@ -5,6 +5,7 @@
 
 #include "kmm/core/macros.hpp"
 #include "kmm/core/panic.hpp"
+#include "kmm/runtime/data_interfaces/external.hpp"
 #include "kmm/runtime/data_interfaces/flat.hpp"
 #include "kmm/runtime/device_data_streams.hpp"
 #include "kmm/runtime/memory_buffer.hpp"
@@ -202,6 +203,29 @@ BufferId Runtime::create_buffer(
 
     auto buffer =
         m_impl->memory_manager.create_buffer(std::move(data), std::move(name), true, home);
+    m_impl->buffers.emplace(id, std::move(buffer));
+    return id;
+}
+
+BufferId Runtime::adopt_buffer(
+    BufferLayout layout,
+    std::string name,
+    void* external_ptr,
+    MemoryId memory_id
+) {
+    std::lock_guard<std::mutex> guard(m_impl->mutex);
+
+    auto data =
+        std::make_unique<ExternalDataInterface>(external_ptr, layout.size_in_bytes, memory_id);
+    auto id = BufferId(m_impl->next_buffer_id_counter++);
+
+    if (name.empty()) {
+        name = std::to_string(id.get());
+    }
+
+    // Not evictable: KMM does not own the allocation and cannot recreate it after eviction.
+    auto buffer =
+        m_impl->memory_manager.create_buffer(std::move(data), std::move(name), false, memory_id);
     m_impl->buffers.emplace(id, std::move(buffer));
     return id;
 }

@@ -149,7 +149,8 @@ void __global__ blockwise_reduce_kernel(
     memops_stride_type reduction_stride,
     bool accumulate
 ) {
-    cub::BlockReduce<T, BlockDim> block_reduce;
+    __shared__ typename cub::BlockReduce<T, BlockDim>::TempStorage smem_storage;
+    cub::BlockReduce<T, BlockDim> block_reduce{smem_storage};
 
     uint p[3] = {
         blockIdx.x,
@@ -463,15 +464,15 @@ void reduce_async(
         copy_async(stream, src_addr, dst_addr, simplified.as_copy());
         return;
     }
-
-    if (simplified.reduction_extent > 1024 * 256) {
-        do_multilevel_reduce(
-            stream,
-            src_addr,
-            dst_addr,
-            description
-        );
-    }
+//
+//    if (simplified.reduction_extent > 1024 * 256) {
+//        do_multilevel_reduce(
+//            stream,
+//            src_addr,
+//            dst_addr,
+//            description
+//        );
+//    }
 
     do_reduce_async(
         stream, src_addr, dst_addr, simplified

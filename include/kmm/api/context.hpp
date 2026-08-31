@@ -41,6 +41,21 @@ class Context {
         );
     }
 
+    template<typename T, typename DomainT, typename PolicyT = RowMajor>
+    NDArray<T, Layout<DomainT, PolicyT>> adopt(
+        T* data,
+        DomainT domain,
+        std::optional<MemoryId> memory_id = {},
+        PolicyT policy = {}
+    ) {
+        return NDArray<T, Layout<DomainT, PolicyT>>(
+            runtime(),
+            make_layout(domain, policy),
+            data,
+            memory_id.value_or(affinity_memory_id())
+        );
+    }
+
     template<typename T, typename PolicyT = RowMajor, typename... ExtentT>
     Array<T, sizeof...(ExtentT)> empty(ExtentT... extents) {
         return array<T>(shape(extents...), PolicyT {});

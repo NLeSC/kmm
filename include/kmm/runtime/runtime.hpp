@@ -84,6 +84,27 @@ class Runtime {
     );
 
     /**
+     * Register a pre-existing, externally-owned allocation with the runtime as a buffer. KMM never
+     * allocates, frees, or relocates the memory: the buffer is pinned to `memory_id` and any
+     * attempt to access or copy it on another memory throws. This lets an application hand KMM a
+     * pointer it already owns (host or device) without a copy; the caller keeps responsibility for
+     * keeping the allocation alive for as long as the buffer is in use.
+     *
+     * @param layout The layout (size/alignment) describing `external_ptr`.
+     * @param name The name of the new buffer.
+     * @param external_ptr The pre-existing allocation. Must not be null and must be valid in
+     *  `memory_id`.
+     * @param memory_id The memory that `external_ptr` lives in.
+     * @return The identifier of the new buffer.
+     */
+    BufferId adopt_buffer(
+        BufferLayout layout,
+        std::string name,
+        void* external_ptr,
+        MemoryId memory_id
+    );
+
+    /**
      * Release a buffer, freeing its memory once any pending accesses to it have completed.
      *
      * @param id The identifier of the buffer to release.

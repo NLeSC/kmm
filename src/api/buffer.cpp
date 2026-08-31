@@ -24,7 +24,7 @@ struct Buffer::Impl: reference_count<Impl> {
     BufferLayout layout;
 };
 
-Buffer::Buffer(
+Buffer Buffer::create(
     Runtime runtime,
     BufferLayout layout,
     std::string name,
@@ -32,7 +32,22 @@ Buffer::Buffer(
     std::optional<MemoryId> home
 ) {
     auto id = runtime.create_buffer(layout, std::move(name), fill_value, home);
-    m_impl = make_refcnt<Impl>(runtime, id, layout);
+    Buffer buffer;
+    buffer.m_impl = make_refcnt<Impl>(runtime, id, layout);
+    return buffer;
+}
+
+Buffer Buffer::adopt(
+    Runtime runtime,
+    BufferLayout layout,
+    void* ptr,
+    MemoryId memory_id,
+    std::string name
+) {
+    auto id = runtime.adopt_buffer(layout, std::move(name), ptr, memory_id);
+    Buffer buffer;
+    buffer.m_impl = make_refcnt<Impl>(runtime, id, layout);
+    return buffer;
 }
 
 static void assert_impl(const refcnt_ptr<Buffer::Impl>& impl) {

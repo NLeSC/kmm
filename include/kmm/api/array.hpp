@@ -26,10 +26,11 @@ class NDArray: public ArrayBase {
     using self_type = NDArray<T, LayoutT>;
     using element_type = T;
     using layout_type = LayoutT;
+    static constexpr size_t rank = layout_type::rank;
     using domain_type = typename layout_type::domain_type;
     using policy_type = typename layout_type::policy_type;
-    static constexpr size_t rank = layout_type::rank;
     using mapping_type = typename layout_type::mapping_type;
+
     using index_type = typename layout_type::index_type;
     using ndindex_type = typename layout_type::ndindex_type;
     using shape_type = typename layout_type::shape_type;
@@ -93,7 +94,7 @@ class NDArray: public ArrayBase {
         std::optional<T> fill_value = std::nullopt,
         std::optional<MemoryId> home = std::nullopt
     ) :
-        ArrayBase(Buffer(
+        ArrayBase(Buffer::create(
             runtime,
             BufferLayout::for_type<T>(static_cast<size_t>(layout.offset_span().size())),
             "",
@@ -114,6 +115,20 @@ class NDArray: public ArrayBase {
         KMM_ASSERT(!make_layout(domain, policy).is_empty());
         KMM_ASSERT(!make_layout(domain, policy).offset_span().is_empty());
     }
+
+    /// Wrap a pre-existing, externally-owned allocation as an array, without copying. `external_ptr`
+    /// must point to at least `layout.offset_span().size()` elements of `T` resident in
+    /// `memory_id`, and the caller must keep it alive for as long as this array (or any copy) is in
+    /// use. KMM never allocates, frees, relocates, or copies the memory to another `MemoryId`.
+    NDArray(Runtime runtime, layout_type layout, T* external_ptr, MemoryId memory_id) :
+        ArrayBase(Buffer::adopt(
+            runtime,
+            BufferLayout::for_type<T>(static_cast<size_t>(layout.offset_span().size())),
+            static_cast<void*>(external_ptr),
+            memory_id,
+            ""
+        )),
+        m_layout(layout.normalize_offset()) {}
 
     template<typename OtherLayoutT>
     NDArray(const NDArray<T, OtherLayoutT>& that) : ArrayBase(that), m_layout(that.layout()) {}

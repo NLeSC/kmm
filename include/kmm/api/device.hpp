@@ -114,6 +114,10 @@ class DeviceGuard {
         return m_guard.template get<I>();
     }
 
+    void poison(std::exception_ptr reason) noexcept {
+        m_guard.poison(std::move(reason));
+    }
+
     template<typename F>
     void submit(F fun) {
         m_guard.apply(std::move(fun), context());

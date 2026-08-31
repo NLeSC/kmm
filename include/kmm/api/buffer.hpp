@@ -19,12 +19,25 @@ class Buffer {
 
     Buffer() = default;
 
-    Buffer(
+    /// Create a new runtime-managed buffer. The runtime owns the allocation and is free to place,
+    /// move, and evict it across memories as needed.
+    static Buffer create(
         Runtime runtime,
         BufferLayout layout,
         std::string name,
         FillValue fill_value = {},
         std::optional<MemoryId> home = {}
+    );
+
+    /// Wrap a pre-existing, externally-owned allocation as a buffer, without copying. KMM never
+    /// allocates, frees, or relocates the memory; the caller must keep `ptr` alive for as long as
+    /// the returned `Buffer` (or any copy of it) is in use. See `Runtime::adopt_buffer`.
+    static Buffer adopt(
+        Runtime runtime,
+        BufferLayout layout,
+        void* ptr,
+        MemoryId memory_id,
+        std::string name = {}
     );
 
     BufferId id() const;
