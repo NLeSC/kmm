@@ -7,7 +7,6 @@
 #include "kmm/core/macros.hpp"
 #include "kmm/core/panic.hpp"
 #include "kmm/runtime/memops/types.hpp"
-#include "kmm/utils/backends.hpp"
 
 namespace kmm {
 
@@ -49,9 +48,9 @@ struct FillDim {
 /// Describes a (possibly strided, possibly multi-dimensional) fill of a destination buffer with
 /// a repeating element value.
 ///
-/// The destination is treated as an opaque byte buffer: `fill`/`fill_async` do not interpret the
+/// The destination is treated as an opaque byte buffer: `fill`/`fill_gpu` do not interpret the
 /// bytes being written, so `element_size` only determines the width of the value written at each
-/// position (see `fill`/`fill_async`).
+/// position (see `fill`/`fill_gpu`).
 struct FillDescription {
     FillValue value;
 
@@ -121,20 +120,23 @@ struct FillDescription {
     /// Returns an equivalent description with `dims` sorted from the largest stride to the
     /// smallest, and adjacent axes merged whenever they are contiguous (i.e. the outer axis's
     /// stride equals the inner axis's stride times its extent). This can reduce `num_dims`,
-    /// which matters since backends (e.g. `fill_async`) only special-case a small number of axes.
+    /// which matters since backends (e.g. `fill_gpu`) only special-case a small number of axes.
     FillDescription simplify() const;
 };
+
+/// @}
+
+namespace memops {
+
+/// \addtogroup memops
+/// @{
 
 /// Fills `dst_addr` on the CPU, according to `description`, with copies of the `element_size`
 /// bytes pointed to by `fill_value`. Blocks until the fill has completed.
 void fill(void* dst_addr, const FillDescription& description);
 
-/// Fills `dst_addr` on the GPU, according to `description`, with copies of the `element_size`
-/// bytes pointed to by `fill_value` (which must be host-accessible memory; it is read before the
-/// fill is enqueued). The fill is enqueued on `stream` after waiting for `dependencies`, and the
-/// returned event becomes ready once the fill has completed.
-void fill_async(g_stream_t stream, void* dst_addr, const FillDescription& description);
-
 /// @}
+
+}  // namespace memops
 
 }  // namespace kmm
