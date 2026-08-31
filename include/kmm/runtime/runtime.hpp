@@ -74,13 +74,16 @@ class Runtime {
      * @param home If set, the memory where the buffer is preferentially kept resident, used to
      *  pick a copy source once the buffer becomes valid there instead of the location of first
      *  access.
+     * @param kind The kind of storage backing the buffer (discrete, managed, or host-pinned). If
+     *  empty, `RuntimeConfig::default_buffer_kind` is used.
      * @return The identifier of the new buffer.
      */
     BufferId create_buffer(
         BufferLayout layout,
         std::string name,
         FillValue fill_value = {},
-        std::optional<MemoryId> home = {}
+        std::optional<MemoryId> home = {},
+        std::optional<BufferKind> kind = std::nullopt
     );
 
     /**

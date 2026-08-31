@@ -183,8 +183,12 @@ void reduce_async(
     g_stream_t stream,
     const void* src_addr,
     void* dst_addr,
+    void* scratch_addr,
     const ReductionDescription& description
 );
+
+/// Returns the size in bytes of the scratch buffer that `reduce_async` requires for `description`.
+size_t reduce_async_scratch_size(const ReductionDescription& description);
 
 /// Builds a `ReductionDescription` that reduces `src` (e.g. a `kmm::Layout`) over `axis` into
 /// `dst`, whose rank must be exactly one less than `src`'s: every axis of `src` other than `axis`

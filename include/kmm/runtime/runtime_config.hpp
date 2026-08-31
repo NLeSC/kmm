@@ -28,6 +28,20 @@ enum struct DeviceMemoryKind {
     NoPool,
 };
 
+enum struct BufferKind {
+    /// One separate allocation per memory, with explicit copies between them when the buffer is
+    /// accessed on a memory that does not hold a valid copy. This is the default.
+    Discrete,
+
+    /// A single CUDA/HIP managed-memory allocation (`cudaMallocManaged`). The driver migrates
+    /// pages between host and devices on demand; KMM never issues explicit copies.
+    Managed,
+
+    /// A single pinned host allocation. Devices access it directly (zero-copy) through a mapped
+    /// pointer; KMM never stages a device-side copy.
+    HostPinned,
+};
+
 struct RuntimeConfig {
     /// The type of memory pool to use for the host.
     HostMemoryKind host_memory_kind = HostMemoryKind::NoPool;
@@ -63,6 +77,9 @@ struct RuntimeConfig {
     /// Enable this run the system in debug mode. This will be significantly slower, but can be
     /// used to track down synchronization bugs.
     bool debug_mode = false;
+
+    /// The buffer kind used by `Runtime::create_buffer` when it is called without an explicit kind.
+    BufferKind default_buffer_kind = BufferKind::Discrete;
 };
 
 RuntimeConfig default_config_from_environment();

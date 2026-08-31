@@ -29,9 +29,10 @@ Buffer Buffer::create(
     BufferLayout layout,
     std::string name,
     FillValue fill_value,
-    std::optional<MemoryId> home
+    std::optional<MemoryId> home,
+    std::optional<BufferKind> kind
 ) {
-    auto id = runtime.create_buffer(layout, std::move(name), fill_value, home);
+    auto id = runtime.create_buffer(layout, std::move(name), fill_value, home, kind);
     Buffer buffer;
     buffer.m_impl = make_refcnt<Impl>(runtime, id, layout);
     return buffer;

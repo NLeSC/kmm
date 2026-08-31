@@ -12,12 +12,13 @@ namespace kmm {
 /// allocate, deallocate, and copy exactly that buffer at any of its possible locations.
 ///
 /// Concrete implementations live in their own headers under `data_interfaces/`: `FlatDataInterface`
-/// (flat.hpp), `HostDataInterface` (host.hpp), and `ExternalDataInterface` (external.hpp).
+/// (flat.hpp), `ManagedDataInterface` (managed.hpp), `PinnedDataInterface` (pinned.hpp), and
+/// `ExternalDataInterface` (external.hpp).
 class DataInterface {
   public:
     virtual ~DataInterface() = default;
 
-    virtual size_t size_in_bytes() const = 0;
+    virtual size_t size_in_bytes() const noexcept = 0;
 
     /// Allocate this buffer on the given memory id. The returned dependencies indicate
     /// when the buffer is safe to be used.
@@ -37,7 +38,7 @@ class DataInterface {
 
     /// Returns the pointer to the data for the given MemoryId. The caller must ensure that
     /// `allocate` was called before this function was called.
-    virtual void* address(MemoryId memory_id) const = 0;
+    virtual void* address(MemoryId memory_id) const noexcept = 0;
 
     /// Copy data from the given `src` to `dst` memory. The given dependencies indicate
     /// when the copy should be performed. The caller must have called `allocate` on both
@@ -51,7 +52,7 @@ class DataInterface {
     ) = 0;
 
     /// Indicate if copying data from `src` to `dst` is supported.
-    virtual bool is_copy_supported(MemoryId src, MemoryId dst) = 0;
+    virtual bool is_copy_supported(MemoryId src, MemoryId dst) const noexcept = 0;
 
     /// Hint that this buffer will be accessed on the given memory in the future when the given
     /// dependencies complete. This is just a hint, useful for `cudaMemPrefetchAsync`.

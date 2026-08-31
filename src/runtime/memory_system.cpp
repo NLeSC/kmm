@@ -836,7 +836,7 @@ DeviceEvent MemorySystem::reduce_device(
     );
 }
 
-bool MemorySystem::is_copy_supported(MemoryId src, MemoryId dst) {
+bool MemorySystem::is_copy_supported(MemoryId src, MemoryId dst) const noexcept {
     if (src.is_host() || dst.is_host()) {
         return true;
     }

@@ -26,7 +26,8 @@ class Buffer {
         BufferLayout layout,
         std::string name,
         FillValue fill_value = {},
-        std::optional<MemoryId> home = {}
+        std::optional<MemoryId> home = {},
+        std::optional<BufferKind> kind = std::nullopt
     );
 
     /// Wrap a pre-existing, externally-owned allocation as a buffer, without copying. KMM never

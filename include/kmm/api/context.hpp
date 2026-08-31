@@ -230,16 +230,6 @@ class Context {
   protected:
     Runtime m_runtime;
     MemoryTransaction m_transaction;
-
-  private:
-    template<size_t N>
-    static std::array<size_t, N> all_axes() {
-        std::array<size_t, N> result;
-        for (size_t i = 0; i < N; i++) {
-            result[i] = i;
-        }
-        return result;
-    }
 };
 
 }  // namespace kmm

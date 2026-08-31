@@ -24,7 +24,7 @@ FlatDataInterface::FlatDataInterface(
     m_system(std::move(system)),
     m_fill_value(std::move(fill_value)) {}
 
-size_t FlatDataInterface::size_in_bytes() const {
+size_t FlatDataInterface::size_in_bytes() const noexcept {
     return m_layout.size_in_bytes;
 }
 
@@ -63,7 +63,7 @@ void FlatDataInterface::deallocate(
     }
 }
 
-void* FlatDataInterface::address(MemoryId memory_id) const {
+void* FlatDataInterface::address(MemoryId memory_id) const noexcept {
     if (memory_id.is_host()) {
         return m_host_ptr;
     } else {
@@ -132,7 +132,7 @@ void FlatDataInterface::copy(
     KMM_PANIC("cannot copy from host memory to host memory");
 }
 
-bool FlatDataInterface::is_copy_supported(MemoryId src, MemoryId dst) {
+bool FlatDataInterface::is_copy_supported(MemoryId src, MemoryId dst) const noexcept {
     return m_system->is_copy_supported(src, dst);
 }
 

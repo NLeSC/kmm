@@ -12,7 +12,7 @@ class ExternalDataInterface final: public DataInterface {
   public:
     ExternalDataInterface(void* ptr, size_t size_in_bytes, MemoryId memory_id);
 
-    size_t size_in_bytes() const override;
+    size_t size_in_bytes() const noexcept override;
 
     AllocResult allocate(  //
         MemoryId memory_id,
@@ -28,7 +28,7 @@ class ExternalDataInterface final: public DataInterface {
 
     void* address(  //
         MemoryId memory_id
-    ) const override;
+    ) const noexcept override;
 
     void copy(
         MemoryId src,
@@ -38,7 +38,7 @@ class ExternalDataInterface final: public DataInterface {
         DeviceEventSet& deps_out
     ) override;
 
-    bool is_copy_supported(MemoryId src, MemoryId dst) override;
+    bool is_copy_supported(MemoryId src, MemoryId dst) const noexcept override;
 
   private:
     void check_memory_id(MemoryId memory_id) const;

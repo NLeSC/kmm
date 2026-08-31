@@ -7,6 +7,8 @@
 #include "kmm/core/panic.hpp"
 #include "kmm/runtime/data_interfaces/external.hpp"
 #include "kmm/runtime/data_interfaces/flat.hpp"
+#include "kmm/runtime/data_interfaces/managed.hpp"
+#include "kmm/runtime/data_interfaces/pinned.hpp"
 #include "kmm/runtime/device_data_streams.hpp"
 #include "kmm/runtime/memory_buffer.hpp"
 #include "kmm/runtime/reduction_manager.hpp"
@@ -38,6 +40,7 @@ class RuntimeImpl: public reference_count<RuntimeImpl> {
 
   public:
     RuntimeImpl(const RuntimeConfig& config) :
+        default_buffer_kind(config.default_buffer_kind),
         system_info {},
         memory_system {std::make_unique<MemorySystem>(system_info, event_registry, config)},
         reduction_manager(memory_manager, memory_system) {}
@@ -114,6 +117,7 @@ class RuntimeImpl: public reference_count<RuntimeImpl> {
         }
     }
 
+    const BufferKind default_buffer_kind;
     const SystemInfo system_info;
 
     std::mutex mutex;
@@ -188,13 +192,39 @@ BufferId Runtime::create_buffer(
     BufferLayout layout,
     std::string name,
     FillValue fill_value,
-    std::optional<MemoryId> home
+    std::optional<MemoryId> home,
+    std::optional<BufferKind> kind
 ) {
     std::lock_guard<std::mutex> guard(m_impl->mutex);
 
     auto system = refcnt_ptr<MemorySystem>(m_impl->memory_system.get(), true);
-    auto data =
-        std::make_unique<FlatDataInterface>(layout, std::move(system), std::move(fill_value));
+
+    std::unique_ptr<DataInterface> data;
+    switch (kind.value_or(m_impl->default_buffer_kind)) {
+        case BufferKind::Discrete:
+            data = std::make_unique<FlatDataInterface>(
+                layout,
+                std::move(system),
+                std::move(fill_value)
+            );
+            break;
+        case BufferKind::Managed:
+            data = std::make_unique<ManagedDataInterface>(
+                layout,
+                std::move(system),
+                std::move(fill_value)
+            );
+            break;
+        case BufferKind::HostPinned:
+            if (fill_value.length != 0) {
+                throw std::runtime_error(
+                    "create_buffer: BufferKind::HostPinned does not support a fill value"
+                );
+            }
+            data = std::make_unique<PinnedDataInterface>(layout, std::move(system));
+            break;
+    }
+
     auto id = BufferId(m_impl->next_buffer_id_counter++);
 
     if (name.empty()) {

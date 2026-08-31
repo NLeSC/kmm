@@ -24,7 +24,7 @@ ManagedDataInterface::ManagedDataInterface(
     m_system(std::move(system)),
     m_fill_value(std::move(fill_value)) {}
 
-size_t ManagedDataInterface::size_in_bytes() const {
+size_t ManagedDataInterface::size_in_bytes() const noexcept {
     return m_layout.size_in_bytes;
 }
 
@@ -65,11 +65,11 @@ void ManagedDataInterface::deallocate(
     }
 }
 
-void* ManagedDataInterface::address(MemoryId memory_id) const {
+void* ManagedDataInterface::address(MemoryId memory_id) const noexcept {
     return m_ptr;
 }
 
-bool ManagedDataInterface::is_copy_supported(MemoryId src, MemoryId dst) {
+bool ManagedDataInterface::is_copy_supported(MemoryId src, MemoryId dst) const noexcept {
     return true;
 }
 

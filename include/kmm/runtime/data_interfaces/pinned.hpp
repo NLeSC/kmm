@@ -9,17 +9,17 @@
 
 namespace kmm {
 
-/// A `DataInterface` that always lives in a single pinned host allocation
-class HostDataInterface final: public DataInterface {
+/// A `DataInterface` backed by a single pinned host allocation. Devices access it directly
+/// (zero-copy) through a mapped pointer, so `copy` is a no-op and no device-side copy is ever
+/// staged.
+class PinnedDataInterface final: public DataInterface {
   public:
-    /// If `fill_value` is non-empty, the buffer is filled with copies of it the first time it is
-    /// materialized (see `initialize_host`/`initialize_device`).
-    HostDataInterface(
+    PinnedDataInterface(
         BufferLayout layout,
         refcnt_ptr<MemorySystem> system
     );
 
-    size_t size_in_bytes() const override;
+    size_t size_in_bytes() const noexcept override;
 
     AllocResult allocate(  //
         MemoryId memory_id,
@@ -35,9 +35,9 @@ class HostDataInterface final: public DataInterface {
 
     void* address(  //
         MemoryId memory_id
-    ) const override;
+    ) const noexcept override;
 
-    bool is_copy_supported(MemoryId src, MemoryId dst) override;
+    bool is_copy_supported(MemoryId src, MemoryId dst) const noexcept override;
 
     void copy(
         MemoryId src,
@@ -51,6 +51,7 @@ class HostDataInterface final: public DataInterface {
     BufferLayout m_layout;
     refcnt_ptr<MemorySystem> m_system;
     void* m_host_ptr = nullptr;
+    void* m_device_ptrs[MAX_DEVICES] {};
     size_t m_refcount = 0;
     DeviceEventSet m_alloc_deps;
     DeviceEventSet m_dealloc_deps;

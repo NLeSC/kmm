@@ -23,7 +23,7 @@ class ManagedDataInterface final: public DataInterface {
         FillValue fill_value = {}
     );
 
-    size_t size_in_bytes() const override;
+    size_t size_in_bytes() const noexcept override;
 
     AllocResult allocate(  //
         MemoryId memory_id,
@@ -39,9 +39,9 @@ class ManagedDataInterface final: public DataInterface {
 
     void* address(  //
         MemoryId memory_id
-    ) const override;
+    ) const noexcept override;
 
-    bool is_copy_supported(MemoryId src, MemoryId dst) override;
+    bool is_copy_supported(MemoryId src, MemoryId dst) const noexcept override;
 
     /// Prefetches the allocation to `memory_id` (`cudaMemPrefetchAsync`/`hipMemPrefetchAsync`) so
     /// the driver can start migrating pages before the actual access. Best-effort: fired on the

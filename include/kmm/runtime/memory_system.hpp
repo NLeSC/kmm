@@ -184,7 +184,7 @@ class MemorySystem: public reference_count<MemorySystem> {
         const DeviceEventSet& deps_in
     );
 
-    bool is_copy_supported(MemoryId src, MemoryId dst);
+    bool is_copy_supported(MemoryId src, MemoryId dst) const noexcept;
 
   private:
     struct DeviceState;
