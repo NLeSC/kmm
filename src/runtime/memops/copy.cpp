@@ -125,7 +125,7 @@ void copy(const void* src_addr, void* dst_addr, const CopyDescription& descripti
 }
 
 void copy_async(
-    GPUStream stream,
+    g_stream_t stream,
     const void* src_addr,
     void* dst_addr,
     const CopyDescription& description
@@ -137,9 +137,9 @@ void copy_async(
     size_t element_size = description.element_size;
     if (n == 0) {
         // No axes: a single contiguous run of `element_size` bytes.
-        KMM_GPU_CHECK(gpuMemcpyDtoDAsync(
-            (GPUDeviceptr)dst_addr,
-            (GPUDeviceptr)src_addr,
+        KMM_GPU_CHECK(g_memcpy_d_to_d_async(
+            (g_device_ptr_t)dst_addr,
+            (g_device_ptr_t)src_addr,
             element_size,
             stream
         ));
@@ -157,17 +157,17 @@ void copy_async(
         std::memset(&copy_params, 0, sizeof(copy_params));
 
         copy_params.srcMemoryType = CU_MEMORYTYPE_DEVICE;
-        copy_params.srcDevice = (GPUDeviceptr)src_addr;
+        copy_params.srcDevice = (g_device_ptr_t)src_addr;
         copy_params.srcPitch = static_cast<size_t>(dim.src_stride);
 
         copy_params.dstMemoryType = CU_MEMORYTYPE_DEVICE;
-        copy_params.dstDevice = (GPUDeviceptr)dst_addr;
+        copy_params.dstDevice = (g_device_ptr_t)dst_addr;
         copy_params.dstPitch = static_cast<size_t>(dim.dst_stride);
 
         copy_params.WidthInBytes = element_size;
         copy_params.Height = static_cast<size_t>(dim.extent);
 
-        KMM_GPU_CHECK(gpuMemcpy2DAsync(&copy_params, stream));
+        KMM_GPU_CHECK(g_memcpy_2d_async(&copy_params, stream));
         return;
     }
 #endif

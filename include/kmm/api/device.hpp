@@ -32,7 +32,7 @@ class Device: public Context {
         return m_device_id;
     }
 
-    operator GPUStream() const noexcept {
+    operator g_stream_t() const noexcept {
         return *m_stream;
     }
 

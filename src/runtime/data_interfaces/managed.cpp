@@ -4,7 +4,6 @@
 #include "kmm/core/integer_fun.hpp"
 #include "kmm/core/panic.hpp"
 #include "kmm/runtime/data_interfaces/managed.hpp"
-#include "kmm/utils/gpu_api.hpp"
 #include "kmm/utils/gpu_utils.hpp"
 
 namespace kmm {
@@ -128,7 +127,8 @@ DeviceEvent ManagedDataInterface::initialize_device(
     );
 
     return m_system
-        ->fill_device(memory_id, reinterpret_cast<GPUDeviceptr>(m_ptr), description, stream_hint, deps);
+        ->fill_device( //
+            memory_id, reinterpret_cast<g_device_ptr_t>(m_ptr), description, stream_hint, deps);
 }
 
 }  // namespace kmm

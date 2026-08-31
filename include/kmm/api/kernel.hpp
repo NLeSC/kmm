@@ -3,7 +3,7 @@
 #include <utility>
 
 #include "kmm/api/device.hpp"
-#include "kmm/utils/gpu_api.hpp"
+#include "kmm/utils/gpu_utils.hpp"
 
 namespace kmm {
 
@@ -22,7 +22,7 @@ class Kernel {
         m_shared_mem(shared_mem) {}
 
     template<typename... Args>
-    void operator()(GPUStream context, Args&&... args) const {
+    void operator()(g_stream_t context, Args&&... args) const {
         m_fun<<<m_grid_dim, m_block_dim, m_shared_mem, context>>>(std::forward<Args>(args)...);
     }
 

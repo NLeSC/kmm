@@ -97,7 +97,7 @@ void __global__ elementwise_reduce_kernel(
 
 template<typename T, ReductionOp Op>
 void launch_elementwise_reduce(
-    GPUStream stream,
+    g_stream_t stream,
     const void* src_addr,
     void* dst_addr,
     const ReductionDescription& description
@@ -186,7 +186,7 @@ void __global__ blockwise_reduce_kernel(
 
 template<typename T, ReductionOp Op>
 void launch_blockwise_reduce(
-    GPUStream stream,
+    g_stream_t stream,
     const void* src_addr,
     void* dst_addr,
     const ReductionDescription& description
@@ -227,7 +227,7 @@ void launch_blockwise_reduce(
 
 template<typename T, ReductionOp Op>
 void reduced_typed_op_async(
-    GPUStream stream,
+    g_stream_t stream,
     const void* src_addr,
     void* dst_addr,
     const ReductionDescription& description
@@ -251,7 +251,7 @@ void reduced_typed_op_async(
 
 template<typename T>
 void reduce_typed_async(
-    GPUStream stream,
+    g_stream_t stream,
     const void* src_addr,
     void* dst_addr,
     const ReductionDescription& description
@@ -291,7 +291,7 @@ void reduce_typed_async(
 }
 
 void do_reduce_async(
-    GPUStream stream,
+    g_stream_t stream,
         const void* src_addr,
         void* dst_addr,
         const ReductionDescription& description
@@ -385,7 +385,7 @@ void do_reduce_async(
 }
 
 void do_multilevel_reduce(
-    GPUStream stream,
+    g_stream_t stream,
     const void* src_addr,
     void* dst_addr,
     const ReductionDescription& description
@@ -452,7 +452,7 @@ void do_multilevel_reduce(
 }
 
 void reduce_async(
-    GPUStream stream,
+    g_stream_t stream,
     const void* src_addr,
     void* dst_addr,
     const ReductionDescription& description

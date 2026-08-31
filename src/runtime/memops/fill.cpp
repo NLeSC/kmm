@@ -58,7 +58,7 @@ void fill(void* dst_addr, const FillDescription& description) {
 }
 
 void fill_async(
-    GPUStream stream,
+    g_stream_t stream,
     void* dst_addr,
     const FillDescription& description
 ) {
@@ -77,27 +77,7 @@ void fill_async(
         std::memcpy(&value, fill_value, sizeof(value));
 
         if (n == 0) {
-            KMM_GPU_CHECK(gpuMemsetD8Async((GPUDeviceptr)dst_addr, value, 1, stream));
-        } else if (n == 1) {
-            const FillDim& dim = description.dims[0];
-
-            if (dim.stride == static_cast<memops_stride_type>(element_size)) {
-                KMM_GPU_CHECK(gpuMemsetD8Async(
-                    (GPUDeviceptr)dst_addr,
-                    value,
-                    static_cast<size_t>(dim.extent),
-                    stream
-                ));
-            } else {
-                KMM_GPU_CHECK(gpuMemsetD2D8Async(
-                    (GPUDeviceptr)dst_addr,
-                    static_cast<size_t>(dim.stride),
-                    value,
-                    1,
-                    static_cast<size_t>(dim.extent),
-                    stream
-                ));
-            }
+            KMM_GPU_CHECK(g_memset_d8_async((g_device_ptr_t)dst_addr, value, 1, stream));
         } else {
             KMM_TODO();
         }
@@ -106,27 +86,7 @@ void fill_async(
         std::memcpy(&value, fill_value, sizeof(value));
 
         if (n == 0) {
-            KMM_GPU_CHECK(gpuMemsetD16Async((GPUDeviceptr)dst_addr, value, 1, stream));
-        } else if (n == 1) {
-            const FillDim& dim = description.dims[0];
-
-            if (dim.stride == static_cast<memops_stride_type>(element_size)) {
-                KMM_GPU_CHECK(gpuMemsetD16Async(
-                    (GPUDeviceptr)dst_addr,
-                    value,
-                    static_cast<size_t>(dim.extent),
-                    stream
-                ));
-            } else {
-                KMM_GPU_CHECK(gpuMemsetD2D16Async(
-                    (GPUDeviceptr)dst_addr,
-                    static_cast<size_t>(dim.stride),
-                    value,
-                    1,
-                    static_cast<size_t>(dim.extent),
-                    stream
-                ));
-            }
+            KMM_GPU_CHECK(g_memset_d16_async((g_device_ptr_t)dst_addr, value, 1, stream));
         } else {
             KMM_TODO();
         }
@@ -135,27 +95,7 @@ void fill_async(
         std::memcpy(&value, fill_value, sizeof(value));
 
         if (n == 0) {
-            KMM_GPU_CHECK(gpuMemsetD32Async((GPUDeviceptr)dst_addr, value, 1, stream));
-        } else if (n == 1) {
-            const FillDim& dim = description.dims[0];
-
-            if (dim.stride == static_cast<memops_stride_type>(element_size)) {
-                KMM_GPU_CHECK(gpuMemsetD32Async(
-                    (GPUDeviceptr)dst_addr,
-                    value,
-                    static_cast<size_t>(dim.extent),
-                    stream
-                ));
-            } else {
-                KMM_GPU_CHECK(gpuMemsetD2D32Async(
-                    (GPUDeviceptr)dst_addr,
-                    static_cast<size_t>(dim.stride),
-                    value,
-                    1,
-                    static_cast<size_t>(dim.extent),
-                    stream
-                ));
-            }
+            KMM_GPU_CHECK(g_memset_d32_async((g_device_ptr_t)dst_addr, value, 1, stream));
         } else {
             KMM_TODO();
         }

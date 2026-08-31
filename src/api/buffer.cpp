@@ -89,7 +89,7 @@ static void copy_device_to_host(
     auto src = static_cast<const std::byte*>(src_addr) + simplified.src_offset;
     auto dst = static_cast<std::byte*>(dst_addr) + simplified.dst_offset;
 
-    KMM_GPU_CHECK(gpuMemcpyDtoH(dst, (GPUDeviceptr)src, simplified.element_size));
+    KMM_GPU_CHECK(g_memcpy_d_to_h(dst, (g_device_ptr_t)src, simplified.element_size));
 }
 
 static void copy_host_to_device(
@@ -102,7 +102,7 @@ static void copy_host_to_device(
     auto src = static_cast<const std::byte*>(src_addr) + simplified.src_offset;
     auto dst = static_cast<std::byte*>(dst_addr) + simplified.dst_offset;
 
-    KMM_GPU_CHECK(gpuMemcpyHtoD((GPUDeviceptr)dst, src, simplified.element_size));
+    KMM_GPU_CHECK(g_memcpy_h_to_d((g_device_ptr_t)dst, src, simplified.element_size));
 }
 
 static CopyDescription contiguous_copy_description(

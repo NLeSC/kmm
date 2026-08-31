@@ -15,7 +15,7 @@ class DevicePoolAllocator: public Allocator {
 
   public:
     DevicePoolAllocator(
-        GPUContext context,
+        g_context_t context,
         DevicePoolKind kind = DevicePoolKind::Create,
         size_t max_size = std::numeric_limits<size_t>::max()
     );
@@ -40,8 +40,8 @@ class DevicePoolAllocator: public Allocator {
     void trim(size_t nbytes_remaining) override final;
 
   private:
-    GPUContext m_context;
-    GPUMemPool m_pool;
+    g_context_t m_context;
+    g_memory_pool_t m_pool;
     DevicePoolKind m_kind;
 };
 

@@ -71,7 +71,7 @@ class FlatDataInterface final: public DataInterface {
     refcnt_ptr<MemorySystem> m_system;
     FillValue m_fill_value;
     void* m_host_ptr = nullptr;
-    GPUDeviceptr m_device_ptrs[MAX_DEVICES] {};
+    g_device_ptr_t m_device_ptrs[MAX_DEVICES] {};
 };
 
 }  // namespace kmm

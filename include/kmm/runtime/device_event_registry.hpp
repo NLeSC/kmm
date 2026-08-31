@@ -53,12 +53,12 @@ class DeviceEventRegistry {
     /**
      * Get the GPUStream associated with the given stream.
      */
-    GPUStream get(DeviceStreamId stream_id) const;
+    g_stream_t get(DeviceStreamId stream_id) const;
 
     /**
      * Get the GPUContext associated with the given stream.
      */
-    GPUContext context(DeviceStreamId stream_id) const;
+    g_context_t context(DeviceStreamId stream_id) const;
 
     /**
      * Get a `DeviceStream` wrapping the given stream.
@@ -101,12 +101,12 @@ class DeviceEventRegistry {
     /**
      * Let the given stream wait until the given event completes.
      */
-    void wait_on_event(GPUStream stream, DeviceEvent event) const;
+    void wait_on_event(g_stream_t stream, DeviceEvent event) const;
 
     /**
      * Let the given stream wait until all the given events completes.
      */
-    void wait_on_event(GPUStream stream, const DeviceEventSet& events) const;
+    void wait_on_event(g_stream_t stream, const DeviceEventSet& events) const;
 
     /**
      * Let the given stream wait until all work already enqueued on the CUDA legacy default

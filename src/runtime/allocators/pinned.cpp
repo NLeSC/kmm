@@ -8,14 +8,14 @@
 
 namespace kmm {
 
-PinnedMemoryAllocator::PinnedMemoryAllocator(GPUContext context) :
+PinnedMemoryAllocator::PinnedMemoryAllocator(g_context_t context) :
     m_context(context) {}
 
 AllocResult PinnedMemoryAllocator::allocate(BufferLayout layout, void** addr_out) {
     GPUContextGuard guard {m_context};
-    GPUResult result = gpuMemHostAlloc(addr_out, layout.size_in_bytes);
+    g_result_t result = g_mem_host_alloc(addr_out, layout.size_in_bytes, G_MEMHOSTALLOC_PORTABLE | G_MEMHOSTALLOC_DEVICEMAP);
 
-    if (result == GPU_ERROR_OUT_OF_MEMORY) {
+    if (result == G_ERROR_OUT_OF_MEMORY) {
         return AllocResult::ErrorOutOfMemory;
     }
 
@@ -28,7 +28,7 @@ void PinnedMemoryAllocator::deallocate(void* addr, BufferLayout layout) {
     spdlog::trace("deallocate {} bytes of pinned memory (addr: {})", layout.size_in_bytes, addr);
 
     GPUContextGuard guard {m_context};
-    KMM_GPU_CHECK(gpuMemFreeHost(addr));
+    KMM_GPU_CHECK(g_mem_free_host(addr));
 }
 
 }  // namespace kmm

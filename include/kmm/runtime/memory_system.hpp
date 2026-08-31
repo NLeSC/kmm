@@ -97,14 +97,14 @@ class MemorySystem: public reference_count<MemorySystem> {
     AllocResult allocate_device(
         DeviceId device_id,
         BufferLayout layout,
-        GPUDeviceptr* ptr_out,
+        g_device_ptr_t* ptr_out,
         const DeviceStreamId& stream_hint,
         DeviceEventSet& deps_out
     );
 
     void deallocate_device(
         DeviceId device_id,
-        GPUDeviceptr ptr,
+        g_device_ptr_t ptr,
         BufferLayout layout,
         const DeviceStreamId& stream_hint,
         const DeviceEventSet& deps_in
@@ -113,7 +113,7 @@ class MemorySystem: public reference_count<MemorySystem> {
     DeviceEvent copy_host_to_device(
         DeviceId device_id,
         const void* src_addr,
-        GPUDeviceptr dst_addr,
+        g_device_ptr_t dst_addr,
         size_t nbytes,
         const DeviceStreamId& stream_hint,
         const DeviceEventSet& deps_in
@@ -121,7 +121,7 @@ class MemorySystem: public reference_count<MemorySystem> {
 
     DeviceEvent copy_device_to_host(
         DeviceId device_id,
-        GPUDeviceptr src_addr,
+        g_device_ptr_t src_addr,
         void* dst_addr,
         size_t nbytes,
         const DeviceStreamId& stream_hint,
@@ -131,8 +131,8 @@ class MemorySystem: public reference_count<MemorySystem> {
     DeviceEvent copy_device_to_device(
         DeviceId src_device,
         DeviceId dst_device,
-        GPUDeviceptr src_addr,
-        GPUDeviceptr dst_addr,
+        g_device_ptr_t src_addr,
+        g_device_ptr_t dst_addr,
         size_t nbytes,
         const DeviceStreamId& stream_hint,
         const DeviceEventSet& deps_in
@@ -142,7 +142,7 @@ class MemorySystem: public reference_count<MemorySystem> {
         BufferLayout layout,
         void** dst_addr,
         DeviceId device_id,
-        GPUDeviceptr src_addr,
+        g_device_ptr_t src_addr,
         const DeviceStreamId& stream_hint,
         const DeviceEventSet& deps_in,
         DeviceEvent& dep_out
@@ -151,7 +151,7 @@ class MemorySystem: public reference_count<MemorySystem> {
     AllocResult allocate_device_and_copy_from_host(
         DeviceId device_id,
         BufferLayout layout,
-        GPUDeviceptr* dst_addr,
+        g_device_ptr_t* dst_addr,
         const void* src_addr,
         const DeviceStreamId& stream_hint,
         const DeviceEventSet& deps_in,
@@ -160,7 +160,7 @@ class MemorySystem: public reference_count<MemorySystem> {
 
     DeviceEvent fill_device(
         DeviceId device_id,
-        GPUDeviceptr addr,
+        g_device_ptr_t addr,
         const FillDescription& description,
         const DeviceStreamId& stream_hint,
         const DeviceEventSet& deps_in
@@ -177,8 +177,8 @@ class MemorySystem: public reference_count<MemorySystem> {
 
     DeviceEvent reduce_device(
         DeviceId device_id,
-        GPUDeviceptr src_addr,
-        GPUDeviceptr dst_addr,
+        g_device_ptr_t src_addr,
+        g_device_ptr_t dst_addr,
         const ReductionDescription& description,
         const DeviceStreamId& stream_hint,
         const DeviceEventSet& deps_in

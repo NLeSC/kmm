@@ -10,7 +10,7 @@
 #include "fmt/ostream.h"
 
 #include "kmm/core/macros.hpp"
-#include "kmm/utils/gpu_api.hpp"
+#include "kmm/utils/backends.hpp"
 
 #define KMM_GPU_CHECK(...)                                                        \
     do {                                                                          \
@@ -25,7 +25,7 @@ namespace kmm {
 /// \addtogroup utility
 /// @{
 
-void gpu_throw_exception(GPUResult result, const char* file, int line, const char* expression);
+void gpu_throw_exception(g_result_t result, const char* file, int line, const char* expression);
 
 class GPUException: public std::exception {
   public:
@@ -43,17 +43,17 @@ class GPUContextGuard {
     KMM_NOT_COPYABLE_OR_MOVABLE(GPUContextGuard)
 
   public:
-    GPUContextGuard(GPUContext context);
+    GPUContextGuard(g_context_t context);
     ~GPUContextGuard();
 
   private:
-    GPUContext m_context;
+    g_context_t m_context;
 };
 
-GPUContext context_from_stream(GPUStream stream);
+g_context_t context_from_stream(g_stream_t stream);
 
 struct GPUContextId {
-    GPUContextId(GPUContext context);
+    GPUContextId(g_context_t context);
 
     bool operator==(const GPUContextId& that) const noexcept {
         return m_id == that.m_id;
@@ -77,8 +77,8 @@ class GPUStreamRef;
 class GPUStreamOwner;
 
 struct GPUStreamId {
-    GPUStreamId(GPUStream stream);
-    GPUStreamId(GPUStream stream, GPUContext context);
+    GPUStreamId(g_stream_t stream);
+    GPUStreamId(g_stream_t stream, g_context_t context);
     GPUStreamId(const GPUStreamRef& stream);
     GPUStreamId(const GPUStreamOwner& stream);
 
@@ -107,13 +107,13 @@ struct GPUStreamId {
 
 class GPUStreamRef {
   public:
-    GPUStreamRef(GPUStream);
+    GPUStreamRef(g_stream_t);
 
-    GPUContext context() const noexcept {
+    g_context_t context() const noexcept {
         return m_context;
     }
 
-    GPUStream stream() const noexcept {
+    g_stream_t stream() const noexcept {
         return m_stream;
     }
 
@@ -121,15 +121,15 @@ class GPUStreamRef {
         return m_stream_id;
     }
 
-    operator GPUStream() const noexcept {
+    operator g_stream_t() const noexcept {
         return m_stream;
     }
 
     friend std::ostream& operator<<(std::ostream&, const GPUStreamRef& self);
 
   private:
-    GPUContext m_context = nullptr;
-    GPUStream m_stream = nullptr;
+    g_context_t m_context = nullptr;
+    g_stream_t m_stream = nullptr;
     GPUStreamId m_stream_id;
 };
 
@@ -138,7 +138,7 @@ class GPUStreamOwner {
     GPUStreamOwner(const GPUStreamOwner&) = delete;
     GPUStreamOwner& operator=(const GPUStreamOwner&) = delete;
 
-    explicit GPUStreamOwner(GPUContext context, unsigned int flags = GPU_STREAM_DEFAULT_FLAGS);
+    explicit GPUStreamOwner(g_context_t context, unsigned int flags = G_STREAM_NON_BLOCKING);
     ~GPUStreamOwner();
 
     GPUStreamOwner(GPUStreamOwner&& that) noexcept : m_stream(that.m_stream) {
@@ -150,11 +150,11 @@ class GPUStreamOwner {
         return *this;
     }
 
-    GPUStream get() const noexcept {
+    g_stream_t get() const noexcept {
         return m_stream;
     }
 
-    operator GPUStream() const noexcept {
+    operator g_stream_t() const noexcept {
         return m_stream;
     }
 
@@ -167,7 +167,7 @@ class GPUStreamOwner {
   private:
     void destroy() noexcept;
 
-    GPUStream m_stream = nullptr;
+    g_stream_t m_stream = nullptr;
 };
 
 /// @}

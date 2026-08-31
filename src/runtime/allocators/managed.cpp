@@ -8,15 +8,15 @@
 
 namespace kmm {
 
-ManagedMemoryAllocator::ManagedMemoryAllocator(GPUContext context) :
+ManagedMemoryAllocator::ManagedMemoryAllocator(g_context_t context) :
     m_context(context) {}
 
 AllocResult ManagedMemoryAllocator::allocate(BufferLayout layout, void** addr_out) {
     GPUContextGuard guard {m_context};
-    GPUDeviceptr ptr;
-    GPUResult result = gpuMemAllocManaged(&ptr, layout.size_in_bytes);
+    g_device_ptr_t ptr;
+    g_result_t result = g_mem_alloc_manged(&ptr, layout.size_in_bytes, G_MEM_ATTACH_GLOBAL);
 
-    if (result == GPU_ERROR_OUT_OF_MEMORY) {
+    if (result == G_ERROR_OUT_OF_MEMORY) {
         return AllocResult::ErrorOutOfMemory;
     }
 
@@ -30,7 +30,7 @@ void ManagedMemoryAllocator::deallocate(void* addr, BufferLayout layout) {
     spdlog::trace("deallocate {} bytes of managed memory (addr: {})", layout.size_in_bytes, addr);
 
     GPUContextGuard guard {m_context};
-    KMM_GPU_CHECK(gpuMemFree(GPUDeviceptr(addr)));
+    KMM_GPU_CHECK(g_mem_free(g_device_ptr_t(addr)));
 }
 
 }  // namespace kmm

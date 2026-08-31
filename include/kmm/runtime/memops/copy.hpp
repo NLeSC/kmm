@@ -92,7 +92,7 @@ void copy(const void* src_addr, void* dst_addr, const CopyDescription& descripti
 /// once the copy has completed. Both `src_addr` and `dst_addr` must point to device memory on
 /// the same device (i.e. this is a device-to-device copy).
 void copy_async(
-    GPUStream stream,
+    g_stream_t stream,
     const void* src_addr,
     void* dst_addr,
     const CopyDescription& description

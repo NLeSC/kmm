@@ -17,13 +17,13 @@
 namespace kmm {
 
 struct MemorySystem::DeviceState {
-    DeviceState(GPUContext context, GPUDevice ordinal, std::unique_ptr<Allocator> allocator) :
+    DeviceState(g_context_t context, g_device_t ordinal, std::unique_ptr<Allocator> allocator) :
         context(context),
         ordinal(ordinal),
         allocator(std::move(allocator)) {}
 
-    GPUContext context;
-    GPUDevice ordinal;
+    g_context_t context;
+    g_device_t ordinal;
     std::unique_ptr<Allocator> allocator;
 
     MemoryStats stats;
@@ -40,7 +40,7 @@ struct MemorySystem::DeviceState {
 static std::unique_ptr<Allocator> make_host_allocator(
     const RuntimeConfig& config,
     DeviceEventRegistry events,
-    GPUContext context
+    g_context_t context
 ) {
     std::unique_ptr<Allocator> allocator;
     allocator = std::make_unique<PinnedMemoryAllocator>(context);
@@ -64,7 +64,7 @@ static std::unique_ptr<Allocator> make_host_allocator(
 static std::unique_ptr<Allocator> make_device_allocator(
     const RuntimeConfig& config,
     DeviceEventRegistry events,
-    GPUContext context,
+    g_context_t context,
     size_t device_memory_size
 ) {
     std::unique_ptr<Allocator> allocator;
@@ -126,7 +126,7 @@ MemorySystem::MemorySystem(
     m_num_devices(system_info.num_devices()) {
     spdlog::info("initializing memory system with {} device(s)", m_num_devices);
 
-    GPUContext host_context =
+    g_context_t host_context =
         m_num_devices > 0 ? system_info.device(DeviceId(0)).context() : nullptr;
     m_host_allocator = make_host_allocator(config, events, host_context);
 
@@ -154,13 +154,13 @@ MemorySystem::MemorySystem(
             int i_can_access_j = 0;
             int j_can_access_i = 0;
 
-            KMM_GPU_CHECK(gpuDeviceCanAccessPeer(
+            KMM_GPU_CHECK(g_device_can_access_peer(
                 &i_can_access_j,
                 system_info.device(DeviceId(i)).device_ordinal(),
                 system_info.device(DeviceId(j)).device_ordinal()
             ));
 
-            KMM_GPU_CHECK(gpuDeviceCanAccessPeer(
+            KMM_GPU_CHECK(g_device_can_access_peer(
                 &j_can_access_i,
                 system_info.device(DeviceId(j)).device_ordinal(),
                 system_info.device(DeviceId(i)).device_ordinal()
@@ -171,7 +171,7 @@ MemorySystem::MemorySystem(
 
             if (i_can_access_j) {
                 GPUContextGuard guard {m_devices[i]->context};
-                GPUResult result = gpuCtxEnablePeerAccess(m_devices[j]->context);
+                g_result_t result = g_ctx_enable_peer_access(m_devices[j]->context, 0);
 
                 if (result != GPU_ERROR_PEER_ACCESS_ALREADY_ENABLED) {
                     KMM_GPU_CHECK(result);
@@ -180,7 +180,7 @@ MemorySystem::MemorySystem(
 
             if (j_can_access_i) {
                 GPUContextGuard guard {m_devices[j]->context};
-                GPUResult result = gpuCtxEnablePeerAccess(m_devices[i]->context);
+                g_result_t result = g_ctx_enable_peer_access(m_devices[i]->context, 0);
 
                 if (result != GPU_ERROR_PEER_ACCESS_ALREADY_ENABLED) {
                     KMM_GPU_CHECK(result);
@@ -437,8 +437,8 @@ void MemorySystem::prefetch_managed(
     GPUContextGuard guard {device_state(device_id).context};
     m_events.wait_on_event(stream_hint, deps);
 
-    KMM_GPU_CHECK(gpuMemPrefetchAsync(
-        reinterpret_cast<GPUDeviceptr>(ptr),
+    KMM_GPU_CHECK(g_mem_prefetch_async(
+        reinterpret_cast<g_device_ptr_t>(ptr),
         layout.size_in_bytes,
         device_state(device_id).ordinal,
         m_events.get(stream_hint)
@@ -448,8 +448,8 @@ void MemorySystem::prefetch_managed(
 void* MemorySystem::translate_host_pointer(DeviceId device_id, void* host_ptr) const {
     GPUContextGuard guard {device_state(device_id).context};
 
-    GPUDeviceptr dptr;
-    KMM_GPU_CHECK(gpuMemHostGetDevicePointer(&dptr, host_ptr));
+    g_device_ptr_t dptr;
+    KMM_GPU_CHECK(g_mem_host_get_device_pointer(&dptr, host_ptr, 0));
     return reinterpret_cast<void*>(dptr);
 }
 
@@ -460,7 +460,7 @@ bool MemorySystem::same_context(kmm::DeviceId device_id, const kmm::DeviceStream
 AllocResult MemorySystem::allocate_device(
     DeviceId device_id,
     BufferLayout layout,
-    GPUDeviceptr* ptr_out,
+    g_device_ptr_t* ptr_out,
     const DeviceStreamId& stream_hint,
     DeviceEventSet& deps_out
 ) {
@@ -482,7 +482,7 @@ AllocResult MemorySystem::allocate_device(
     );
 
     deps_out.insert(event);
-    *ptr_out = reinterpret_cast<GPUDeviceptr>(addr);
+    *ptr_out = reinterpret_cast<g_device_ptr_t>(addr);
 
     if (result == AllocResult::Success) {
         device_state(device_id).record_allocation(layout.size_in_bytes);
@@ -501,7 +501,7 @@ AllocResult MemorySystem::allocate_device(
 
 void MemorySystem::deallocate_device(
     DeviceId device_id,
-    GPUDeviceptr ptr,
+    g_device_ptr_t ptr,
     BufferLayout layout,
     const DeviceStreamId& stream_hint,
     const DeviceEventSet& deps_in
@@ -535,7 +535,7 @@ void MemorySystem::deallocate_device(
 DeviceEvent MemorySystem::copy_host_to_device(
     DeviceId device_id,
     const void* src_addr,
-    GPUDeviceptr dst_addr,
+    g_device_ptr_t dst_addr,
     size_t nbytes,
     const DeviceStreamId& stream_hint,
     const DeviceEventSet& deps_in
@@ -559,8 +559,8 @@ DeviceEvent MemorySystem::copy_host_to_device(
         StreamKind::HostToDevice,
         stream_hint,
         deps_in,
-        [&](GPUStream stream) {
-            KMM_GPU_CHECK(gpuMemcpyHtoDAsync(dst_addr, src_addr, nbytes, (GPUStream)stream));
+        [&](g_stream_t stream) {
+            KMM_GPU_CHECK(g_memcpy_h_to_d_async(dst_addr, src_addr, nbytes, (g_stream_t)stream));
             return nbytes;
         }
     );
@@ -571,7 +571,7 @@ DeviceEvent MemorySystem::copy_host_to_device(
 
 DeviceEvent MemorySystem::copy_device_to_host(
     DeviceId device_id,
-    GPUDeviceptr src_addr,
+    g_device_ptr_t src_addr,
     void* dst_addr,
     size_t nbytes,
     const DeviceStreamId& stream_hint,
@@ -596,8 +596,8 @@ DeviceEvent MemorySystem::copy_device_to_host(
         StreamKind::DeviceToHost,
         stream_hint,
         deps_in,
-        [&](GPUStream stream) {
-            KMM_GPU_CHECK(gpuMemcpyDtoHAsync(dst_addr, src_addr, nbytes, (GPUStream)stream));
+        [&](g_stream_t stream) {
+            KMM_GPU_CHECK(g_memcpy_d_to_h_async(dst_addr, src_addr, nbytes, (g_stream_t)stream));
             return nbytes;
         }
     );
@@ -609,8 +609,8 @@ DeviceEvent MemorySystem::copy_device_to_host(
 DeviceEvent MemorySystem::copy_device_to_device(
     DeviceId src_device,
     DeviceId dst_device,
-    GPUDeviceptr src_addr,
-    GPUDeviceptr dst_addr,
+    g_device_ptr_t src_addr,
+    g_device_ptr_t dst_addr,
     size_t nbytes,
     const DeviceStreamId& stream_hint,
     const DeviceEventSet& deps_in
@@ -629,11 +629,13 @@ DeviceEvent MemorySystem::copy_device_to_device(
         StreamKind::DeviceToDevice,
         deps_in,
         [&](auto stream_id) -> uint64_t {
-            KMM_GPU_CHECK(gpuMemcpyPeerAsync(
+            KMM_GPU_CHECK(g_memcpy_peer_async(
                 dst_addr,
                 device_state(dst_device).context,
+                device_state(dst_device).ordinal,
                 src_addr,
                 device_state(src_device).context,
+                device_state(src_device).ordinal,
                 nbytes,
                 m_events.get(stream_id)
             ));
@@ -650,7 +652,7 @@ AllocResult MemorySystem::allocate_host_and_copy_from_device(
     BufferLayout layout,
     void** dst_addr,
     DeviceId device_id,
-    GPUDeviceptr src_addr,
+    g_device_ptr_t src_addr,
     const DeviceStreamId& stream_hint,
     const DeviceEventSet& deps_in,
     DeviceEvent& dep_out
@@ -679,9 +681,12 @@ AllocResult MemorySystem::allocate_host_and_copy_from_device(
             *dst_addr = addr;
 
             try {
-                KMM_GPU_CHECK(
-                    gpuMemcpyDtoHAsync(*dst_addr, src_addr, layout.size_in_bytes, (GPUStream)stream)
-                );
+                KMM_GPU_CHECK(g_memcpy_d_to_h_async(
+                    *dst_addr,
+                    src_addr,
+                    layout.size_in_bytes,
+                    (g_stream_t)stream
+                ));
                 return layout.size_in_bytes;
             } catch (...) {
                 m_host_allocator->deallocate_async(stream, addr, layout);
@@ -700,7 +705,7 @@ AllocResult MemorySystem::allocate_host_and_copy_from_device(
 AllocResult MemorySystem::allocate_device_and_copy_from_host(
     DeviceId device_id,
     BufferLayout layout,
-    GPUDeviceptr* dst_addr,
+    g_device_ptr_t* dst_addr,
     const void* src_addr,
     const DeviceStreamId& stream_hint,
     const DeviceEventSet& deps_in,
@@ -727,7 +732,7 @@ AllocResult MemorySystem::allocate_device_and_copy_from_host(
                 return size_t(0);
             }
 
-            *dst_addr = reinterpret_cast<GPUDeviceptr>(addr);
+            *dst_addr = reinterpret_cast<g_device_ptr_t>(addr);
 
             try {
                 spdlog::trace(
@@ -737,9 +742,12 @@ AllocResult MemorySystem::allocate_device_and_copy_from_host(
                     src_addr,
                     *dst_addr
                 );
-                KMM_GPU_CHECK(
-                    gpuMemcpyHtoDAsync(*dst_addr, src_addr, layout.size_in_bytes, (GPUStream)stream)
-                );
+                KMM_GPU_CHECK(g_memcpy_h_to_d_async(
+                    *dst_addr,
+                    src_addr,
+                    layout.size_in_bytes,
+                    (g_stream_t)stream
+                ));
                 return layout.size_in_bytes;
             } catch (...) {
                 device_state(device_id).allocator->deallocate(addr, layout);
@@ -758,7 +766,7 @@ AllocResult MemorySystem::allocate_device_and_copy_from_host(
 
 DeviceEvent MemorySystem::fill_device(
     DeviceId device_id,
-    GPUDeviceptr addr,
+    g_device_ptr_t addr,
     const FillDescription& description,
     const DeviceStreamId& stream_hint,
     const DeviceEventSet& deps_in
@@ -773,7 +781,7 @@ DeviceEvent MemorySystem::fill_device(
         StreamKind::DeviceToDevice,
         stream_hint,
         deps_in,
-        [&](GPUStream stream) {
+        [&](g_stream_t stream) {
             fill_async(stream, reinterpret_cast<void*>(addr), description);
             return checked_mul<size_t>(description.num_elements(), description.value.length);
         }
@@ -795,8 +803,8 @@ std::future<void> MemorySystem::fill_host(
 
 DeviceEvent MemorySystem::reduce_device(
     DeviceId device_id,
-    GPUDeviceptr src_addr,
-    GPUDeviceptr dst_addr,
+    g_device_ptr_t src_addr,
+    g_device_ptr_t dst_addr,
     const ReductionDescription& description,
     const DeviceStreamId& stream_hint,
     const DeviceEventSet& deps_in
@@ -816,7 +824,7 @@ DeviceEvent MemorySystem::reduce_device(
         StreamKind::DeviceToDevice,
         stream_hint,
         deps_in,
-        [&](GPUStream stream) {
+        [&](g_stream_t stream) {
             reduce_async(
                 stream,
                 reinterpret_cast<void*>(src_addr),

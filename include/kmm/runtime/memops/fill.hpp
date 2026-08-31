@@ -5,7 +5,7 @@
 #include <type_traits>
 
 #include "kmm/core/macros.hpp"
-#include "kmm/utils/gpu_api.hpp"
+#include "kmm/utils/backends.hpp"
 #include "kmm/core/panic.hpp"
 #include "kmm/runtime/memops/types.hpp"
 
@@ -134,7 +134,7 @@ void fill(void* dst_addr, const FillDescription& description);
 /// fill is enqueued). The fill is enqueued on `stream` after waiting for `dependencies`, and the
 /// returned event becomes ready once the fill has completed.
 void fill_async(
-    GPUStream stream,
+    g_stream_t stream,
     void* dst_addr,
     const FillDescription& description
 );

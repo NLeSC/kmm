@@ -2,7 +2,7 @@
 
 #include "kmm/core/checked_math.hpp"
 #include "kmm/core/macros.hpp"
-#include "kmm/utils/gpu_api.hpp"
+#include "kmm/utils/backends.hpp"
 #include "kmm/core/panic.hpp"
 #include "kmm/runtime/memops/copy.hpp"
 #include "kmm/runtime/memops/fill.hpp"
@@ -180,7 +180,7 @@ void reduce(const void* src_addr, void* dst_addr, const ReductionDescription& de
 /// enqueued on `stream` after waiting for `dependencies`, and the returned event becomes ready
 /// once the reduction has completed.
 void reduce_async(
-    GPUStream stream,
+    g_stream_t stream,
     const void* src_addr,
     void* dst_addr,
     const ReductionDescription& description
