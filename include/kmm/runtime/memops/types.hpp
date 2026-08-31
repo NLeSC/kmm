@@ -45,7 +45,7 @@ size_t data_type_size(DataType dtype);
 /// Returns a human-readable name for the given data type (e.g. `"Float32"`).
 const char* data_type_name(DataType dtype);
 
-/// The operator applied by `reduce`/`reduce_async` to combine elements.
+/// The operator applied by `reduce`/`reduce_gpu` to combine elements.
 enum class ReductionOp {
     Sum,
     Product,

@@ -14,9 +14,11 @@ KMM_HOST_DEVICE constexpr T div_floor(T a, T b) {
     const T zero = static_cast<T>(0);
     T quotient = a / b;
 
-    // Adjust the quotient if a and b have different signs
-    if (a % b != zero && ((a >= zero) ^ (b >= zero))) {
-        quotient -= 1;
+    if constexpr (detail::numeric_type_traits<T>::is_signed) {
+        // Adjust the quotient if a and b have different signs
+        if (a % b != zero && ((a >= zero) ^ (b >= zero))) {
+            quotient -= 1;
+        }
     }
 
     return quotient;
@@ -28,8 +30,12 @@ KMM_HOST_DEVICE constexpr T div_ceil(T a, T b) {
     const T zero = static_cast<T>(0);
     T quotient = a / b;
 
-    // Adjust the quotient if both a and b have the same sign
-    if (a % b != zero && !((a >= zero) ^ (b >= zero))) {
+    if constexpr (detail::numeric_type_traits<T>::is_signed) {
+        // Adjust the quotient if both a and b have the same sign
+        if (a % b != zero && !((a >= zero) ^ (b >= zero))) {
+            quotient += 1;
+        }
+    } else if (a % b != zero) {
         quotient += 1;
     }
 
@@ -47,11 +53,15 @@ KMM_HOST_DEVICE constexpr T round_up_to_multiple(T input, T multiple) {
     T delta = 0;
 
     if (remainder != zero) {
-        // There are two cases:
-        // - input >= 0: return input + abs(multiple) - remainder
-        // - input < 0:  return input - remainder
-        T abs_multiple = (multiple >= zero ? multiple : -multiple);
-        delta = abs_multiple * (input >= zero) - remainder;
+        if constexpr (detail::numeric_type_traits<T>::is_signed) {
+            // There are two cases:
+            // - input >= 0: return input + abs(multiple) - remainder
+            // - input < 0:  return input - remainder
+            T abs_multiple = (multiple >= zero ? multiple : -multiple);
+            delta = abs_multiple * (input >= zero) - remainder;
+        } else {
+            delta = multiple - remainder;
+        }
     }
 
     return checked_add(input, delta);

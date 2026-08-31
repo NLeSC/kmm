@@ -11,6 +11,7 @@
 #include "kmm/core/panic.hpp"
 #include "kmm/runtime/data_interfaces/flat.hpp"
 #include "kmm/runtime/memops/reduction.hpp"
+#include "kmm/runtime/memops/reduction_gpu.hpp"
 #include "kmm/runtime/memory_buffer.hpp"
 #include "kmm/runtime/memory_system.hpp"
 #include "kmm/runtime/reduction_manager.hpp"
@@ -177,13 +178,18 @@ struct PartialFold {
         if (memory_id.is_host()) {
             void* peer_addr = local_addr;
             host_future = std::async(std::launch::async, [peer_addr, home_addr, description] {
-                reduce(peer_addr, home_addr, description);
+                memops::reduce(peer_addr, home_addr, description);
             });
         } else {
+            // This path does not provide a scratch buffer, so it only supports reductions that
+            // need none.
+            KMM_ASSERT(memops::reduce_gpu_scratch_size(description) == 0);
+
             auto event = system.reduce_device(
                 memory_id.as_device(),
                 reinterpret_cast<g_device_ptr_t>(local_addr),
                 reinterpret_cast<g_device_ptr_t>(home_addr),
+                g_device_ptr_t {},
                 description,
                 DeviceStreamId::null(),
                 request_deps

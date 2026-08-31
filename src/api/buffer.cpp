@@ -160,7 +160,7 @@ void Buffer::copy_to(void* dest, CopyDescription description, MemoryId memory_id
     );
 
     if (memory_id.is_host()) {
-        copy(accessor.address, dest, description);
+        memops::copy(accessor.address, dest, description);
     } else {
         copy_device_to_host(accessor.address, dest, simplified);
     }
@@ -196,7 +196,7 @@ void Buffer::copy_from(const void* src, CopyDescription description, MemoryId me
     );
 
     if (memory_id.is_host()) {
-        copy(src, accessor.address, description);
+        memops::copy(src, accessor.address, description);
     } else {
         copy_host_to_device(src, accessor.address, simplified);
     }

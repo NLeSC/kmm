@@ -8,6 +8,7 @@
 #include "kmm/core/const_value.hpp"
 #include "kmm/core/panic.hpp"
 #include "kmm/runtime/memops/copy.hpp"
+#include "kmm/runtime/memops/fill.hpp"
 #include "kmm/runtime/memops/reduction.hpp"
 
 namespace kmm {
@@ -119,6 +120,20 @@ CopyDescription ReductionDescription::as_copy() const {
 
     for (size_t i = 0; i < num_dims; i++) {
         result.dims[i] = CopyDim {dims[i].extent, dims[i].input_stride, dims[i].output_stride};
+    }
+
+    return result;
+}
+
+FillDescription ReductionDescription::as_fill() const {
+    KMM_ASSERT(is_equivalent_to_fill());
+
+    FillDescription result(reduction_identity(dtype, operation));
+    result.offset = output_offset;
+    result.num_dims = num_dims;
+
+    for (size_t i = 0; i < num_dims; i++) {
+        result.dims[i] = FillDim {dims[i].extent, dims[i].output_stride};
     }
 
     return result;
@@ -368,11 +383,21 @@ static void reduce_typed(
     KMM_PANIC("invalid reduction operator");
 }
 
+namespace memops {
+
 void reduce(const void* src_addr, void* dst_addr, const ReductionDescription& description) {
     auto simplified = description.simplify();
 
+    if (simplified.is_noop()) {
+        return;
+    }
+
     if (simplified.is_equivalent_to_copy()) {
         return copy(src_addr, dst_addr, simplified.as_copy());
+    }
+
+    if (simplified.is_equivalent_to_fill()) {
+        return fill(dst_addr, simplified.as_fill());
     }
 
     switch (simplified.dtype) {
@@ -403,7 +428,9 @@ void reduce(const void* src_addr, void* dst_addr, const ReductionDescription& de
     KMM_PANIC("invalid data type");
 }
 
-// `reduce_async` (the GPU counterpart) lives in reduction.cu -- it needs real GPU kernels (via
-// CUB), so it must be compiled by nvcc, unlike the rest of this file.
+}  // namespace memops
+
+// `memops::reduce_gpu` (the GPU counterpart) lives in reduction_gpu.cu -- it needs real GPU kernels
+// (via CUB), so it must be compiled by nvcc, unlike the rest of this file.
 
 }  // namespace kmm

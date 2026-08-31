@@ -6,7 +6,6 @@
 #include "kmm/runtime/memops/copy.hpp"
 #include "kmm/runtime/memops/fill.hpp"
 #include "kmm/runtime/memops/types.hpp"
-#include "kmm/utils/backends.hpp"
 
 namespace kmm {
 
@@ -170,25 +169,31 @@ struct ReductionDescription {
     /// Converts this reduction into an equivalent `CopyDescription`. Only valid when
     /// `is_equivalent_to_copy()` returns `true`.
     CopyDescription as_copy() const;
+
+    /// Returns `true` if this reduction combines *zero* input elements into each output element
+    /// (`reduction_extent == 0`) without accumulating into the previous value: every output is
+    /// therefore left as the identity element for `operation`, so the reduction is equivalent to
+    /// broadcasting that identity across the output region. See `as_fill`.
+    KMM_HOST_DEVICE
+    bool is_equivalent_to_fill() const {
+        return reduction_extent == 0 && !accumulate;
+    }
+
+    /// Converts this reduction into an equivalent `FillDescription` that writes the identity
+    /// element of `operation` across the output region (the batch axes). Only valid when
+    /// `is_equivalent_to_fill()` returns `true`.
+    FillDescription as_fill() const;
+
+    /// Returns `true` if this reduction is guaranteed to leave the output buffer unchanged, so it
+    /// need not read or write anything. That happens when no output elements are produced at all
+    /// (`num_outputs() == 0`), or when zero input elements are combined into each output
+    /// (`reduction_extent == 0`) while accumulating: every output becomes
+    /// `combine(previous, identity) == previous` for all of `Sum`/`Product`/`Min`/`Max`.
+    KMM_HOST_DEVICE
+    bool is_noop() const {
+        return num_outputs() == 0 || (reduction_extent == 0 && accumulate);
+    }
 };
-
-/// Reduces `src_addr` into `dst_addr` on the CPU, according to `description`. Blocks until the
-/// reduction has completed.
-void reduce(const void* src_addr, void* dst_addr, const ReductionDescription& description);
-
-/// Reduces `src_addr` into `dst_addr` on the GPU, according to `description`. The reduction is
-/// enqueued on `stream` after waiting for `dependencies`, and the returned event becomes ready
-/// once the reduction has completed.
-void reduce_async(
-    g_stream_t stream,
-    const void* src_addr,
-    void* dst_addr,
-    void* scratch_addr,
-    const ReductionDescription& description
-);
-
-/// Returns the size in bytes of the scratch buffer that `reduce_async` requires for `description`.
-size_t reduce_async_scratch_size(const ReductionDescription& description);
 
 /// Builds a `ReductionDescription` that reduces `src` (e.g. a `kmm::Layout`) over `axis` into
 /// `dst`, whose rank must be exactly one less than `src`'s: every axis of `src` other than `axis`
@@ -249,5 +254,18 @@ ReductionDescription make_reduction_description(
 }
 
 /// @}
+
+namespace memops {
+
+/// \addtogroup memops
+/// @{
+
+/// Reduces `src_addr` into `dst_addr` on the CPU, according to `description`. Blocks until the
+/// reduction has completed.
+void reduce(const void* src_addr, void* dst_addr, const ReductionDescription& description);
+
+/// @}
+
+}  // namespace memops
 
 }  // namespace kmm

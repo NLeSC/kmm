@@ -11,6 +11,8 @@
 #include "kmm/runtime/allocators/managed.hpp"
 #include "kmm/runtime/allocators/pinned.hpp"
 #include "kmm/runtime/device_data_streams.hpp"
+#include "kmm/runtime/memops/fill_gpu.hpp"
+#include "kmm/runtime/memops/reduction_gpu.hpp"
 #include "kmm/runtime/memory_system.hpp"
 #include "kmm/utils/gpu_utils.hpp"
 
@@ -790,7 +792,7 @@ DeviceEvent MemorySystem::fill_device(
         stream_hint,
         deps_in,
         [&](g_stream_t stream) {
-            fill_async(stream, reinterpret_cast<void*>(addr), description);
+            memops::fill_gpu(stream, reinterpret_cast<void*>(addr), description);
             return checked_mul<size_t>(description.num_elements(), description.value.length);
         }
     );
@@ -805,7 +807,7 @@ std::future<void> MemorySystem::fill_host(
 
     return std::async(std::launch::async, [this, addr, description, deps_in] {
         m_events.synchronize(deps_in);
-        fill(addr, description);
+        memops::fill(addr, description);
     });
 }
 
@@ -834,7 +836,7 @@ DeviceEvent MemorySystem::reduce_device(
         stream_hint,
         deps_in,
         [&](g_stream_t stream) {
-            reduce_async(
+            memops::reduce_gpu(
                 stream,
                 reinterpret_cast<void*>(src_addr),
                 reinterpret_cast<void*>(dst_addr),

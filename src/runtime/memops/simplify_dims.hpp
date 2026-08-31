@@ -51,8 +51,7 @@ size_t simplify_dims(const Dim* dims, size_t num_dims, Dim* out, Less less, TryM
         }
     }
 
-    // Compact in place: `num_out` never exceeds `i`, so writing `out[num_out]` never clobbers an
-    // entry at or beyond `out[i]` before it has been read.
+    // Compact in place: `num_out` never exceeds `i`, so writing `out[num_out]` never overwrites
     size_t num_out = 0;
 
     for (size_t i = 0; i < n; i++) {

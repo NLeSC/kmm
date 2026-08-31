@@ -10,6 +10,7 @@
 #include "kmm/runtime/data_interfaces/managed.hpp"
 #include "kmm/runtime/data_interfaces/pinned.hpp"
 #include "kmm/runtime/device_data_streams.hpp"
+#include "kmm/runtime/memops/reduction_gpu.hpp"
 #include "kmm/runtime/memory_buffer.hpp"
 #include "kmm/runtime/reduction_manager.hpp"
 #include "kmm/runtime/resource.hpp"
@@ -581,7 +582,8 @@ static DeviceEvent do_copy(
         );
     } else {
         // TOOD: maybe use a thread pool?
-        auto fut = std::async([=] { copy(src_access.address, dst_access.address, description); });
+        auto fut =
+            std::async([=] { memops::copy(src_access.address, dst_access.address, description); });
 
         impl->poll_until_completion(guard, [&] {
             if (fut.wait_for(std::chrono::seconds(0)) == std::future_status::timeout) {
@@ -708,7 +710,7 @@ static DeviceEvent do_reduce(
     DeviceEvent event;
 
     if (memory_id.is_device()) {
-        KMM_ASSERT(scratch_access.size_in_bytes >= reduce_async_scratch_size(description));
+        KMM_ASSERT(scratch_access.size_in_bytes >= memops::reduce_gpu_scratch_size(description));
 
         event = impl->memory_system->reduce_device(
             memory_id.as_device(),
@@ -721,7 +723,9 @@ static DeviceEvent do_reduce(
         );
     } else {
         // TODO: maybe use a thread pool?
-        auto fut = std::async([=] { reduce(src_access.address, dst_access.address, description); });
+        auto fut = std::async([=] {
+            memops::reduce(src_access.address, dst_access.address, description);
+        });
 
         impl->poll_until_completion(guard, [&] {
             if (fut.wait_for(std::chrono::seconds(0)) == std::future_status::timeout) {
@@ -818,7 +822,7 @@ DeviceEvent Runtime::submit_reduction(
         }
     });
 
-    size_t scratch_size = reduce_async_scratch_size(description);
+    size_t scratch_size = memops::reduce_gpu_scratch_size(description);
     bool has_scratch = memory_id.is_device() && scratch_size > 0;
 
     auto transaction = m_impl->memory_manager.create_transaction(parent);

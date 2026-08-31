@@ -5,8 +5,6 @@
 #include "kmm/core/macros.hpp"
 #include "kmm/core/panic.hpp"
 #include "kmm/core/range.hpp"
-#include "kmm/runtime/device_event.hpp"
-#include "kmm/runtime/device_stream.hpp"
 #include "kmm/runtime/memops/types.hpp"
 
 namespace kmm {
@@ -83,21 +81,6 @@ struct CopyDescription {
     CopyDescription simplify() const;
 };
 
-/// Copies data from `src_addr` to `dst_addr` on the CPU, according to `description`. Blocks
-/// until the copy has completed.
-void copy(const void* src_addr, void* dst_addr, const CopyDescription& description);
-
-/// Copies data from `src_addr` to `dst_addr` on the GPU, according to `description`. The copy is
-/// enqueued on `stream` after waiting for `dependencies`, and the returned event becomes ready
-/// once the copy has completed. Both `src_addr` and `dst_addr` must point to device memory on
-/// the same device (i.e. this is a device-to-device copy).
-void copy_async(
-    g_stream_t stream,
-    const void* src_addr,
-    void* dst_addr,
-    const CopyDescription& description
-);
-
 /// Builds a `CopyDescription` that copies `element_size`-sized elements between two layouts of
 /// matching rank (e.g. `kmm::Layout`), translating each layout's (element-space) base offset,
 /// per-axis origin, and strides into the byte offsets/strides that `CopyDescription` expects.
@@ -134,5 +117,18 @@ CopyDescription make_copy_description(
 }
 
 /// @}
+
+namespace memops {
+
+/// \addtogroup memops
+/// @{
+
+/// Copies data from `src_addr` to `dst_addr` on the CPU, according to `description`. Blocks
+/// until the copy has completed.
+void copy(const void* src_addr, void* dst_addr, const CopyDescription& description);
+
+/// @}
+
+}  // namespace memops
 
 }  // namespace kmm

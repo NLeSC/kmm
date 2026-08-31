@@ -6,7 +6,6 @@
 #include "kmm/core/checked_compare.hpp"
 #include "kmm/core/panic.hpp"
 #include "kmm/runtime/memops/copy.hpp"
-#include "kmm/utils/gpu_utils.hpp"
 
 namespace kmm {
 
@@ -91,6 +90,8 @@ CopyDescription CopyDescription::simplify() const {
     return result;
 }
 
+namespace memops {
+
 static void copy_dim(
     const std::byte* src,
     std::byte* dst,
@@ -124,55 +125,6 @@ void copy(const void* src_addr, void* dst_addr, const CopyDescription& descripti
     );
 }
 
-void copy_async(
-    g_stream_t stream,
-    const void* src_addr,
-    void* dst_addr,
-    const CopyDescription& description
-) {
-    src_addr = static_cast<const std::byte*>(src_addr) + description.src_offset;
-    dst_addr = static_cast<std::byte*>(dst_addr) + description.dst_offset;
-
-    size_t n = description.num_dims;
-    size_t element_size = description.element_size;
-    if (n == 0) {
-        // No axes: a single contiguous run of `element_size` bytes.
-        KMM_GPU_CHECK(g_memcpy_d_to_d_async(
-            (g_device_ptr_t)dst_addr,
-            (g_device_ptr_t)src_addr,
-            element_size,
-            stream
-        ));
-
-        return;
-    }
-
-#if defined(KMM_USE_CUDA)
-    if (n == 1) {
-        const CopyDim& dim = description.dims[0];
-
-        // One strided axis on top of a contiguous element: a 2D pitched copy, where
-        // each "row" is a single element and `dim.extent` rows are copied.
-        CUDA_MEMCPY2D copy_params;
-        std::memset(&copy_params, 0, sizeof(copy_params));
-
-        copy_params.srcMemoryType = CU_MEMORYTYPE_DEVICE;
-        copy_params.srcDevice = (g_device_ptr_t)src_addr;
-        copy_params.srcPitch = static_cast<size_t>(dim.src_stride);
-
-        copy_params.dstMemoryType = CU_MEMORYTYPE_DEVICE;
-        copy_params.dstDevice = (g_device_ptr_t)dst_addr;
-        copy_params.dstPitch = static_cast<size_t>(dim.dst_stride);
-
-        copy_params.WidthInBytes = element_size;
-        copy_params.Height = static_cast<size_t>(dim.extent);
-
-        KMM_GPU_CHECK(g_memcpy_2d_async(&copy_params, stream));
-        return;
-    }
-#endif
-
-    throw std::runtime_error("copy operation unsupported");
-}
+}  // namespace memops
 
 }  // namespace kmm
