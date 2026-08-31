@@ -1,11 +1,9 @@
-CLANG_FORMAT=clang-format-16 --verbose
+CLANG_FORMAT=clang-format --verbose
 
 pretty:
-	${CLANG_FORMAT} -i include/kmm/*/*.hpp
-	$(CLANG_FORMAT) -i src/*/*.cpp
-	${CLANG_FORMAT} -i examples/*.cu
-	${CLANG_FORMAT} -i test/*/*.cpp
-	#${CLANG_FORMAT} -i benchmarks/*.cu
+	find include src test examples \
+		\( -name '*.hpp' -o -name '*.cpp' -o -name '*.cu' -o -name '*.cuh' \) -type f -print0 \
+		| xargs -0 -r ${CLANG_FORMAT} -i
 
 docs:
 	cd docs && doxygen Doxyfile

@@ -16,8 +16,7 @@ LimitAllocator::LimitAllocator(
     m_events(std::move(events)),
     m_bytes_limit(max_size),
     m_bytes_active(0),
-    m_bytes_pending(0) {
-}
+    m_bytes_pending(0) {}
 
 LimitAllocator::~LimitAllocator() {
     // wait until all evenst are done
@@ -48,11 +47,7 @@ AllocResult LimitAllocator::allocate_async(
     // the stream must wait until reaching the barrier
     stream.wait_on_event(m_limit_barrier);
 
-    auto result = m_inner->allocate_async(
-        stream,
-        layout,
-        addr_out
-    );
+    auto result = m_inner->allocate_async(stream, layout, addr_out);
 
     if (result != AllocResult::Success) {
         return result;
@@ -62,11 +57,7 @@ AllocResult LimitAllocator::allocate_async(
     return AllocResult::Success;
 }
 
-void LimitAllocator::deallocate_async(
-    const DeviceStream& stream,
-    void* addr,
-    BufferLayout layout
-) {
+void LimitAllocator::deallocate_async(const DeviceStream& stream, void* addr, BufferLayout layout) {
     m_inner->deallocate_async(stream, addr, layout);
     auto event = stream.record_event();
     m_bytes_active -= layout.size_in_bytes;
@@ -85,14 +76,11 @@ AllocResult LimitAllocator::allocate(BufferLayout layout, void** addr_out) {
     }
 
     // the stream must wait until reaching the barrier
-    for (const auto& dep: m_limit_barrier) {
+    for (const auto& dep : m_limit_barrier) {
         m_events.synchronize(dep);
     }
 
-    auto result = m_inner->allocate(
-        layout,
-        addr_out
-    );
+    auto result = m_inner->allocate(layout, addr_out);
 
     if (result != AllocResult::Success) {
         return result;

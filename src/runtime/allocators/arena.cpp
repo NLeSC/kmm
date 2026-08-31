@@ -1,8 +1,8 @@
 #include <algorithm>
 #include <utility>
 
-#include "kmm/runtime/allocators/arena.hpp"
 #include "kmm/core/panic.hpp"
+#include "kmm/runtime/allocators/arena.hpp"
 
 namespace kmm {
 
@@ -56,9 +56,8 @@ bool ArenaAllocator::find_best_fit(
 
         for (auto it = block.by_size.lower_bound({nbytes, 0}); it != block.by_size.end(); ++it) {
             const auto& deps = block.by_offset.at(it->second).deps;
-            bool is_ready = stream_opt == nullptr ?
-                                                  m_events.is_ready(deps) :
-                                              stream_opt->preceded_by(deps);
+            bool is_ready =
+                stream_opt == nullptr ? m_events.is_ready(deps) : stream_opt->preceded_by(deps);
 
             if (is_ready) {
                 block_out = m_blocks[block_index].get();
@@ -176,7 +175,9 @@ AllocResult ArenaAllocator::allocate_generic(
 
 void ArenaAllocator::deallocate_generic(
     const DeviceStream* stream_opt,
-    void* addr, BufferLayout layout) {
+    void* addr,
+    BufferLayout layout
+) {
     auto it = m_allocations.find(addr);
     KMM_ASSERT(it != m_allocations.end());
 
@@ -228,11 +229,7 @@ AllocResult ArenaAllocator::allocate_async(
     return allocate_generic(&stream, layout, addr_out);
 }
 
-void ArenaAllocator::deallocate_async(
-    const DeviceStream& stream,
-    void* addr,
-    BufferLayout layout
-) {
+void ArenaAllocator::deallocate_async(const DeviceStream& stream, void* addr, BufferLayout layout) {
     deallocate_generic(&stream, addr, layout);
 }
 
@@ -268,8 +265,7 @@ bool ArenaAllocator::trim_one(const DeviceStream* stream_opt) {
     for (size_t i = 0; i < m_blocks.size(); i++) {
         Block& block = *m_blocks[i];
         const auto& [offset, chunk] = *block.by_offset.begin();
-        bool fully_free = block.by_offset.size() == 1 && offset == 0
-            && chunk.size == block.size;
+        bool fully_free = block.by_offset.size() == 1 && offset == 0 && chunk.size == block.size;
 
         if (fully_free) {
             const auto& event = chunk.deps;

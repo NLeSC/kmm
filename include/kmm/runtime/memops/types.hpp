@@ -56,15 +56,15 @@ enum class ReductionOp {
 /// Returns a human-readable name for the given reduction operator (e.g. `"Sum"`).
 const char* reduction_op_name(ReductionOp op);
 
-template <typename T>
+template<typename T>
 struct data_type_of {};
 
-#define KMM_IMPL_DATA_TYPE_OF(TYPE, DTYPE)              \
-    template<>                                          \
-    struct data_type_of<TYPE> {                         \
-        constexpr operator DataType() const {           \
-            return DataType::DTYPE;                     \
-        }                                                \
+#define KMM_IMPL_DATA_TYPE_OF(TYPE, DTYPE)    \
+    template<>                                \
+    struct data_type_of<TYPE> {               \
+        constexpr operator DataType() const { \
+            return DataType::DTYPE;           \
+        }                                     \
     };
 
 KMM_IMPL_DATA_TYPE_OF(int8_t, Int8)

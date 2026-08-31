@@ -8,8 +8,7 @@
 
 namespace kmm {
 
-ManagedMemoryAllocator::ManagedMemoryAllocator(g_context_t context) :
-    m_context(context) {}
+ManagedMemoryAllocator::ManagedMemoryAllocator(g_context_t context) : m_context(context) {}
 
 AllocResult ManagedMemoryAllocator::allocate(BufferLayout layout, void** addr_out) {
     GPUContextGuard guard {m_context};
@@ -22,7 +21,11 @@ AllocResult ManagedMemoryAllocator::allocate(BufferLayout layout, void** addr_ou
 
     KMM_GPU_CHECK(result);
     *addr_out = (void*)ptr;
-    spdlog::trace("allocate {} bytes of managed memory (addr: {})", layout.size_in_bytes, *addr_out);
+    spdlog::trace(
+        "allocate {} bytes of managed memory (addr: {})",
+        layout.size_in_bytes,
+        *addr_out
+    );
     return AllocResult::Success;
 }
 

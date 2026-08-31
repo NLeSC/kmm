@@ -343,8 +343,9 @@ class NDView: public detail::NDViewBase<NDView<T, LayoutT, AccessorT>, LayoutT::
     /// `permute_axes<2, 0, 1>()` moves the current axis 2 to position 0, axis 0 to position 1,
     /// and axis 1 to position 2.
     template<size_t... Is>
-    KMM_HOST_DEVICE permute_axes_type<Is...> permute_axes(IndexSequence<Is...> seq = {})
-        const noexcept {
+    KMM_HOST_DEVICE permute_axes_type<Is...> permute_axes(
+        IndexSequence<Is...> seq = {}
+    ) const noexcept {
         return with_layout(m_layout.template permute_axes<Is...>(seq));
     }
 

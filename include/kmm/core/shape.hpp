@@ -169,13 +169,15 @@ Shape(Ts&&...) -> Shape<sizeof...(Ts)>;
 template<typename... Ts>
 KMM_HOST_DEVICE Shape<sizeof...(Ts)> shape(const Ts&... values) {
     return Shape<sizeof...(Ts)> {
-        Vec<default_index_type, sizeof...(Ts)> {static_cast<default_index_type>(values)...}};
+        Vec<default_index_type, sizeof...(Ts)> {static_cast<default_index_type>(values)...}
+    };
 }
 
 template<typename T, size_t N, size_t M>
 KMM_HOST_DEVICE Shape<N + M, T> concat(const Shape<N, T>& lhs, const Shape<M, T>& rhs) {
     return Shape<N + M, T> {
-        concat(static_cast<const Vec<T, N>&>(lhs), static_cast<const Vec<T, M>&>(rhs))};
+        concat(static_cast<const Vec<T, N>&>(lhs), static_cast<const Vec<T, M>&>(rhs))
+    };
 }
 
 template<size_t N, typename T, size_t M, typename U>
@@ -256,8 +258,10 @@ struct domain_traits<Shape<N, IndexT>> {
     using permute_axes_type = Shape<sizeof...(Is), index_type>;
 
     template<size_t... Is>
-    KMM_HOST_DEVICE static constexpr permute_axes_type<Is...>
-    permute_axes(const domain_type& domain, IndexSequence<Is...>) {
+    KMM_HOST_DEVICE static constexpr permute_axes_type<Is...> permute_axes(
+        const domain_type& domain,
+        IndexSequence<Is...>
+    ) {
         return {domain[Is]...};
     }
 

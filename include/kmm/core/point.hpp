@@ -103,7 +103,8 @@ KMM_HOST_DEVICE Point<sizeof...(Ts)> point(const Ts&... values) {
 template<typename T, size_t N, size_t M>
 KMM_HOST_DEVICE Point<N + M, T> concat(const Point<N, T>& lhs, const Point<M, T>& rhs) {
     return Point<N + M, T> {
-        concat(static_cast<const Vec<T, N>&>(lhs), static_cast<const Vec<T, M>&>(rhs))};
+        concat(static_cast<const Vec<T, N>&>(lhs), static_cast<const Vec<T, M>&>(rhs))
+    };
 }
 
 template<size_t N, typename T, size_t M, typename U>

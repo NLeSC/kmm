@@ -14,6 +14,7 @@
 #include "kmm/runtime/reduction_manager.hpp"
 #include "kmm/runtime/resource.hpp"
 #include "kmm/runtime/runtime.hpp"
+#include "kmm/utils/scope_exit.hpp"
 
 namespace kmm {
 
@@ -415,11 +416,13 @@ ResourceGrant Runtime::submit(
 
             if (req.mode == AccessMode::Reduce) {
                 if (!entry.reduction) {
-                    throw std::runtime_error(fmt::format(
-                        "buffer {} is not in reduction mode, call `begin_reduction` before "
-                        "reducing into it",
-                        it.buffer_id.get()
-                    ));
+                    throw std::runtime_error(
+                        fmt::format(
+                            "buffer {} is not in reduction mode, call `begin_reduction` before "
+                            "reducing into it",
+                            it.buffer_id.get()
+                        )
+                    );
                 }
 
                 auto partial = m_impl->reduction_manager.acquire_partial(  //
@@ -436,11 +439,13 @@ ResourceGrant Runtime::submit(
                 );
             } else {
                 if (entry.reduction) {
-                    throw std::runtime_error(fmt::format(
-                        "buffer {} is still in reduction mode, call `finalize_reduction` "
-                        "before reading or writing it",
-                        it.buffer_id.get()
-                    ));
+                    throw std::runtime_error(
+                        fmt::format(
+                            "buffer {} is still in reduction mode, call `finalize_reduction` "
+                            "before reading or writing it",
+                            it.buffer_id.get()
+                        )
+                    );
                 }
 
                 auto access =
@@ -608,10 +613,6 @@ DeviceEvent Runtime::submit_copy(
         stream_hint = m_impl->event_registry.lookup_or_register_stream(*stream);
     }
 
-    if (description.num_dims > 0) {
-        throw std::runtime_error("only copy of dimensionality N=1 are supported for now");
-    }
-
     auto& dst_entry = m_impl->find_entry(dst_id);
     auto& src_entry = m_impl->find_entry(src_id);
 
@@ -629,6 +630,7 @@ DeviceEvent Runtime::submit_copy(
         AccessKind::Exclusive,
         transaction
     );
+
     MemoryRequest src_req = dst_req;
 
     if (!same_buffer) {
@@ -694,6 +696,7 @@ static DeviceEvent do_reduce(
     RuntimeImpl* impl,
     BufferAccessor dst_access,
     BufferAccessor src_access,
+    BufferAccessor scratch_access,
     const ReductionDescription& description,
     const DeviceEventSet& deps,
     const DeviceStreamId& stream_hint = {}
@@ -705,10 +708,13 @@ static DeviceEvent do_reduce(
     DeviceEvent event;
 
     if (memory_id.is_device()) {
+        KMM_ASSERT(scratch_access.size_in_bytes >= reduce_async_scratch_size(description));
+
         event = impl->memory_system->reduce_device(
             memory_id.as_device(),
             g_device_ptr_t(src_access.address),
             g_device_ptr_t(dst_access.address),
+            g_device_ptr_t(scratch_access.address),
             description,
             stream_hint,
             deps
@@ -751,11 +757,13 @@ DeviceEvent Runtime::submit_reduction(
     auto& src_entry = m_impl->find_entry(src_id);
 
     if (src_entry.reduction) {
-        throw std::runtime_error(fmt::format(
-            "buffer {} is still in reduction mode and cannot be a reduction source, call "
-            "`finalize_reduction` before reading it",
-            src_id.get()
-        ));
+        throw std::runtime_error(
+            fmt::format(
+                "buffer {} is still in reduction mode and cannot be a reduction source, call "
+                "`finalize_reduction` before reading it",
+                src_id.get()
+            )
+        );
     }
 
     // If the destination is mid-reduction its home buffer must not be written directly (the
@@ -765,14 +773,19 @@ DeviceEvent Runtime::submit_reduction(
 
     if (dst_entry.reduction) {
         if (m_impl->reduction_manager.is_submitted(dst_entry.reduction)) {
-            throw std::runtime_error(fmt::format(
-                "buffer {} reduction has already been finalized, cannot reduce into it",
-                dst_id.get()
-            ));
+            throw std::runtime_error(
+                fmt::format(
+                    "buffer {} reduction has already been finalized, cannot reduce into it",
+                    dst_id.get()
+                )
+            );
         }
 
-        m_impl->reduction_manager
-            .check_compatible(dst_entry.reduction, description.operation, description.dtype);
+        m_impl->reduction_manager.check_compatible(
+            dst_entry.reduction,
+            description.operation,
+            description.dtype
+        );
 
         dst_buffer =
             m_impl->reduction_manager.acquire_partial(dst_entry.reduction, memory_id, stream_hint);
@@ -781,58 +794,113 @@ DeviceEvent Runtime::submit_reduction(
         description.accumulate = false;
     }
 
+    MemoryBuffer scratch_buffer;
+    MemoryRequest scratch_req;
+    MemoryRequest dst_req;
+    MemoryRequest src_req;
+
+    // if an exception occurs, then we need to clean up the memory requests and scratch buffer.
+    auto cleanup = scope_exit([&] {
+        if (dst_req) {
+            m_impl->memory_manager.release_request(dst_req);
+        }
+
+        if (src_req) {
+            m_impl->memory_manager.release_request(src_req);
+        }
+
+        if (scratch_req) {
+            m_impl->memory_manager.release_request(scratch_req);
+        }
+
+        if (scratch_buffer) {
+            m_impl->memory_manager.release_buffer(scratch_buffer);
+        }
+    });
+
+    size_t scratch_size = reduce_async_scratch_size(description);
+    bool has_scratch = memory_id.is_device() && scratch_size > 0;
+
     auto transaction = m_impl->memory_manager.create_transaction(parent);
 
-    MemoryRequest dst_req = m_impl->memory_manager.create_request(  //
+    dst_req = m_impl->memory_manager.create_request(  //
         dst_buffer,
         memory_id,
         AccessKind::Exclusive,
         transaction
     );
-    MemoryRequest src_req;
 
-    try {
-        src_req = m_impl->memory_manager.create_request(  //
-            src_entry.buffer,
+    src_req = m_impl->memory_manager.create_request(  //
+        src_entry.buffer,
+        memory_id,
+        AccessKind::ReadOnly,
+        transaction
+    );
+
+    if (has_scratch) {
+        auto layout = BufferLayout::for_type<std::byte>(scratch_size);
+        auto iface = std::make_unique<FlatDataInterface>(layout, m_impl->memory_system);
+
+        scratch_buffer = m_impl->memory_manager.create_buffer(
+            std::move(iface),
+            "reduction-scratch-buffer",
+            false,
+            memory_id
+        );
+
+        scratch_req = m_impl->memory_manager.create_request(  //
+            scratch_buffer,
             memory_id,
-            AccessKind::ReadOnly,
+            AccessKind::Exclusive,
             transaction
         );
-    } catch (...) {
-        m_impl->memory_manager.release_request(std::move(dst_req));
-        throw;
     }
 
     DeviceEventSet deps;
     DeviceEvent event;
 
-    try {
-        m_impl->poll_until_completion(guard, [&] {
-            auto dst_status = m_impl->memory_manager.poll_request(stream_hint, dst_req);
-            auto src_status = m_impl->memory_manager.poll_request(stream_hint, src_req);
-            return src_status == Poll::Ready && dst_status == Poll::Ready;
-        });
+    m_impl->poll_until_completion(guard, [&] {
+        auto dst_status = m_impl->memory_manager.poll_request(stream_hint, dst_req);
+        auto src_status = m_impl->memory_manager.poll_request(stream_hint, src_req);
+        auto scratch_status = scratch_req
+            ? m_impl->memory_manager.poll_request(stream_hint, scratch_req)
+            : Poll::Ready;
+        return src_status == Poll::Ready && dst_status == Poll::Ready
+            && scratch_status == Poll::Ready;
+    });
 
-        auto dst_accessor = m_impl->memory_manager.access_request(dst_req, deps);
-        auto src_accessor = m_impl->memory_manager.access_request(src_req, deps);
+    auto dst_accessor = m_impl->memory_manager.access_request(dst_req, deps);
+    auto src_accessor = m_impl->memory_manager.access_request(src_req, deps);
 
-        event = do_reduce(
-            guard,
-            m_impl.get(),
-            dst_accessor,
-            src_accessor,
-            description,
-            deps,
-            stream_hint
-        );
-    } catch (...) {
-        m_impl->memory_manager.release_request(src_req);
-        m_impl->memory_manager.release_request(dst_req);
-        throw;
+    BufferAccessor scratch_accessor {};
+    if (scratch_req) {
+        scratch_accessor = m_impl->memory_manager.access_request(scratch_req, deps);
     }
 
+    event = do_reduce(
+        guard,
+        m_impl.get(),
+        dst_accessor,
+        src_accessor,
+        scratch_accessor,
+        description,
+        deps,
+        stream_hint
+    );
+
     m_impl->memory_manager.release_request(src_req, event);
+    src_req = nullptr;
+
     m_impl->memory_manager.release_request(dst_req, event);
+    dst_req = nullptr;
+
+    if (has_scratch) {
+        m_impl->memory_manager.release_request(scratch_req, event);
+        scratch_req = nullptr;
+
+        m_impl->memory_manager.release_buffer(scratch_buffer);
+        scratch_buffer = nullptr;
+    }
 
     return event;
 }

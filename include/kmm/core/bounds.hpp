@@ -332,8 +332,10 @@ struct domain_traits<Bounds<N, IndexT>> {
     using permute_axes_type = Bounds<sizeof...(Is), index_type>;
 
     template<size_t... Is>
-    KMM_HOST_DEVICE static constexpr permute_axes_type<Is...>
-    permute_axes(const domain_type& domain, IndexSequence<Is...>) {
+    KMM_HOST_DEVICE static constexpr permute_axes_type<Is...> permute_axes(
+        const domain_type& domain,
+        IndexSequence<Is...>
+    ) {
         return {domain[Is]...};
     }
 

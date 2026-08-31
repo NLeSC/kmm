@@ -55,7 +55,8 @@ DeviceDataStreams::DeviceDataStreams(
         std::array options = {
             std::make_tuple(StreamKind::DeviceToDevice, num_d2d_streams, "d2d"),
             std::make_tuple(StreamKind::HostToDevice, num_h2d_streams, "h2d"),
-            std::make_tuple(StreamKind::DeviceToHost, num_d2h_streams, "d2h")};
+            std::make_tuple(StreamKind::DeviceToHost, num_d2h_streams, "d2h")
+        };
 
         for (auto [kind, n, name] : options) {
             auto& slots = m_impl->streams_per_device[i][size_t(kind)];

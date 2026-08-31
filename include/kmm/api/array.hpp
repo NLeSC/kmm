@@ -94,13 +94,15 @@ class NDArray: public ArrayBase {
         std::optional<T> fill_value = std::nullopt,
         std::optional<MemoryId> home = std::nullopt
     ) :
-        ArrayBase(Buffer::create(
-            runtime,
-            BufferLayout::for_type<T>(static_cast<size_t>(layout.offset_span().size())),
-            "",
-            fill_value ? FillValue::from<T>(*fill_value) : FillValue {},
-            home
-        )),
+        ArrayBase(
+            Buffer::create(
+                runtime,
+                BufferLayout::for_type<T>(static_cast<size_t>(layout.offset_span().size())),
+                "",
+                fill_value ? FillValue::from<T>(*fill_value) : FillValue {},
+                home
+            )
+        ),
         m_layout(layout.normalize_offset()) {}
 
     NDArray(
@@ -121,13 +123,15 @@ class NDArray: public ArrayBase {
     /// `memory_id`, and the caller must keep it alive for as long as this array (or any copy) is in
     /// use. KMM never allocates, frees, relocates, or copies the memory to another `MemoryId`.
     NDArray(Runtime runtime, layout_type layout, T* external_ptr, MemoryId memory_id) :
-        ArrayBase(Buffer::adopt(
-            runtime,
-            BufferLayout::for_type<T>(static_cast<size_t>(layout.offset_span().size())),
-            static_cast<void*>(external_ptr),
-            memory_id,
-            ""
-        )),
+        ArrayBase(
+            Buffer::adopt(
+                runtime,
+                BufferLayout::for_type<T>(static_cast<size_t>(layout.offset_span().size())),
+                static_cast<void*>(external_ptr),
+                memory_id,
+                ""
+            )
+        ),
         m_layout(layout.normalize_offset()) {}
 
     template<typename OtherLayoutT>
@@ -228,8 +232,10 @@ class NDArray: public ArrayBase {
     }
 
     template<typename DstPolicyT = policy_type>
-    rebind_layout<Layout<domain_type, DstPolicyT>> copy(MemoryId home, DstPolicyT dst_policy)
-        const {
+    rebind_layout<Layout<domain_type, DstPolicyT>> copy(
+        MemoryId home,
+        DstPolicyT dst_policy
+    ) const {
         rebind_layout<Layout<domain_type, DstPolicyT>>
             result(runtime(), domain(), dst_policy, std::nullopt, home);
 
@@ -275,8 +281,9 @@ class NDArray: public ArrayBase {
     /// Returns this array with a new broadcast axis of the given extent inserted at the given
     /// position.
     template<size_t Axis>
-    insert_axis_type<Axis> insert_axis(index_type extent = static_cast<index_type>(1))
-        const noexcept {
+    insert_axis_type<Axis> insert_axis(
+        index_type extent = static_cast<index_type>(1)
+    ) const noexcept {
         return {buffer(), m_layout.template insert_axis<Axis>(extent)};
     }
 

@@ -14,8 +14,7 @@ class LimitAllocator: public Allocator {
     };
 
   public:
-    LimitAllocator(std::unique_ptr<Allocator> inner,
-                   DeviceEventRegistry events, size_t max_size);
+    LimitAllocator(std::unique_ptr<Allocator> inner, DeviceEventRegistry events, size_t max_size);
     ~LimitAllocator();
 
     AllocResult allocate_async(
@@ -57,4 +56,4 @@ class LimitAllocator: public Allocator {
     size_t m_bytes_pending = 0;
 };
 
-}
+}  // namespace kmm

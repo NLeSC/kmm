@@ -6,9 +6,7 @@ namespace kmm {
 
 class ManagedMemoryAllocator: public Allocator {
   public:
-    ManagedMemoryAllocator(
-        g_context_t context
-    );
+    ManagedMemoryAllocator(g_context_t context);
 
     AllocResult allocate(BufferLayout layout, void** addr_out) override final;
     void deallocate(void* addr, BufferLayout layout) override final;

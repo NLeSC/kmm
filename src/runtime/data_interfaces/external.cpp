@@ -14,11 +14,13 @@ ExternalDataInterface::ExternalDataInterface(void* ptr, size_t size_in_bytes, Me
 
 void ExternalDataInterface::check_memory_id(MemoryId memory_id) const {
     if (memory_id != m_memory_id) {
-        throw std::runtime_error(fmt::format(
-            "cannot access or copy buffer on memory {}: buffer is pinned to memory {}",
-            memory_id,
-            m_memory_id
-        ));
+        throw std::runtime_error(
+            fmt::format(
+                "cannot access or copy buffer on memory {}: buffer is pinned to memory {}",
+                memory_id,
+                m_memory_id
+            )
+        );
     }
 }
 

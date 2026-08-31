@@ -15,10 +15,7 @@ static BufferLayout normalize_buffer_layout(BufferLayout layout) {
     return {round_up_to_multiple(layout.size_in_bytes, align), align};
 }
 
-PinnedDataInterface::PinnedDataInterface(
-    BufferLayout layout,
-    refcnt_ptr<MemorySystem> system
-) :
+PinnedDataInterface::PinnedDataInterface(BufferLayout layout, refcnt_ptr<MemorySystem> system) :
     m_layout(normalize_buffer_layout(layout)),
     m_system(std::move(system)) {}
 
@@ -46,8 +43,7 @@ AllocResult PinnedDataInterface::allocate(
     // `allocate` throws the exception and address remains exception-free.
     if (!memory_id.is_host()) {
         auto device_id = memory_id.as_device();
-        m_device_ptrs[device_id.get()] =
-            m_system->translate_host_pointer(device_id, m_host_ptr);
+        m_device_ptrs[device_id.get()] = m_system->translate_host_pointer(device_id, m_host_ptr);
     }
 
     m_refcount++;
@@ -95,6 +91,5 @@ void PinnedDataInterface::copy(
 ) {
     deps_out.insert(deps);
 }
-
 
 }  // namespace kmm

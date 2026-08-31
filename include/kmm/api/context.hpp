@@ -110,8 +110,12 @@ class Context {
 
         std::vector<T> result;
         result.resize(nelem);
-        input.buffer()
-            .copy_to(result.data(), nelem * sizeof(T), offset * sizeof(T), affinity_memory_id());
+        input.buffer().copy_to(
+            result.data(),
+            nelem * sizeof(T),
+            offset * sizeof(T),
+            affinity_memory_id()
+        );
         return result;
     }
 
@@ -179,7 +183,8 @@ class Context {
     }
 
     template<typename T, typename PolicyT = RowMajor, typename... ExtentT>
-    NDAccumulator<T, Layout<Shape<sizeof...(ExtentT)>, PolicyT>> sum_accumulator(ExtentT... extents
+    NDAccumulator<T, Layout<Shape<sizeof...(ExtentT)>, PolicyT>> sum_accumulator(
+        ExtentT... extents
     ) {
         return accumulator<T, PolicyT>(ReductionOp::Sum, extents...);
     }

@@ -137,14 +137,16 @@ void ReductionManager::check_compatible(
     KMM_ASSERT(reduction);
 
     if (reduction->op != op || reduction->dtype != dtype) {
-        throw std::runtime_error(fmt::format(
-            "reduction contribution does not match the reduction opened by `begin_reduction`: "
-            "expected op={}, dtype={}, but got op={}, dtype={}",
-            reduction_op_name(reduction->op),
-            data_type_name(reduction->dtype),
-            reduction_op_name(op),
-            data_type_name(dtype)
-        ));
+        throw std::runtime_error(
+            fmt::format(
+                "reduction contribution does not match the reduction opened by `begin_reduction`: "
+                "expected op={}, dtype={}, but got op={}, dtype={}",
+                reduction_op_name(reduction->op),
+                data_type_name(reduction->dtype),
+                reduction_op_name(op),
+                data_type_name(dtype)
+            )
+        );
     }
 }
 
@@ -407,13 +409,15 @@ struct ReductionJob {
                 index++;
             }
 
-            group_jobs.push_back(std::make_unique<ReductionMemoryJob>(
-                reduction,
-                group_memory_id,
-                std::move(group_home_buffer),
-                group_home_initialized,
-                std::move(partials)
-            ));
+            group_jobs.push_back(
+                std::make_unique<ReductionMemoryJob>(
+                    reduction,
+                    group_memory_id,
+                    std::move(group_home_buffer),
+                    group_home_initialized,
+                    std::move(partials)
+                )
+            );
         }
 
         final_reduction = std::make_unique<ReductionMemoryJob>(

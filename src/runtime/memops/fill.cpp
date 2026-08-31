@@ -1,10 +1,11 @@
 #include <cstddef>
 #include <cstring>
 
+#include "simplify_dims.hpp"
+
 #include "kmm/core/panic.hpp"
 #include "kmm/runtime/memops/fill.hpp"
 #include "kmm/utils/gpu_utils.hpp"
-#include "simplify_dims.hpp"
 
 namespace kmm {
 
@@ -57,11 +58,7 @@ void fill(void* dst_addr, const FillDescription& description) {
     );
 }
 
-void fill_async(
-    g_stream_t stream,
-    void* dst_addr,
-    const FillDescription& description
-) {
+void fill_async(g_stream_t stream, void* dst_addr, const FillDescription& description) {
     dst_addr = static_cast<std::byte*>(dst_addr) + description.offset;
 
     const void* fill_value = description.value.buffer;

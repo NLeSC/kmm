@@ -46,7 +46,8 @@ Reduce<NDAccumulator<T, LayoutT>, sizeof...(Extents)> reduce(
     return Reduce<NDAccumulator<T, LayoutT>, sizeof...(Extents)> {
         accumulator,
         accumulator.op(),
-        replication};
+        replication
+    };
 }
 
 namespace detail {
@@ -136,8 +137,10 @@ class ReplicatedRegion {
 
   private:
     template<size_t... Is>
-    KMM_HOST_DEVICE static replicated_strides
-    build_strides(const Vec<default_stride_type, replicated_rank>& values, IndexSequence<Is...>) {
+    KMM_HOST_DEVICE static replicated_strides build_strides(
+        const Vec<default_stride_type, replicated_rank>& values,
+        IndexSequence<Is...>
+    ) {
         return replicated_strides {values[Is]...};
     }
 

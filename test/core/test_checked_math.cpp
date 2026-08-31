@@ -314,10 +314,10 @@ TEST_CASE("checked_mul (stress test)", "[.][slow]") {
 
 template<typename O, typename L, typename R>
 void stress_test_checked_div() {
-    stress_test_checked<
-        O,
-        L,
-        R>([](__int128 a, __int128 b) { return b != 0 ? a / b : __int128(1) << 127; }, checked_div<O, L, R>);
+    stress_test_checked<O, L, R>(
+        [](__int128 a, __int128 b) { return b != 0 ? a / b : __int128(1) << 127; },
+        checked_div<O, L, R>
+    );
 }
 
 TEST_CASE("checked_div (stress test)", "[.][slow]") {
@@ -338,10 +338,10 @@ TEST_CASE("checked_div (stress test)", "[.][slow]") {
 
 template<typename O, typename L, typename R>
 void stress_test_checked_rem() {
-    stress_test_checked<
-        O,
-        L,
-        R>([](__int128 a, __int128 b) { return b != 0 ? a % b : __int128(1) << 127; }, checked_rem<O, L, R>);
+    stress_test_checked<O, L, R>(
+        [](__int128 a, __int128 b) { return b != 0 ? a % b : __int128(1) << 127; },
+        checked_rem<O, L, R>
+    );
 }
 
 TEST_CASE("checked_rem (stress test)", "[.][slow]") {

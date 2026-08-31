@@ -10,12 +10,7 @@
 
 namespace kmm {
 
-enum struct AllocResult {
-    Success,
-    ErrorOutOfMemory,
-    ErrorUnsupported,
-    ErrorPending
-};
+enum struct AllocResult { Success, ErrorOutOfMemory, ErrorUnsupported, ErrorPending };
 
 class Allocator {
     KMM_NOT_COPYABLE_OR_MOVABLE(Allocator)
@@ -44,6 +39,5 @@ class Allocator {
 
     virtual void trim(size_t nbytes_remaining) {}
 };
-
 
 }  // namespace kmm

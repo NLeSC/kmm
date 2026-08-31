@@ -2,11 +2,11 @@
 
 #include "kmm/core/checked_math.hpp"
 #include "kmm/core/macros.hpp"
-#include "kmm/utils/backends.hpp"
 #include "kmm/core/panic.hpp"
 #include "kmm/runtime/memops/copy.hpp"
 #include "kmm/runtime/memops/fill.hpp"
 #include "kmm/runtime/memops/types.hpp"
+#include "kmm/utils/backends.hpp"
 
 namespace kmm {
 

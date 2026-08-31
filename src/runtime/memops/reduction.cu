@@ -10,10 +10,10 @@
 
 namespace kmm {
 
-template <typename T, ReductionOp Op>
+template<typename T, ReductionOp Op>
 struct ReductionTraits;
 
-template <typename T>
+template<typename T>
 struct ReductionTraits<T, ReductionOp::Sum> {
     KMM_HOST_DEVICE static T identity() {
         return static_cast<T>(0);
@@ -24,7 +24,7 @@ struct ReductionTraits<T, ReductionOp::Sum> {
     }
 };
 
-template <typename T>
+template<typename T>
 struct ReductionTraits<T, ReductionOp::Product> {
     KMM_HOST_DEVICE static T identity() {
         return static_cast<T>(1);
@@ -35,7 +35,7 @@ struct ReductionTraits<T, ReductionOp::Product> {
     }
 };
 
-template <typename T>
+template<typename T>
 struct ReductionTraits<T, ReductionOp::Min> {
     KMM_HOST_DEVICE static T identity() {
         return std::numeric_limits<T>::max();
@@ -46,7 +46,7 @@ struct ReductionTraits<T, ReductionOp::Min> {
     }
 };
 
-template <typename T>
+template<typename T>
 struct ReductionTraits<T, ReductionOp::Max> {
     KMM_HOST_DEVICE static T identity() {
         return std::numeric_limits<T>::lowest();
@@ -57,7 +57,7 @@ struct ReductionTraits<T, ReductionOp::Max> {
     }
 };
 
-template <typename T, ReductionOp Op, size_t Rank>
+template<typename T, ReductionOp Op, size_t Rank>
 void __global__ elementwise_reduce_kernel(
     const void* src_addr,
     void* dst_addr,
@@ -140,7 +140,7 @@ void launch_elementwise_reduce(
     );
 }
 
-template <uint BlockDim, typename T, ReductionOp Op, size_t Rank>
+template<uint BlockDim, typename T, ReductionOp Op, size_t Rank>
 void __global__ blockwise_reduce_kernel(
     const void* src_addr,
     void* dst_addr,
@@ -150,13 +150,9 @@ void __global__ blockwise_reduce_kernel(
     bool accumulate
 ) {
     __shared__ typename cub::BlockReduce<T, BlockDim>::TempStorage smem_storage;
-    cub::BlockReduce<T, BlockDim> block_reduce{smem_storage};
+    cub::BlockReduce<T, BlockDim> block_reduce {smem_storage};
 
-    uint p[3] = {
-        blockIdx.x,
-        blockIdx.y,
-        blockIdx.z
-    };
+    uint p[3] = {blockIdx.x, blockIdx.y, blockIdx.z};
 
     for (size_t i = 0; i < Rank; i++) {
         if (p[i] >= dims[i].extent) {
@@ -211,12 +207,7 @@ void launch_blockwise_reduce(
         checked_cast<uint>(description.dims[2].extent),
     };
 
-    blockwise_reduce_kernel<block_size, T, Op><<<
-        grid_size,
-        block_size,
-        0,
-        stream
-    >>>(
+    blockwise_reduce_kernel<block_size, T, Op><<<grid_size, block_size, 0, stream>>>(
         static_cast<const std::byte*>(src_addr) + description.input_offset,
         static_cast<std::byte*>(dst_addr) + description.output_offset,
         dims,
@@ -234,19 +225,9 @@ void reduced_typed_op_async(
     const ReductionDescription& description
 ) {
     if (description.reduction_extent < 1024) {
-        return launch_elementwise_reduce<T, Op>(
-            stream,
-            src_addr,
-            dst_addr,
-            description
-        );
+        return launch_elementwise_reduce<T, Op>(stream, src_addr, dst_addr, description);
     } else {
-        return launch_blockwise_reduce<T, Op>(
-            stream,
-            src_addr,
-            dst_addr,
-            description
-        );
+        return launch_blockwise_reduce<T, Op>(stream, src_addr, dst_addr, description);
     }
 }
 
@@ -293,92 +274,42 @@ void reduce_typed_async(
 
 void do_reduce_async(
     g_stream_t stream,
-        const void* src_addr,
-        void* dst_addr,
-        const ReductionDescription& description
+    const void* src_addr,
+    void* dst_addr,
+    const ReductionDescription& description
 ) {
     switch (description.dtype) {
         case DataType::Unknown:
             break;
         case DataType::Int8:
-            reduce_typed_async<int8_t>(
-                stream,
-                src_addr,
-                dst_addr,
-                description
-            );
+            reduce_typed_async<int8_t>(stream, src_addr, dst_addr, description);
             break;
         case DataType::Int16:
-            reduce_typed_async<int16_t>(
-                stream,
-                src_addr,
-                dst_addr,
-                description
-            );
+            reduce_typed_async<int16_t>(stream, src_addr, dst_addr, description);
             break;
         case DataType::Int32:
-            reduce_typed_async<int32_t>(
-                stream,
-                src_addr,
-                dst_addr,
-                description
-            );
+            reduce_typed_async<int32_t>(stream, src_addr, dst_addr, description);
             break;
         case DataType::Int64:
-            reduce_typed_async<int64_t>(
-                stream,
-                src_addr,
-                dst_addr,
-                description
-            );
+            reduce_typed_async<int64_t>(stream, src_addr, dst_addr, description);
             break;
         case DataType::Uint8:
-            reduce_typed_async<uint8_t>(
-                stream,
-                src_addr,
-                dst_addr,
-                description
-            );
+            reduce_typed_async<uint8_t>(stream, src_addr, dst_addr, description);
             break;
         case DataType::Uint16:
-            reduce_typed_async<uint16_t>(
-                stream,
-                src_addr,
-                dst_addr,
-                description
-            );
+            reduce_typed_async<uint16_t>(stream, src_addr, dst_addr, description);
             break;
         case DataType::Uint32:
-            reduce_typed_async<uint32_t>(
-                stream,
-                src_addr,
-                dst_addr,
-                description
-            );
+            reduce_typed_async<uint32_t>(stream, src_addr, dst_addr, description);
             break;
         case DataType::Uint64:
-            reduce_typed_async<uint64_t>(
-                stream,
-                src_addr,
-                dst_addr,
-                description
-            );
+            reduce_typed_async<uint64_t>(stream, src_addr, dst_addr, description);
             break;
         case DataType::Float32:
-            reduce_typed_async<float>(
-                stream,
-                src_addr,
-                dst_addr,
-                description
-            );
+            reduce_typed_async<float>(stream, src_addr, dst_addr, description);
             break;
         case DataType::Float64:
-            reduce_typed_async<double>(
-                stream,
-                src_addr,
-                dst_addr,
-                description
-            );
+            reduce_typed_async<double>(stream, src_addr, dst_addr, description);
             break;
     }
 
@@ -406,20 +337,12 @@ void do_multilevel_reduce(
     memops_extent_type stride = 1;
 
     for (size_t i = 0; i < description.num_dims; i++) {
-        coarse.add_dimension(
-            description.dims[i].extent,
-            description.dims[i].input_stride,
-            stride
-        );
+        coarse.add_dimension(description.dims[i].extent, description.dims[i].input_stride, stride);
 
         stride = checked_mul<memops_extent_type>(stride, description.dims[i].extent);
     }
 
-    coarse.add_dimension(
-        num_chunks,
-        chunk_stride,
-        stride
-    );
+    coarse.add_dimension(num_chunks, chunk_stride, stride);
 
     ReductionDescription fine(description.dtype, description.operation);
     fine.input_offset = 0;
@@ -437,7 +360,8 @@ void do_multilevel_reduce(
     }
 
     ReductionDescription remainder(description.dtype, description.operation);
-    remainder.input_offset = description.input_offset + remaining_chunks * description.reduction_stride;
+    remainder.input_offset =
+        description.input_offset + remaining_chunks * description.reduction_stride;
     remainder.output_offset = description.output_offset;
     remainder.reduction_extent = description.reduction_extent % elements_per_block;
     remainder.reduction_stride = description.reduction_stride;
@@ -464,19 +388,17 @@ void reduce_async(
         copy_async(stream, src_addr, dst_addr, simplified.as_copy());
         return;
     }
-//
-//    if (simplified.reduction_extent > 1024 * 256) {
-//        do_multilevel_reduce(
-//            stream,
-//            src_addr,
-//            dst_addr,
-//            description
-//        );
-//    }
+    //
+    //    if (simplified.reduction_extent > 1024 * 256) {
+    //        do_multilevel_reduce(
+    //            stream,
+    //            src_addr,
+    //            dst_addr,
+    //            description
+    //        );
+    //    }
 
-    do_reduce_async(
-        stream, src_addr, dst_addr, simplified
-    );
+    do_reduce_async(stream, src_addr, dst_addr, simplified);
 }
 
 }  // namespace kmm

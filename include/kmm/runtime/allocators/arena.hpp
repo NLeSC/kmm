@@ -72,11 +72,7 @@ class ArenaAllocator: public Allocator {
         void** addr_out
     );
 
-    void deallocate_generic(
-        const DeviceStream* stream_opt,
-        void* addr,
-        BufferLayout layout
-    );
+    void deallocate_generic(const DeviceStream* stream_opt, void* addr, BufferLayout layout);
 
     AllocResult add_block(const DeviceStream* stream, size_t min_size);
 

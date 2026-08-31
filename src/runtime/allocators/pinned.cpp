@@ -8,12 +8,15 @@
 
 namespace kmm {
 
-PinnedMemoryAllocator::PinnedMemoryAllocator(g_context_t context) :
-    m_context(context) {}
+PinnedMemoryAllocator::PinnedMemoryAllocator(g_context_t context) : m_context(context) {}
 
 AllocResult PinnedMemoryAllocator::allocate(BufferLayout layout, void** addr_out) {
     GPUContextGuard guard {m_context};
-    g_result_t result = g_mem_host_alloc(addr_out, layout.size_in_bytes, G_MEMHOSTALLOC_PORTABLE | G_MEMHOSTALLOC_DEVICEMAP);
+    g_result_t result = g_mem_host_alloc(
+        addr_out,
+        layout.size_in_bytes,
+        G_MEMHOSTALLOC_PORTABLE | G_MEMHOSTALLOC_DEVICEMAP
+    );
 
     if (result == G_ERROR_OUT_OF_MEMORY) {
         return AllocResult::ErrorOutOfMemory;

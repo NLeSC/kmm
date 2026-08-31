@@ -5,9 +5,9 @@
 #include <type_traits>
 
 #include "kmm/core/macros.hpp"
-#include "kmm/utils/backends.hpp"
 #include "kmm/core/panic.hpp"
 #include "kmm/runtime/memops/types.hpp"
+#include "kmm/utils/backends.hpp"
 
 namespace kmm {
 
@@ -21,7 +21,7 @@ struct FillValue {
 
     FillValue() = default;
 
-    template <typename T>
+    template<typename T>
     static FillValue from(T value) {
         static_assert(sizeof(T) <= MAX_FILL_LENGTH, "T is too large to store in a FillValue");
         static_assert(
@@ -133,11 +133,7 @@ void fill(void* dst_addr, const FillDescription& description);
 /// bytes pointed to by `fill_value` (which must be host-accessible memory; it is read before the
 /// fill is enqueued). The fill is enqueued on `stream` after waiting for `dependencies`, and the
 /// returned event becomes ready once the fill has completed.
-void fill_async(
-    g_stream_t stream,
-    void* dst_addr,
-    const FillDescription& description
-);
+void fill_async(g_stream_t stream, void* dst_addr, const FillDescription& description);
 
 /// @}
 

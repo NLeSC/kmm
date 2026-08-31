@@ -8,8 +8,7 @@
 
 namespace kmm {
 
-DeviceMemoryAllocator::DeviceMemoryAllocator(g_context_t context) :
-    m_context(context) {}
+DeviceMemoryAllocator::DeviceMemoryAllocator(g_context_t context) : m_context(context) {}
 
 AllocResult DeviceMemoryAllocator::allocate(BufferLayout layout, void** addr_out) {
     GPUContextGuard guard {m_context};

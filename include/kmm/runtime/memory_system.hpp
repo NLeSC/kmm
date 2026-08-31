@@ -179,6 +179,7 @@ class MemorySystem: public reference_count<MemorySystem> {
         DeviceId device_id,
         g_device_ptr_t src_addr,
         g_device_ptr_t dst_addr,
+        g_device_ptr_t scratch_addr,
         const ReductionDescription& description,
         const DeviceStreamId& stream_hint,
         const DeviceEventSet& deps_in

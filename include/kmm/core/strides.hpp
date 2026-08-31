@@ -154,14 +154,16 @@ class Strides:
 
     /// Returns the `i`-th stride as
     template<size_t Axis>
-    KMM_HOST_DEVICE constexpr axis_stride_type<Axis> get(ConstIndex<Axis> index = {})
-        const noexcept {
+    KMM_HOST_DEVICE constexpr axis_stride_type<Axis> get(
+        ConstIndex<Axis> index = {}
+    ) const noexcept {
         return base_type::get_static(index);
     }
 
     /// Returns the product `point[0] * strides[0] + point[1] * strides[1] + ...`.
     template<typename IndexT = stride_type>
-    KMM_HOST_DEVICE constexpr ptrdiff_t linearize_offset(const Vec<IndexT, rank>& point
+    KMM_HOST_DEVICE constexpr ptrdiff_t linearize_offset(
+        const Vec<IndexT, rank>& point
     ) const noexcept {
         return linearize_offset_impl(point, make_index_sequence<rank>());
     }
@@ -188,8 +190,10 @@ class Strides:
     }
 
     template<typename IndexT, size_t... Is>
-    KMM_HOST_DEVICE constexpr ptrdiff_t
-    linearize_offset_impl(const Vec<IndexT, rank>& point, IndexSequence<Is...>) const noexcept {
+    KMM_HOST_DEVICE constexpr ptrdiff_t linearize_offset_impl(
+        const Vec<IndexT, rank>& point,
+        IndexSequence<Is...>
+    ) const noexcept {
         return (
             static_cast<ptrdiff_t>(0) + ...
             + (static_cast<ptrdiff_t>(point[Is])
@@ -198,8 +202,10 @@ class Strides:
     }
 
     template<typename... OtherStridesT, size_t... Is>
-    KMM_HOST_DEVICE bool is_equal_impl(const Strides<OtherStridesT...>& that, IndexSequence<Is...>)
-        const noexcept {
+    KMM_HOST_DEVICE bool is_equal_impl(
+        const Strides<OtherStridesT...>& that,
+        IndexSequence<Is...>
+    ) const noexcept {
         return (::kmm::is_equal(this->get(ConstIndex<Is>()), that.get(ConstIndex<Is>())) && ...);
     }
 

@@ -150,7 +150,8 @@ struct StreamState {
     // stream's `pending_events`, even if `record()` is ever called concurrently for this stream.
     uint64_t record_locked(std::atomic<uint64_t>& next_event_id) {
         if (released) {
-            throw std::runtime_error("cannot record an event on a stream that has been unregistered"
+            throw std::runtime_error(
+                "cannot record an event on a stream that has been unregistered"
             );
         }
 
@@ -301,8 +302,10 @@ KMM_REFCNT_TRAITS_IMPL(DeviceEventRegistry::Impl)
 
 DeviceEventRegistry::DeviceEventRegistry() : m_impl(make_refcnt<Impl>()) {}
 
-DeviceStreamId DeviceEventRegistry::register_stream(GPUStreamRef stream_ref, std::string name)
-    const {
+DeviceStreamId DeviceEventRegistry::register_stream(
+    GPUStreamRef stream_ref,
+    std::string name
+) const {
     for (uint64_t i = 0; i < MAX_DEVICE_STREAMS; i++) {
         auto id = DeviceStreamId(i);
         auto* state = new StreamState(id, stream_ref, name);
@@ -483,8 +486,10 @@ void DeviceEventRegistry::wait_on_event(DeviceStreamId stream_id, DeviceEvent ev
     //    }
 }
 
-void DeviceEventRegistry::wait_on_event(DeviceStreamId stream_id, const DeviceEventSet& events)
-    const {
+void DeviceEventRegistry::wait_on_event(
+    DeviceStreamId stream_id,
+    const DeviceEventSet& events
+) const {
     for (const auto& event : events) {
         wait_on_event(stream_id, event);
     }

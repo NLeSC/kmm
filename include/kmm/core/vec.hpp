@@ -164,8 +164,12 @@ KMM_HOST_DEVICE constexpr Vec<T, N> fill(const T& value) {
 
 namespace detail {
 template<typename T, size_t N, size_t M, size_t... Is, size_t... Js>
-KMM_HOST_DEVICE Vec<T, N + M>
-concat_impl(const Vec<T, N>& lhs, const Vec<T, M>& rhs, IndexSequence<Is...>, IndexSequence<Js...>) {
+KMM_HOST_DEVICE Vec<T, N + M> concat_impl(
+    const Vec<T, N>& lhs,
+    const Vec<T, M>& rhs,
+    IndexSequence<Is...>,
+    IndexSequence<Js...>
+) {
     return {lhs[Is]..., rhs[Js]...};
 }
 }  // namespace detail

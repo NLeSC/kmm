@@ -173,9 +173,9 @@ TEST_CASE("Layout::restrict_bounds") {
     using TestLayout = ::kmm::Layout<Shape<3, int>, Strided>;
     TestLayout layout(Shape<3, int>(4, 5, 6), {30, 6, 1});
 
-    auto restricted =
-        layout.restrict_bounds(Bounds<3, int>(Range<int>(1, 3), Range<int>(1, 4), Range<int>(0, 6))
-        );
+    auto restricted = layout.restrict_bounds(
+        Bounds<3, int>(Range<int>(1, 3), Range<int>(1, 4), Range<int>(0, 6))
+    );
 
     CHECK(restricted.begin() == Point<3, int>(1, 1, 0));
     CHECK(restricted.end() == Point<3, int>(3, 4, 6));

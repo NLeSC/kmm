@@ -37,9 +37,9 @@ struct BufferLayout {
 
 struct BufferAccessor {
     MemoryId memory_id = MemoryId::host();
-    size_t size_in_bytes;
-    bool is_writable;
-    void* address;
+    size_t size_in_bytes = 0;
+    bool is_writable = false;
+    void* address = nullptr;
 };
 
 }  // namespace kmm

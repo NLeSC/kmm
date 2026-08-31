@@ -16,7 +16,7 @@ DevicePoolAllocator::DevicePoolAllocator(
 ) :
     m_context(context),
     m_pool(nullptr),
-    m_kind(kind)  {
+    m_kind(kind) {
     GPUContextGuard guard {m_context};
 
     g_device_t device;
@@ -81,7 +81,12 @@ AllocResult DevicePoolAllocator::allocate_async(
 
     KMM_GPU_CHECK(result);
     *addr_out = (void*)device_ptr;
-    spdlog::trace("allocate {} bytes of device memory on stream {} (addr: {})", layout.size_in_bytes, stream.id(), *addr_out);
+    spdlog::trace(
+        "allocate {} bytes of device memory on stream {} (addr: {})",
+        layout.size_in_bytes,
+        stream.id(),
+        *addr_out
+    );
     return AllocResult::Success;
 }
 
@@ -91,7 +96,12 @@ void DevicePoolAllocator::deallocate_async(
     BufferLayout layout
 ) {
     g_device_ptr_t device_ptr = (g_device_ptr_t)addr;
-    spdlog::trace("deallocate {} bytes of device memory on stream {} (addr: {})", layout.size_in_bytes, stream.id(), addr);
+    spdlog::trace(
+        "deallocate {} bytes of device memory on stream {} (addr: {})",
+        layout.size_in_bytes,
+        stream.id(),
+        addr
+    );
 
     GPUContextGuard guard {m_context};
     KMM_GPU_CHECK(g_mem_free_async(device_ptr, stream));
@@ -114,14 +124,22 @@ AllocResult DevicePoolAllocator::allocate(BufferLayout layout, void** addr_out) 
     KMM_GPU_CHECK(result);
     KMM_GPU_CHECK(g_stream_synchronize(nullptr));
 
-    spdlog::trace("allocate {} bytes of device memory on stream NULL (addr: {})", layout.size_in_bytes, *addr_out);
+    spdlog::trace(
+        "allocate {} bytes of device memory on stream NULL (addr: {})",
+        layout.size_in_bytes,
+        *addr_out
+    );
     *addr_out = (void*)device_ptr;
     return AllocResult::Success;
 }
 
 void DevicePoolAllocator::deallocate(void* addr, BufferLayout layout) {
     g_device_ptr_t device_ptr = (g_device_ptr_t)addr;
-    spdlog::trace("deallocate {} bytes of device memory on stream NULL (addr: {})", layout.size_in_bytes, addr);
+    spdlog::trace(
+        "deallocate {} bytes of device memory on stream NULL (addr: {})",
+        layout.size_in_bytes,
+        addr
+    );
 
     GPUContextGuard guard {m_context};
     KMM_GPU_CHECK(g_mem_free_async(device_ptr, nullptr));

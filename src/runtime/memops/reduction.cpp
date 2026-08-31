@@ -19,7 +19,9 @@ ReductionDescription ReductionDescription::simplify() const {
         dims,
         num_dims,
         result.dims,
-        [](const ReductionDim& a, const ReductionDim& b) { return a.input_stride > b.input_stride; },
+        [](const ReductionDim& a, const ReductionDim& b) {
+            return a.input_stride > b.input_stride;
+        },
         [](ReductionDim& outer, const ReductionDim& inner) {
             if (outer.input_stride == inner.input_stride * inner.extent
                 && outer.output_stride == inner.output_stride * inner.extent) {
@@ -57,7 +59,7 @@ static Range<ptrdiff_t> offset_range(
     const ReductionDim* dims,
     size_t num_dims,
     size_t element_size,
-    memops_stride_type ReductionDim::*stride_member,
+    memops_stride_type ReductionDim::* stride_member,
     memops_extent_type reduced_extent,
     memops_stride_type reduced_stride
 ) {

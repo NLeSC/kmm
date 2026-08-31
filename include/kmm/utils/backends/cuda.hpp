@@ -99,20 +99,20 @@ using gpu_mem_pool_attr_t = cudaMemPoolAttr;
 #define G_POINTER_ATTRIBUTE_DEVICE_ORDINAL CU_POINTER_ATTRIBUTE_DEVICE_ORDINAL
 #define G_MEM_ATTACH_GLOBAL                CU_MEM_ATTACH_GLOBAL
 
-#define g_mem_get_info          cuMemGetInfo
-#define gpu_mem_get_info        gpuMemGetInfo
-#define g_mem_alloc             cuMemAlloc
-#define g_mem_free              cuMemFree
-#define gpu_malloc              cudaMalloc
-#define gpu_free                cudaFree
-#define g_mem_host_alloc        cuMemHostAlloc
-#define g_mem_free_host         cuMemFreeHost
-#define g_mem_alloc_manged      cuMemAllocManaged
+#define g_mem_get_info                cuMemGetInfo
+#define gpu_mem_get_info              gpuMemGetInfo
+#define g_mem_alloc                   cuMemAlloc
+#define g_mem_free                    cuMemFree
+#define gpu_malloc                    cudaMalloc
+#define gpu_free                      cudaFree
+#define g_mem_host_alloc              cuMemHostAlloc
+#define g_mem_free_host               cuMemFreeHost
+#define g_mem_alloc_manged            cuMemAllocManaged
 #define g_mem_host_get_device_pointer cuMemHostGetDevicePointer
-#define g_mem_prefetch_async    cuMemPrefetchAsync
-#define g_pointer_get_attribute cuPointerGetAttribute
-#define g_device_can_access_peer cuDeviceCanAccessPeer
-#define g_ctx_enable_peer_access cuCtxEnablePeerAccess
+#define g_mem_prefetch_async          cuMemPrefetchAsync
+#define g_pointer_get_attribute       cuPointerGetAttribute
+#define g_device_can_access_peer      cuDeviceCanAccessPeer
+#define g_ctx_enable_peer_access      cuCtxEnablePeerAccess
 
 // Memory Copy Operations
 

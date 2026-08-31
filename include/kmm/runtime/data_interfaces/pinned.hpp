@@ -14,10 +14,7 @@ namespace kmm {
 /// staged.
 class PinnedDataInterface final: public DataInterface {
   public:
-    PinnedDataInterface(
-        BufferLayout layout,
-        refcnt_ptr<MemorySystem> system
-    );
+    PinnedDataInterface(BufferLayout layout, refcnt_ptr<MemorySystem> system);
 
     size_t size_in_bytes() const noexcept override;
 

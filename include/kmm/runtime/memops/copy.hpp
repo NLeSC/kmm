@@ -5,9 +5,9 @@
 #include "kmm/core/macros.hpp"
 #include "kmm/core/panic.hpp"
 #include "kmm/core/range.hpp"
-#include "kmm/runtime/memops/types.hpp"
 #include "kmm/runtime/device_event.hpp"
 #include "kmm/runtime/device_stream.hpp"
+#include "kmm/runtime/memops/types.hpp"
 
 namespace kmm {
 

@@ -73,11 +73,13 @@ static std::unique_ptr<Allocator> make_device_allocator(
 
     if (config.device_memory_keep_free > 0) {
         if (device_memory_size <= config.device_memory_keep_free) {
-            throw std::runtime_error(fmt::format(
-                "cannot reserve {} bytes on GPU, only {} bytes are available",
-                config.device_memory_keep_free,
-                device_memory_size
-            ));
+            throw std::runtime_error(
+                fmt::format(
+                    "cannot reserve {} bytes on GPU, only {} bytes are available",
+                    config.device_memory_keep_free,
+                    device_memory_size
+                )
+            );
         }
 
         limit = std::min(limit, device_memory_size - config.device_memory_keep_free);
@@ -373,8 +375,11 @@ AllocResult MemorySystem::allocate_managed(
     if (stream_hint.is_null()) {
         result = m_managed_allocator->allocate(layout, ptr_out);
     } else {
-        result = m_managed_allocator
-                     ->allocate_async(DeviceStream {m_events, stream_hint}, layout, ptr_out);
+        result = m_managed_allocator->allocate_async(
+            DeviceStream {m_events, stream_hint},
+            layout,
+            ptr_out
+        );
 
         deps_out.insert(m_events.record(stream_hint));
     }
@@ -522,8 +527,11 @@ void MemorySystem::deallocate_device(
         stream_hint,
         deps_in,
         [&](const auto& stream) {
-            device_state(device_id)
-                .allocator->deallocate_async(stream, reinterpret_cast<void*>(ptr), layout);
+            device_state(device_id).allocator->deallocate_async(
+                stream,
+                reinterpret_cast<void*>(ptr),
+                layout
+            );
 
             return 0;
         }
@@ -805,6 +813,7 @@ DeviceEvent MemorySystem::reduce_device(
     DeviceId device_id,
     g_device_ptr_t src_addr,
     g_device_ptr_t dst_addr,
+    g_device_ptr_t scratch_addr,
     const ReductionDescription& description,
     const DeviceStreamId& stream_hint,
     const DeviceEventSet& deps_in
@@ -829,6 +838,7 @@ DeviceEvent MemorySystem::reduce_device(
                 stream,
                 reinterpret_cast<void*>(src_addr),
                 reinterpret_cast<void*>(dst_addr),
+                reinterpret_cast<void*>(scratch_addr),
                 description
             );
             return description.num_outputs();

@@ -172,8 +172,13 @@ DeviceEvent FlatDataInterface::initialize_device(
         static_cast<memops_stride_type>(element_size)
     );
 
-    return m_system
-        ->fill_device(memory_id, m_device_ptrs[memory_id.get()], description, stream_hint, deps);
+    return m_system->fill_device(
+        memory_id,
+        m_device_ptrs[memory_id.get()],
+        description,
+        stream_hint,
+        deps
+    );
 }
 
 AllocResult FlatDataInterface::allocate_and_copy(

@@ -15,7 +15,7 @@ static Range<ptrdiff_t> dim_offset_range(
     const CopyDim* dims,
     size_t num_dims,
     size_t element_size,
-    memops_stride_type CopyDim::*stride_member
+    memops_stride_type CopyDim::* stride_member
 ) {
     ptrdiff_t lo = base_offset;
     ptrdiff_t hi = base_offset;
@@ -63,7 +63,7 @@ CopyDescription CopyDescription::simplify() const {
         [](const CopyDim& a, const CopyDim& b) {
             // Descending stride order, ties broken by `dst_stride`.
             return a.src_stride != b.src_stride ? a.src_stride > b.src_stride
-                                                 : a.dst_stride > b.dst_stride;
+                                                : a.dst_stride > b.dst_stride;
         },
         [](CopyDim& outer, const CopyDim& inner) {
             if (outer.src_stride == inner.src_stride * inner.extent

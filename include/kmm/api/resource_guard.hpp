@@ -34,7 +34,8 @@ class ResourceGuard {
                 stream,
                 std::move(parent)
             ),
-            std::move(args_tuple)});
+            std::move(args_tuple)
+        });
     }
 
     Runtime& runtime() const noexcept {

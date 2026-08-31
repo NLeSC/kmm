@@ -77,8 +77,10 @@ struct mapping_traits<PolicyT, DomainT, Strides<StridesT...>> {
     using permute_axes_type = Strides<typename mapping_type::template axis_stride_type<Is>...>;
 
     template<size_t... Is>
-    KMM_HOST_DEVICE static constexpr permute_axes_type<Is...>
-    permute_axes(const mapping_type& mapping, IndexSequence<Is...>) {
+    KMM_HOST_DEVICE static constexpr permute_axes_type<Is...> permute_axes(
+        const mapping_type& mapping,
+        IndexSequence<Is...>
+    ) {
         return permute_axes_type<Is...> {mapping.get(ConstIndex<Is>())...};
     }
 
@@ -99,7 +101,8 @@ struct mapping_traits<PolicyT, DomainT, Strides<StridesT...>> {
             return type {
                 mapping.get(ConstIndex<Before>())...,
                 ConstValue<stride_type {0}> {},
-                mapping.get(ConstIndex<After>())...};
+                mapping.get(ConstIndex<After>())...
+            };
         }
     };
 
@@ -110,7 +113,8 @@ struct mapping_traits<PolicyT, DomainT, Strides<StridesT...>> {
         range_index_sequence_t<Axis, rank>>::type;
 
     template<size_t Axis>
-    KMM_HOST_DEVICE static constexpr insert_axis_type<Axis> insert_axis(const mapping_type& mapping
+    KMM_HOST_DEVICE static constexpr insert_axis_type<Axis> insert_axis(
+        const mapping_type& mapping
     ) {
         static_assert(Axis <= rank, "axis out of bounds");
         return insert_axis_helper<
@@ -285,10 +289,14 @@ namespace detail {
 // Calls make_strides<Order,StrideT>(extent_0, extent_1, ...), reading each axis's extent
 // out of a domain_traits-typed domain rather than taking them as separate arguments.
 template<MemoryOrder Order, typename StrideT, typename DomainT, size_t... Is>
-KMM_HOST_DEVICE make_strides_t<Order, StrideT, sizeof...(Is)>
-make_strides_for_domain(const DomainT& domain, StrideT alignment, IndexSequence<Is...>) {
+KMM_HOST_DEVICE make_strides_t<Order, StrideT, sizeof...(Is)> make_strides_for_domain(
+    const DomainT& domain,
+    StrideT alignment,
+    IndexSequence<Is...>
+) {
     Shape<sizeof...(Is), StrideT> extents = {
-        checked_cast<StrideT>(domain_traits<DomainT>::extent(domain, Is))...};
+        checked_cast<StrideT>(domain_traits<DomainT>::extent(domain, Is))...
+    };
     return make_strides_from_shape<Order>(extents, alignment);
 }
 
@@ -685,14 +693,16 @@ class Layout {
 
     /// Returns a copy of this layout with the domain replaced (mapping and base offset kept).
     template<typename NewDomainT>
-    KMM_HOST_DEVICE Layout<NewDomainT, mapping_type> with_domain(const NewDomainT& new_domain
+    KMM_HOST_DEVICE Layout<NewDomainT, mapping_type> with_domain(
+        const NewDomainT& new_domain
     ) const noexcept {
         return Layout<NewDomainT, mapping_type> {new_domain, m_mapping, m_base_offset};
     }
 
     /// Returns a copy of this layout with the mapping replaced (domain and base offset kept).
     template<typename NewMappingT>
-    KMM_HOST_DEVICE Layout<domain_type, NewMappingT> with_mapping(const NewMappingT& new_mapping
+    KMM_HOST_DEVICE Layout<domain_type, NewMappingT> with_mapping(
+        const NewMappingT& new_mapping
     ) const noexcept {
         return Layout<domain_type, NewMappingT> {m_domain, new_mapping, m_base_offset};
     }
@@ -743,7 +753,8 @@ class Layout {
         return drop_axis_type<Axis> {
             domain_traits::template drop_axis<Axis>(domain()),
             mapping_traits::template drop_axis<Axis>(mapping()),
-            m_base_offset + static_cast<ptrdiff_t>(stride(Axis)) * static_cast<ptrdiff_t>(index)};
+            m_base_offset + static_cast<ptrdiff_t>(stride(Axis)) * static_cast<ptrdiff_t>(index)
+        };
     }
 
     /// Returns this layout with a new broadcast axis of the given extent inserted at the given position.
@@ -756,22 +767,25 @@ class Layout {
         return insert_axis_type<Axis> {
             domain_traits::template insert_axis<Axis>(domain(), extent),
             mapping_traits::template insert_axis<Axis>(mapping()),
-            m_base_offset};
+            m_base_offset
+        };
     }
 
     /// Returns this layout with its axes reordered according to the given permutation, e.g.
     /// `permute_axes<2, 0, 1>()` moves the current axis 2 to position 0, axis 0 to position 1,
     /// and axis 1 to position 2.
     template<size_t... Is>
-    KMM_HOST_DEVICE permute_axes_type<Is...> permute_axes(IndexSequence<Is...> = {})
-        const noexcept {
+    KMM_HOST_DEVICE permute_axes_type<Is...> permute_axes(
+        IndexSequence<Is...> = {}
+    ) const noexcept {
         static_assert(sizeof...(Is) == rank, "permutation must contain exactly `rank` axes");
         static_assert(is_permutation<IndexSequence<Is...>>, "must be a valid permutation of axes");
 
         return permute_axes_type<Is...> {
             domain_traits::template permute_axes<Is...>(domain(), IndexSequence<Is...> {}),
             mapping_traits::template permute_axes<Is...>(mapping(), IndexSequence<Is...> {}),
-            m_base_offset};
+            m_base_offset
+        };
     }
 
     /// Returns this layout with the order of all axes reversed.
@@ -829,7 +843,8 @@ class Layout {
         return self_type {
             domain_traits::template slice_axis<Axis>(domain(), start, end),
             m_mapping,
-            m_base_offset + static_cast<ptrdiff_t>(stride(Axis)) * static_cast<ptrdiff_t>(start)};
+            m_base_offset + static_cast<ptrdiff_t>(stride(Axis)) * static_cast<ptrdiff_t>(start)
+        };
     }
 
     /// Returns this layout sliced across all axes at once, one slice token per axis.
