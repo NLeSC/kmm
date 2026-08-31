@@ -331,6 +331,12 @@ struct ColMajorPadded: LayoutPolicy<MemoryOrder::ColMajor, alignment, StrideT> {
 template<size_t alignment, typename StrideT = void>
 struct RowMajorPadded: LayoutPolicy<MemoryOrder::RowMajor, alignment, StrideT> {};
 
+/// Column-major stride policy (the first axis varies fastest in memory).
+struct ColMajor: LayoutPolicy<MemoryOrder::ColMajor, 1> {};
+
+/// Row-major stride policy (the last axis varies fastest in memory).
+struct RowMajor: LayoutPolicy<MemoryOrder::RowMajor, 1> {};
+
 /// A stride policy laying out a domain in either column-major order or row-major order, depending
 /// on a provided runtime value.
 ///
@@ -356,12 +362,6 @@ struct StridedPadded {
         }
     }
 };
-
-/// Column-major stride policy (the first axis varies fastest in memory).
-struct ColMajor: LayoutPolicy<MemoryOrder::ColMajor, 1> {};
-
-/// Row-major stride policy (the last axis varies fastest in memory).
-struct RowMajor: LayoutPolicy<MemoryOrder::RowMajor, 1> {};
 
 /// Policy that is either column-major or row-major major, depending on a runtime value.
 struct Strided: StridedPadded<1> {
@@ -634,13 +634,16 @@ class Layout {
         return base_offset() + local_offset(index);
     }
 
+    /// Returns the range of numbers that can be returned from `offset(ndindex)`. In other words,
+    /// this gives the range of the lowest offset to the largest offset that will be accessed on
+    /// the storage that this layout applies to.
     KMM_HOST_DEVICE
     Range<ptrdiff_t> offset_span() const noexcept {
         ptrdiff_t lo = m_base_offset;
         ptrdiff_t hi = m_base_offset;
 
         if (!is_empty()) {
-            for (size_t i = 0; i < rank; i++) {
+            for (size_t i = 0; is_less(i, rank); i++) {
                 auto s = static_cast<ptrdiff_t>(stride(i));
                 auto [a, b] = bounds(i);
                 lo += static_cast<ptrdiff_t>(s >= 0 ? a : b - 1) * s;

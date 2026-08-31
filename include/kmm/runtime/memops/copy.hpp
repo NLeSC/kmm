@@ -25,10 +25,6 @@ struct CopyDim {
 
 /// Describes a (possibly strided, possibly multi-dimensional) copy from a source buffer to a
 /// destination buffer.
-///
-/// The source and destination are treated as opaque byte buffers: `copy`/`copy_async` do not
-/// interpret the bytes being copied, so `element_size` only determines the granularity of the
-/// copy (i.e. how many contiguous bytes make up a single "element" along the innermost axis).
 struct CopyDescription {
     /// The size (in bytes) of a single element.
     size_t element_size = 1;
@@ -44,6 +40,11 @@ struct CopyDescription {
 
     /// The extent and per-axis strides, ordered from the outermost to the innermost axis.
     CopyDim dims[MEMOPS_MAX_DIMS] = {};
+
+    CopyDescription() = default;
+
+    KMM_HOST_DEVICE
+    explicit CopyDescription(size_t element_size) : element_size(element_size) {}
 
     /// Appends an axis to this description. `src_stride`/`dst_stride` must be given in bytes.
     KMM_HOST_DEVICE
@@ -88,8 +89,8 @@ void copy(const void* src_addr, void* dst_addr, const CopyDescription& descripti
 
 /// Copies data from `src_addr` to `dst_addr` on the GPU, according to `description`. The copy is
 /// enqueued on `stream` after waiting for `dependencies`, and the returned event becomes ready
-/// once the copy has completed. Either (or both) of `src_addr`/`dst_addr` may point to host or
-/// device memory.
+/// once the copy has completed. Both `src_addr` and `dst_addr` must point to device memory on
+/// the same device (i.e. this is a device-to-device copy).
 void copy_async(
     GPUStream stream,
     const void* src_addr,
@@ -117,8 +118,7 @@ CopyDescription make_copy_description(
         src_offset += static_cast<ptrdiff_t>(src.stride(i)) * static_cast<ptrdiff_t>(src.begin(i));
     }
 
-    CopyDescription descr;
-    descr.element_size = element_size;
+    CopyDescription descr(element_size);
     descr.src_offset = checked_mul<memops_stride_type>(src_offset, element_size);
     descr.dst_offset = checked_mul<memops_stride_type>(dst_offset, element_size);
 
@@ -130,7 +130,7 @@ CopyDescription make_copy_description(
         );
     }
 
-    return descr;
+    return descr.simplify();
 }
 
 /// @}

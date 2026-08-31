@@ -1,12 +1,19 @@
 #pragma once
 
+#include "kmm/core/checked_math.hpp"
 #include "kmm/core/macros.hpp"
 #include "kmm/utils/gpu_api.hpp"
 #include "kmm/core/panic.hpp"
 #include "kmm/runtime/memops/copy.hpp"
+#include "kmm/runtime/memops/fill.hpp"
 #include "kmm/runtime/memops/types.hpp"
 
 namespace kmm {
+
+/// The identity element for `op` at `dtype`, as the raw bytes to broadcast-fill a buffer that is
+/// about to be reduced into (so slots never written still drop out of the fold): `0` for `Sum`,
+/// `1` for `Product`, the type's maximum for `Min`, its lowest for `Max`.
+FillValue reduction_identity(DataType dtype, ReductionOp op);
 
 /// \addtogroup memops
 /// @{
@@ -70,14 +77,53 @@ struct ReductionDescription {
     /// is overwritten with the result of the reduction.
     bool accumulate = false;
 
+    ReductionDescription() = default;
+
+    KMM_HOST_DEVICE
+    ReductionDescription(DataType dtype, ReductionOp operation) :
+        dtype(dtype),
+        operation(operation) {}
+
     /// Appends a batch axis to this description. `input_stride`/`output_stride` must be given in
     /// bytes.
+    ///
+    /// An axis of extent one is dropped (it is visited exactly once, so its stride never
+    /// contributes to addressing). Otherwise, this axis is checked against every existing axis
+    /// for contiguity (in both `input_stride` and `output_stride`) and folded into the first one
+    /// it is contiguous with instead of consuming a new slot. This keeps `num_dims` from growing
+    /// unnecessarily, which matters since `dims` only has room for `MEMOPS_MAX_DIMS` axes.
     KMM_HOST_DEVICE
     void add_dimension(
         memops_extent_type extent,
         memops_stride_type input_stride,
         memops_stride_type output_stride
     ) {
+        if (extent == 1) {
+            return;
+        }
+
+        for (size_t i = 0; i < num_dims; i++) {
+            ReductionDim& dim = dims[i];
+
+            // `dim` is the outer neighbor of the new axis: it keeps its extent, but adopts the
+            // new axis's (smaller) stride as its own.
+            if (dim.input_stride == input_stride * extent
+                && dim.output_stride == output_stride * extent) {
+                dim.extent *= extent;
+                dim.input_stride = input_stride;
+                dim.output_stride = output_stride;
+                return;
+            }
+
+            // `dim` is the inner neighbor of the new axis: the new axis's stride already
+            // matches `dim`'s span, so only `dim`'s extent needs to grow.
+            if (input_stride == dim.input_stride * dim.extent
+                && output_stride == dim.output_stride * dim.extent) {
+                dim.extent *= extent;
+                return;
+            }
+        }
+
         KMM_ASSERT(num_dims < MEMOPS_MAX_DIMS);
         dims[num_dims] = ReductionDim {extent, input_stride, output_stride};
         num_dims++;
@@ -102,6 +148,15 @@ struct ReductionDescription {
     /// `extent * output_stride`). Does not touch `reduction_extent`/`reduction_stride`, since
     /// those describe a different axis (the one reduced over, shared by every output element).
     ReductionDescription simplify() const;
+
+    /// Returns the half-open range of byte offsets (relative to `src_addr`) that this reduction
+    /// reads from. Accounts for `input_offset`, the batch axes (`dims`), and the reduced axis
+    /// (`reduction_extent`/`reduction_stride`).
+    Range<ptrdiff_t> src_range() const;
+
+    /// Returns the half-open range of byte offsets (relative to `dst_addr`) that this reduction
+    /// writes to. Accounts for `output_offset` and the batch axes (`dims`).
+    Range<ptrdiff_t> dst_range() const;
 
     /// Returns `true` if this reduction combines exactly one input element into each output
     /// element without accumulating into the previous value: every `combine(identity, value)`
@@ -130,6 +185,64 @@ void reduce_async(
     void* dst_addr,
     const ReductionDescription& description
 );
+
+/// Builds a `ReductionDescription` that reduces `src` (e.g. a `kmm::Layout`) over `axis` into
+/// `dst`, whose rank must be exactly one less than `src`'s: every axis of `src` other than `axis`
+/// maps (in order) to the corresponding axis of `dst`, and `axis` itself becomes the reduced
+/// axis. Translates each layout's (element-space) base offset, per-axis origin, and strides into
+/// the byte offsets/strides that `ReductionDescription` expects.
+template<typename DstLayoutT, typename SrcLayoutT>
+ReductionDescription make_reduction_description(
+    const DstLayoutT& dst,
+    const SrcLayoutT& src,
+    size_t axis,
+    DataType dtype,
+    ReductionOp op
+) {
+    static_assert(
+        DstLayoutT::rank + 1 == SrcLayoutT::rank,
+        "dst must have exactly one axis fewer than src"
+    );
+    static_assert(SrcLayoutT::rank <= MEMOPS_MAX_DIMS + 1, "rank exceeds maximum");
+    KMM_ASSERT(axis < SrcLayoutT::rank);
+
+    size_t element_size = data_type_size(dtype);
+
+    ptrdiff_t dst_offset = dst.base_offset();
+    ptrdiff_t src_offset = src.base_offset();
+
+    for (size_t i = 0; i < DstLayoutT::rank; i++) {
+        dst_offset += static_cast<ptrdiff_t>(dst.stride(i)) * static_cast<ptrdiff_t>(dst.begin(i));
+    }
+
+    for (size_t i = 0; i < SrcLayoutT::rank; i++) {
+        src_offset += static_cast<ptrdiff_t>(src.stride(i)) * static_cast<ptrdiff_t>(src.begin(i));
+    }
+
+    ReductionDescription descr(dtype, op);
+    descr.input_offset = checked_mul<memops_stride_type>(src_offset, element_size);
+    descr.output_offset = checked_mul<memops_stride_type>(dst_offset, element_size);
+    descr.reduction_extent = checked_cast<memops_extent_type>(src.extent(axis));
+    descr.reduction_stride = checked_mul<memops_stride_type>(src.stride(axis), element_size);
+
+    size_t dst_axis = 0;
+
+    for (size_t i = 0; i < SrcLayoutT::rank; i++) {
+        if (i == axis) {
+            continue;
+        }
+
+        descr.add_dimension(
+            checked_cast<memops_extent_type>(dst.extent(dst_axis)),
+            checked_mul<memops_stride_type>(src.stride(i), element_size),
+            checked_mul<memops_stride_type>(dst.stride(dst_axis), element_size)
+        );
+
+        dst_axis++;
+    }
+
+    return descr.simplify();
+}
 
 /// @}
 

@@ -39,15 +39,15 @@ void HostAccessControl::wait_pending_future() {
     }
 }
 
-bool MemoryBufferImpl::is_compatible(MemoryId memory_id, Access mode) noexcept {
+bool MemoryBufferImpl::is_compatible(MemoryId memory_id, AccessKind mode) noexcept {
     for (auto r = queue_head; r != nullptr; r = r->queue_next) {
         // two exclusive access are never allowed
-        if (r->mode == Access::Exclusive || mode == Access::Exclusive) {
+        if (r->mode == AccessKind::Exclusive || mode == AccessKind::Exclusive) {
             return false;
         }
 
         // if one writes, then they must access the same memory
-        if (r->mode != Access::ReadOnly || mode != Access::ReadOnly) {
+        if (r->mode != AccessKind::ReadOnly || mode != AccessKind::ReadOnly) {
             if (r->memory_id != memory_id) {
                 return false;
             }
@@ -120,12 +120,12 @@ AllocResult MemoryBufferImpl::try_allocate_location(
             src_id,
             dst_id,
             stream_hint,
-            src_loc.retrieve_access(Access::SharedWrite),
+            src_loc.retrieve_access(AccessKind::SharedWrite),
             events
         );
 
         if (result == AllocResult::Success) {
-            src_loc.record_access(Access::ReadOnly, events);
+            src_loc.record_access(AccessKind::ReadOnly, events);
             dst_loc.mark_allocated_and_valid(events);
         }
 
@@ -291,7 +291,7 @@ Poll MemoryBufferImpl::ensure_alloc_valid(const DeviceStreamId& stream_hint, Mem
 
     if (!has_valid_peer) {
         //
-        const auto& deps = location(memory_id).retrieve_access(Access::Exclusive);
+        const auto& deps = location(memory_id).retrieve_access(AccessKind::Exclusive);
 
         // This now becomes the home memory
         if (!home_memory_id.has_value()) {
@@ -328,7 +328,7 @@ void MemoryBufferImpl::invalidate_other_allocs(MemoryId memory_id) {
         // Invalidate all  device entries
         for (size_t i = 0; i < MAX_DEVICES; i++) {
             auto& peer_entry = device_locations[i];
-            deps.insert(peer_entry.retrieve_access(Access::ReadOnly));
+            deps.insert(peer_entry.retrieve_access(AccessKind::ReadOnly));
             peer_entry.is_valid = false;
         }
     } else {
@@ -337,7 +337,7 @@ void MemoryBufferImpl::invalidate_other_allocs(MemoryId memory_id) {
         // and it force-drains any in-flight future first, so there's no use-after-free risk),
         // and the only other hazard -- a later host fill overwriting `pending_future` while
         // this one is still outstanding -- is guarded non-blockingly in `ensure_alloc_valid`.
-        deps.insert(host_location.retrieve_access(Access::ReadOnly));
+        deps.insert(host_location.retrieve_access(AccessKind::ReadOnly));
         host_location.is_valid = false;
 
         // Invalidate all _other_ device entries
@@ -347,12 +347,12 @@ void MemoryBufferImpl::invalidate_other_allocs(MemoryId memory_id) {
             }
 
             auto& peer_entry = device_locations[i];
-            deps.insert(peer_entry.retrieve_access(Access::ReadOnly));
+            deps.insert(peer_entry.retrieve_access(AccessKind::ReadOnly));
             peer_entry.is_valid = false;
         }
     }
 
-    location(memory_id).record_access(Access::Exclusive, deps);
+    location(memory_id).record_access(AccessKind::Exclusive, deps);
 }
 
 DeviceEventSet MemoryBufferImpl::invalidate_all() {
@@ -365,12 +365,12 @@ DeviceEventSet MemoryBufferImpl::invalidate_all() {
     // See `invalidate_other_allocs`: no need to wait out an in-flight host future here --
     // the allocation isn't freed by this call, and `ensure_alloc_valid` non-blockingly drains
     // any leftover future before a new one could overwrite it.
-    deps.insert(host_location.retrieve_access(Access::ReadOnly));
+    deps.insert(host_location.retrieve_access(AccessKind::ReadOnly));
     host_location.is_valid = false;
 
     for (size_t i = 0; i < MAX_DEVICES; i++) {
         auto& peer_entry = device_locations[i];
-        deps.insert(peer_entry.retrieve_access(Access::ReadOnly));
+        deps.insert(peer_entry.retrieve_access(AccessKind::ReadOnly));
         peer_entry.is_valid = false;
     }
 
@@ -381,20 +381,20 @@ DeviceEventSet MemoryBufferImpl::invalidate_all() {
 // Exclusive waits for Exclusive, SharedWrite, ReadOnly
 // ReadOnly wait for Exclusive, SharedWrite
 // SharedWrite wait for Exclusive
-static Access waiting_mode_for(Access mode) {
-    if (mode == Access::Exclusive) {
-        return Access::ReadOnly;
-    } else if (mode == Access::ReadOnly) {
-        return Access::SharedWrite;
+static AccessKind waiting_mode_for(AccessKind mode) {
+    if (mode == AccessKind::Exclusive) {
+        return AccessKind::ReadOnly;
+    } else if (mode == AccessKind::ReadOnly) {
+        return AccessKind::SharedWrite;
     } else {
-        return Access::Exclusive;
+        return AccessKind::Exclusive;
     }
 }
 
 Poll MemoryBufferImpl::before_access(
     const DeviceStreamId& stream_hint,
     MemoryId memory_id,
-    Access mode
+    AccessKind mode
 ) {
     // 1) ensure that the allocation contains valid data
     if (ensure_alloc_valid(stream_hint, memory_id) == Poll::Pending) {
@@ -402,7 +402,7 @@ Poll MemoryBufferImpl::before_access(
     }
 
     // 2) if we are going to write, we must invalidate all the others
-    if (mode != Access::ReadOnly) {
+    if (mode != AccessKind::ReadOnly) {
         invalidate_other_allocs(memory_id);
     }
 
@@ -413,18 +413,26 @@ Poll MemoryBufferImpl::before_access(
     return Poll::Ready;
 }
 
-BufferAccessor MemoryBufferImpl::access(MemoryId memory_id, Access mode, DeviceEventSet& deps_out) {
+BufferAccessor MemoryBufferImpl::access(
+    MemoryId memory_id,
+    AccessKind mode,
+    DeviceEventSet& deps_out
+) {
     auto& loc = location(memory_id);
     deps_out.insert(loc.retrieve_access(waiting_mode_for(mode)));
 
     return BufferAccessor {
         memory_id,
         size_in_bytes,
-        mode != Access::ReadOnly,
+        mode != AccessKind::ReadOnly,
         data->address(memory_id)};
 }
 
-void MemoryBufferImpl::after_access(MemoryId memory_id, Access mode, const DeviceEventSet& deps) {
+void MemoryBufferImpl::after_access(
+    MemoryId memory_id,
+    AccessKind mode,
+    const DeviceEventSet& deps
+) {
     location(memory_id).record_access(mode, deps);
 }
 
@@ -460,13 +468,13 @@ void MemoryBufferImpl::do_copy(
     KMM_ASSERT((!src_id.is_host() && !dst_id.is_host()) || !host_location.pending_future.valid());
 
     DeviceEventSet deps;
-    deps.insert(src_alloc.retrieve_access(Access::SharedWrite));
-    deps.insert(dst_alloc.retrieve_access(Access::ReadOnly));
+    deps.insert(src_alloc.retrieve_access(AccessKind::SharedWrite));
+    deps.insert(dst_alloc.retrieve_access(AccessKind::ReadOnly));
 
     spdlog::debug("launch copy for buffer {} from {} to {} (deps: {})", name, src_id, dst_id, deps);
     data->copy(src_id, dst_id, stream_hint, deps, deps);
 
-    src_alloc.record_access(Access::ReadOnly, deps);
+    src_alloc.record_access(AccessKind::ReadOnly, deps);
     dst_alloc.mark_valid(deps);
 }
 

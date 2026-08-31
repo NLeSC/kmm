@@ -2,14 +2,14 @@
 
 #include <optional>
 
-#include "kmm/runtime/data_interface.hpp"
+#include "kmm/runtime/data_interfaces/base.hpp"
 #include "kmm/runtime/memory_manager.hpp"
 #include "kmm/utils/refcnt_ptr.hpp"
 
 namespace kmm {
 
 struct BufferQueueNode {
-    BufferQueueNode(MemoryId memory_id, Access mode, NotifyHandle callback) :
+    BufferQueueNode(MemoryId memory_id, AccessKind mode, NotifyHandle callback) :
         memory_id(memory_id),
         mode(mode) {}
 
@@ -17,7 +17,7 @@ struct BufferQueueNode {
     BufferQueueNode* queue_prev = nullptr;
     BufferQueueNode* queue_next = nullptr;
     MemoryId memory_id;
-    Access mode;
+    AccessKind mode;
 };
 
 struct AccessControl {
@@ -47,25 +47,25 @@ struct AccessControl {
 
     // Records an access of the given `mode`, maintaining the epoch/write/read
     // nesting invariant documented above.
-    void record_access(Access mode, const DeviceEventSet& deps) noexcept {
-        if (mode == Access::Exclusive) {
+    void record_access(AccessKind mode, const DeviceEventSet& deps) noexcept {
+        if (mode == AccessKind::Exclusive) {
             epoch_events.insert(deps);
         }
 
-        if (mode != Access::ReadOnly) {
+        if (mode != AccessKind::ReadOnly) {
             write_events.insert(deps);
         }
 
         read_events.insert(deps);
     }
 
-    const DeviceEventSet& retrieve_access(Access mode) noexcept {
+    const DeviceEventSet& retrieve_access(AccessKind mode) noexcept {
         switch (mode) {
-            case Access::ReadOnly:
+            case AccessKind::ReadOnly:
                 return read_events;
-            case Access::SharedWrite:
+            case AccessKind::SharedWrite:
                 return write_events;
-            case Access::Exclusive:
+            case AccessKind::Exclusive:
                 return epoch_events;
             default:
                 KMM_PANIC("invalid state");
@@ -99,7 +99,7 @@ struct AccessControl {
     // Returns the dependencies the caller must wait on before actually freeing the
     // underlying allocation (via `DataInterface`), then clears all state.
     DeviceEventSet mark_deallocated() noexcept {
-        DeviceEventSet deps = retrieve_access(Access::ReadOnly);
+        DeviceEventSet deps = retrieve_access(AccessKind::ReadOnly);
         KMM_ASSERT(alloc_count == 0);
         is_allocated = false;
         is_valid = false;
@@ -195,7 +195,7 @@ struct MemoryBufferImpl: reference_count<MemoryBufferImpl> {
         data(std::move(data)),
         home_memory_id(home_memory_id) {}
 
-    bool is_compatible(MemoryId memory_id, Access mode) noexcept;
+    bool is_compatible(MemoryId memory_id, AccessKind mode) noexcept;
     bool try_register_request(BufferQueueNode* req) noexcept;
     void unregister_request(BufferQueueNode* req) noexcept;
 
@@ -289,11 +289,11 @@ struct MemoryBufferImpl: reference_count<MemoryBufferImpl> {
 
     // Called once a request's location has been granted, right before the
     // caller is allowed to actually read/write through it.
-    Poll before_access(const DeviceStreamId& stream_hint, MemoryId memory_id, Access mode);
+    Poll before_access(const DeviceStreamId& stream_hint, MemoryId memory_id, AccessKind mode);
 
     // Called right after the caller is done reading/writing through a
     // granted location, recording the resulting dependencies.
-    void after_access(MemoryId memory_id, Access mode, const DeviceEventSet& deps);
+    void after_access(MemoryId memory_id, AccessKind mode, const DeviceEventSet& deps);
 
     // Returns `Pending` (without touching any state) if `src_id` is host and its data is
     // still being produced by an in-flight `pending_future`.
@@ -304,7 +304,7 @@ struct MemoryBufferImpl: reference_count<MemoryBufferImpl> {
     // `Ready`), and inserts into `deps_out` the events that must complete before it is safe to
     // read/write through it. Reads live off the location's current epoch/write/read events, so
     // this may safely be called after `before_access` rather than only from within it.
-    BufferAccessor access(MemoryId memory_id, Access mode, DeviceEventSet& deps_out);
+    BufferAccessor access(MemoryId memory_id, AccessKind mode, DeviceEventSet& deps_out);
 
     const std::string name;
 

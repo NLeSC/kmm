@@ -73,14 +73,14 @@ struct Vec<T, 2> {
     KMM_HOST_DEVICE
     constexpr T& operator[](size_t i) {
         KMM_DEBUG_ASSERT(i < 2);
-        constexpr T Vec::*members[] = {&Vec::x, &Vec::y};
+        constexpr decltype(&Vec::x) members[] = {&Vec::x, &Vec::y};
         return this->*members[i];
     }
 
     KMM_HOST_DEVICE
     constexpr const T& operator[](size_t i) const {
         KMM_DEBUG_ASSERT(i < 2);
-        constexpr T Vec::*members[] = {&Vec::x, &Vec::y};
+        constexpr decltype(&Vec::x) members[] = {&Vec::x, &Vec::y};
         return this->*members[i];
     }
 
@@ -99,14 +99,14 @@ struct Vec<T, 3> {
     KMM_HOST_DEVICE
     constexpr T& operator[](size_t i) {
         KMM_DEBUG_ASSERT(i < 3);
-        constexpr T Vec::*members[] = {&Vec::x, &Vec::y, &Vec::z};
+        constexpr decltype(&Vec::x) members[] = {&Vec::x, &Vec::y, &Vec::z};
         return this->*members[i];
     }
 
     KMM_HOST_DEVICE
     constexpr const T& operator[](size_t i) const {
         KMM_DEBUG_ASSERT(i < 3);
-        constexpr T Vec::*members[] = {&Vec::x, &Vec::y, &Vec::z};
+        constexpr decltype(&Vec::x) members[] = {&Vec::x, &Vec::y, &Vec::z};
         return this->*members[i];
     }
 
@@ -126,14 +126,14 @@ struct Vec<T, 4> {
     KMM_HOST_DEVICE
     constexpr T& operator[](size_t i) {
         KMM_DEBUG_ASSERT(i < 4);
-        constexpr T Vec::*members[] = {&Vec::x, &Vec::y, &Vec::z, &Vec::w};
+        constexpr decltype(&Vec::x) members[] = {&Vec::x, &Vec::y, &Vec::z, &Vec::w};
         return this->*members[i];
     }
 
     KMM_HOST_DEVICE
     constexpr const T& operator[](size_t i) const {
         KMM_DEBUG_ASSERT(i < 4);
-        constexpr T Vec::*members[] = {&Vec::x, &Vec::y, &Vec::z, &Vec::w};
+        constexpr decltype(&Vec::x) members[] = {&Vec::x, &Vec::y, &Vec::z, &Vec::w};
         return this->*members[i];
     }
 

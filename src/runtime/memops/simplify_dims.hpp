@@ -45,7 +45,7 @@ size_t simplify_dims(const Dim* dims, size_t num_dims, Dim* out, Less less, TryM
     // bubble sort
     for (size_t i = 0; i < MEMOPS_MAX_DIMS; i++) {
         for (size_t j = 0; j < i; j++) {
-            if (i < n && less(out[j], out[i])) {
+            if (i < n && less(out[i], out[j])) {
                 std::swap(out[i], out[j]);
             }
         }

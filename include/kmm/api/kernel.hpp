@@ -2,12 +2,12 @@
 
 #include <utility>
 
-#include "kmm/api/device_context.hpp"
+#include "kmm/api/device.hpp"
 #include "kmm/utils/gpu_api.hpp"
 
 namespace kmm {
 
-/// Launcher (for use with `DeviceContext::scope`/`DeviceContext::launch`) that launches a
+/// Launcher (for use with `Device::scope`/`Device::launch`) that launches a
 /// `__global__` kernel function `fun` with a fixed grid/block/shared-memory configuration.
 /// `fun` is launched on `context`'s stream as
 /// `fun<<<grid_dim, block_dim, shared_mem, context>>>(args...)`, where `args...` are the views

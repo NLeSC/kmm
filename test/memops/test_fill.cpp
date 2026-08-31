@@ -9,8 +9,7 @@ using namespace kmm;
 TEST_CASE("fill (CPU)") {
     std::vector<int> dst(6, -1);
 
-    FillDescription description;
-    description.value = FillValue::from<int>(42);
+    FillDescription description(FillValue::from<int>(42));
     description.add_dimension(6, sizeof(int));
 
     fill(dst.data(), description);

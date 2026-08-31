@@ -3,9 +3,8 @@
 
 #include "kmm/core/integer_fun.hpp"
 #include "kmm/core/panic.hpp"
-#include "kmm/runtime/data_interface.hpp"
+#include "kmm/runtime/data_interfaces/flat.hpp"
 #include "kmm/runtime/memops/fill.hpp"
-#include "kmm/utils/gpu_utils.hpp"
 
 namespace kmm {
 
@@ -138,25 +137,20 @@ bool FlatDataInterface::is_copy_supported(MemoryId src, MemoryId dst) {
 }
 
 std::future<void> FlatDataInterface::initialize_host(const DeviceEventSet& deps) {
-    if (m_fill_value.length != 0) {
-        for (const auto& event : deps) {
-            m_events.synchronize(event);
-        }
-
-        size_t element_size = m_fill_value.length;
-        size_t count = m_layout.size_in_bytes / element_size;
-
-        FillDescription description;
-        description.value = m_fill_value;
-        description.add_dimension(
-            static_cast<memops_extent_type>(count),
-            static_cast<memops_stride_type>(element_size)
-        );
-
-        fill(m_host_ptr, description);
+    if (m_fill_value.length == 0) {
+        return {};
     }
 
-    return {};
+    size_t element_size = m_fill_value.length;
+    size_t count = m_layout.size_in_bytes / element_size;
+
+    FillDescription description(m_fill_value);
+    description.add_dimension(
+        static_cast<memops_extent_type>(count),
+        static_cast<memops_stride_type>(element_size)
+    );
+
+    return m_system->fill_host(m_host_ptr, description, deps);
 }
 
 DeviceEvent FlatDataInterface::initialize_device(
@@ -172,8 +166,7 @@ DeviceEvent FlatDataInterface::initialize_device(
     size_t element_size = m_fill_value.length;
     size_t count = m_layout.size_in_bytes / m_fill_value.length;
 
-    FillDescription description;
-    description.value = m_fill_value;
+    FillDescription description(m_fill_value);
     description.add_dimension(
         static_cast<memops_extent_type>(count),
         static_cast<memops_stride_type>(element_size)
@@ -232,110 +225,6 @@ AllocResult FlatDataInterface::allocate_and_copy(
 
     // just forward to the default impl.
     return DataInterface::allocate_and_copy(src, dst, stream_hint, deps_in, deps_out);
-}
-
-HostDataInterface::HostDataInterface(
-    BufferLayout layout,
-    refcnt_ptr<MemorySystem> system,
-    FillValue fill_value
-) :
-    m_layout(normalize_buffer_layout(layout)),
-    m_system(std::move(system)),
-    m_fill_value(std::move(fill_value)) {}
-
-size_t HostDataInterface::size_in_bytes() const {
-    return m_layout.size_in_bytes;
-}
-
-AllocResult HostDataInterface::allocate(
-    MemoryId memory_id,
-    const DeviceStreamId& stream_hint,
-    DeviceEventSet& deps_out
-) {
-    if (m_refcount == 0) {
-        DeviceEventSet deps;
-        auto result = m_system->allocate_host(m_layout, &m_host_ptr, stream_hint, deps);
-
-        if (result != AllocResult::Success) {
-            return result;
-        }
-
-        m_alloc_deps = std::move(deps);
-    }
-
-    m_refcount++;
-    deps_out.insert(m_alloc_deps);
-    return AllocResult::Success;
-}
-
-void HostDataInterface::deallocate(
-    MemoryId memory_id,
-    const DeviceStreamId& stream_hint,
-    const DeviceEventSet& deps
-) {
-    KMM_ASSERT(m_refcount > 0);
-    m_dealloc_deps.insert(deps);
-
-    if (--m_refcount == 0) {
-        m_system->deallocate_host(m_host_ptr, m_layout, stream_hint, m_dealloc_deps);
-        m_host_ptr = nullptr;
-        m_alloc_deps.clear();
-        m_dealloc_deps.clear();
-    }
-}
-
-void* HostDataInterface::address(MemoryId memory_id) const {
-    return m_host_ptr;
-}
-
-bool HostDataInterface::is_copy_supported(MemoryId src, MemoryId dst) {
-    return m_system->is_copy_supported(src, dst);
-}
-
-void HostDataInterface::copy(
-    MemoryId src,
-    MemoryId dst,
-    const DeviceStreamId& stream_hint,
-    const DeviceEventSet& deps,
-    DeviceEventSet& deps_out
-) {
-    deps_out.insert(deps);
-}
-
-void HostDataInterface::fill_host_buffer(const DeviceEventSet& deps) {
-    if (m_fill_value.length == 0) {
-        return;
-    }
-
-    for (const auto& event : deps) {
-        m_events.synchronize(event);
-    }
-
-    size_t element_size = m_fill_value.length;
-    size_t count = m_layout.size_in_bytes / element_size;
-
-    FillDescription description;
-    description.value = m_fill_value;
-    description.add_dimension(
-        static_cast<memops_extent_type>(count),
-        static_cast<memops_stride_type>(element_size)
-    );
-
-    fill(m_host_ptr, description);
-}
-
-std::future<void> HostDataInterface::initialize_host(const DeviceEventSet& deps) {
-    fill_host_buffer(deps);
-    return {};
-}
-
-DeviceEvent HostDataInterface::initialize_device(
-    DeviceId memory_id,
-    const DeviceStreamId& stream_hint,
-    const DeviceEventSet& deps
-) {
-    fill_host_buffer(deps);
-    return DeviceEvent::null();
 }
 
 }  // namespace kmm

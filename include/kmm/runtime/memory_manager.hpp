@@ -6,7 +6,7 @@
 
 #include "kmm/core/macros.hpp"
 #include "kmm/runtime/buffer.hpp"
-#include "kmm/runtime/data_interface.hpp"
+#include "kmm/runtime/data_interfaces/base.hpp"
 #include "kmm/runtime/device_event.hpp"
 #include "kmm/runtime/identifiers.hpp"
 #include "kmm/runtime/memory_system.hpp"
@@ -31,7 +31,7 @@ using MemoryBuffer = refcnt_ptr<MemoryBufferImpl>;
 using MemoryTransaction = refcnt_ptr<MemoryTransactionImpl>;
 using MemoryRequest = refcnt_ptr<MemoryRequestImpl>;
 
-enum struct Access { ReadOnly, SharedWrite, Exclusive };
+enum struct AccessKind { ReadOnly, SharedWrite, Exclusive };
 
 class MemoryManager {
   public:
@@ -55,7 +55,7 @@ class MemoryManager {
     MemoryRequest create_request(
         const MemoryBuffer& buffer,
         MemoryId memory_id,
-        Access mode,
+        AccessKind mode,
         MemoryTransaction parent = {},
         NotifyHandle callback = {}
     );
@@ -70,7 +70,7 @@ class MemoryManager {
     void prefetch_buffer(
         const MemoryBuffer& buffer,
         MemoryId memory_id,
-        Access mode = Access::ReadOnly
+        AccessKind mode = AccessKind::ReadOnly
     );
 
     void try_evict_buffer(const MemoryBuffer& buffer, MemoryId memory_id);
@@ -85,9 +85,9 @@ class MemoryManager {
     std::unique_ptr<Impl> m_impl;
 };
 
-std::ostream& operator<<(std::ostream& stream, Access access);
+std::ostream& operator<<(std::ostream& stream, AccessKind access);
 
 }  // namespace kmm
 
 template<>
-struct fmt::formatter<kmm::Access>: fmt::ostream_formatter {};
+struct fmt::formatter<kmm::AccessKind>: fmt::ostream_formatter {};

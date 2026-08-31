@@ -1,141 +1,243 @@
 #pragma once
 
-#include <exception>
+#include <optional>
+#include <string>
 #include <utility>
 
-#include "kmm/api/array.hpp"
+#include "kmm/api/accumulator.hpp"
+#include "kmm/runtime/memops/reduction.hpp"
+#include "kmm/runtime/runtime.hpp"
 
 namespace kmm {
 
-/// A `DomainArray` that has been put into reduction mode -- constructed as
-/// `Reduce(array)` or `Reduce(array, op)` (`op` defaults to `ReductionOp::Sum`). Only
-/// reduce-mode access is possible on it (there is no `LaunchArg` specialization for plain
-/// read/write access) -- attempting to read or write it is caught at compile time, not by an
-/// implicit auto-finalize. Call `finalize()` to fold the accumulated values back into a regular
-/// `DomainArray`, or just let it go out of scope: reduction mode is scoped to this object's
-/// lifetime, so the destructor finalizes automatically if you don't. Move-only: exactly one
-/// `Reduce` owns "when does this reduction end" at a time.
-template<typename T, typename DomainT, typename PolicyT>
-class Reduce<DomainArray<T, DomainT, PolicyT>> {
+template<typename T, size_t K = 1>
+struct Reduce {
+    const T& target;
+    ReductionOp op;
+    Shape<K> replication;
+};
+
+template<typename T, typename LayoutT, typename... Extents>
+Reduce<NDArray<T, LayoutT>, sizeof...(Extents)> reduce(
+    const NDArray<T, LayoutT>& array,
+    ReductionOp op,
+    Extents... extents
+) {
+    auto replication = Shape<sizeof...(Extents)> {checked_cast<default_index_type>(extents)...};
+
+    return Reduce<NDArray<T, LayoutT>, sizeof...(Extents)> {array, op, replication};
+}
+
+template<typename T, typename LayoutT, typename... Extents>
+Reduce<NDArray<T, LayoutT>, sizeof...(Extents)> reduce(
+    const NDArray<T, LayoutT>& array,
+    Extents... extents
+) {
+    return reduce(array, ReductionOp::Sum, extents...);
+}
+
+template<typename T, typename LayoutT, typename... Extents>
+Reduce<NDAccumulator<T, LayoutT>, sizeof...(Extents)> reduce(
+    const NDAccumulator<T, LayoutT>& accumulator,
+    Extents... extents
+) {
+    auto replication = Shape<sizeof...(Extents)> {checked_cast<default_index_type>(extents)...};
+
+    return Reduce<NDAccumulator<T, LayoutT>, sizeof...(Extents)> {
+        accumulator,
+        accumulator.op(),
+        replication};
+}
+
+namespace detail {
+
+template<typename LayoutT, size_t K>
+class ReplicatedRegion {
   public:
-    using element_type = T;
-    using domain_type = DomainT;
-    using policy_type = PolicyT;
-    using layout_type = Layout<DomainT, PolicyT>;
+    using index_type = typename LayoutT::index_type;
+    static constexpr size_t rank = LayoutT::rank;
+    static constexpr size_t replicated_rank = rank + K;
+    using replicated_shape = Shape<replicated_rank, index_type>;
+    using replicated_strides = StridesN<default_stride_type, replicated_rank>;
+    using replicated_layout = Layout<replicated_shape, replicated_strides>;
 
-    Reduce() = default;
+    ReplicatedRegion(const LayoutT& layout, const Shape<K>& replication) :
+        m_source(layout.normalize_offset()),
+        m_replication(replication) {
+        KMM_ASSERT(m_replication.volume() >= 1);
 
-    explicit Reduce(
-        const DomainArray<T, DomainT, PolicyT>& array,
-        ReductionOp op = ReductionOp::Sum
-    ) :
-        m_layout(array.layout()),
-        m_op(op),
-        m_buffer(array.buffer()) {
-        if (m_buffer) {
-            m_buffer.runtime().begin_reduction(m_buffer.id(), data_type_of<T>(), op);
+        auto span = m_source.offset_span();
+        m_replica_span = checked_sub<size_t>(span.stop, span.start);
+    }
+
+    size_t replica_span() const {
+        return m_replica_span;
+    }
+
+    size_t replica_count() const {
+        return checked_cast<size_t>(m_replication.volume());
+    }
+
+    size_t element_count() const {
+        return checked_mul(replica_span(), replica_count());
+    }
+
+    replicated_layout view() const {
+        auto array_shape = m_source.shape();
+        auto array_strides = m_source.strides();
+
+        replicated_shape shape;
+        Vec<default_stride_type, replicated_rank> strides;
+
+        if constexpr (rank > 0) {
+            for (size_t i = 0; i < rank; i++) {
+                shape[i] = array_shape[i];
+                strides[i] = static_cast<default_stride_type>(array_strides[i]);
+            }
         }
-    }
 
-    Reduce(const Reduce&) = delete;
-    Reduce& operator=(const Reduce&) = delete;
-
-    Reduce(Reduce&& that) noexcept :
-        m_layout(that.m_layout),
-        m_op(that.m_op),
-        m_buffer(std::move(that.m_buffer)) {}
-
-    Reduce& operator=(Reduce&& that) noexcept {
-        if (this != &that) {
-            finish();
-            m_buffer = std::move(that.m_buffer);
-            m_layout = that.m_layout;
-            m_op = that.m_op;
+        auto stride = static_cast<default_stride_type>(replica_span());
+        for (size_t j = K; j-- > 0;) {
+            shape[rank + j] = m_replication[j];
+            strides[rank + j] = stride;
+            stride *= static_cast<default_stride_type>(m_replication[j]);
         }
 
-        return *this;
+        auto mapping = build_strides(strides, make_index_sequence<replicated_rank>());
+        return replicated_layout(shape, mapping, m_source.base_offset());
     }
 
-    ~Reduce() {
-        finish();
-    }
+    ReductionDescription fold(ReductionOp op, DataType dtype) const {
+        auto elem_size = checked_cast<memops_stride_type>(data_type_size(dtype));
+        auto base_offset = checked_mul<memops_stride_type>(m_source.base_offset(), elem_size);
 
-    const layout_type& layout() const noexcept {
-        return m_layout;
-    }
+        ReductionDescription description(dtype, op);
+        description.input_offset = base_offset;
+        description.output_offset = base_offset;
 
-    ReductionOp op() const noexcept {
-        return m_op;
-    }
+        if constexpr (rank > 0) {
+            auto array_shape = m_source.shape();
+            auto array_strides = m_source.strides();
 
-    /// Finalizes the reduction.
-    DomainArray<T, DomainT, PolicyT> finalize() {
-        m_buffer.runtime().finalize_reduction(m_buffer.id());
-        return DomainArray<T, DomainT, PolicyT>(std::move(m_buffer), m_layout);
+            for (size_t i = 0; i < rank; i++) {
+                auto stride_bytes = checked_mul<memops_stride_type>(array_strides[i], elem_size);
+                description.add_dimension(
+                    checked_cast<memops_extent_type>(array_shape[i]),
+                    stride_bytes,
+                    stride_bytes
+                );
+            }
+        }
+
+        description.reduction_extent = checked_cast<memops_extent_type>(replica_count());
+        description.reduction_stride = checked_mul<memops_stride_type>(replica_span(), elem_size);
+        return description;
     }
 
   private:
-    void finish() noexcept {
-        if (!m_buffer) {
+    template<size_t... Is>
+    KMM_HOST_DEVICE static replicated_strides
+    build_strides(const Vec<default_stride_type, replicated_rank>& values, IndexSequence<Is...>) {
+        return replicated_strides {values[Is]...};
+    }
+
+    LayoutT m_source;
+    Shape<K> m_replication;
+    size_t m_replica_span;
+};
+
+template<typename T, typename LayoutT, size_t K>
+class LaunchArgReduce {
+  public:
+    using index_type = typename LayoutT::index_type;
+    using region_type = ReplicatedRegion<LayoutT, K>;
+    using replicated_layout = typename region_type::replicated_layout;
+    using resolve_type = NDView<T, replicated_layout>;
+
+    LaunchArgReduce(
+        Buffer buffer,
+        LayoutT layout,
+        ReductionOp op,
+        Shape<K, index_type> replication
+    ) :
+        m_buffer(std::move(buffer)),
+        m_region(layout, replication),
+        m_op(op) {}
+
+    void acquire(Runtime& runtime, ResourceRequest& requests, MemoryId memory_id) {
+        m_memory_id = memory_id;
+
+        m_scratch = runtime.create_buffer(
+            BufferLayout::for_type<T>(m_region.element_count()),
+            "replicated partial",
+            reduction_identity(data_type_of<T>(), m_op)
+        );
+
+        m_index = requests.add(memory_id, *m_scratch, AccessMode::ReadWrite);
+    }
+
+    resolve_type resolve(Runtime& runtime, const ResourceGrant& grant) {
+        auto accessor = grant.accessor(m_index);
+        auto layout = m_region.view();
+        return {static_cast<typename resolve_type::pointer>(accessor.address), layout};
+    }
+
+    void release(Runtime& runtime) {
+        if (!m_scratch) {
             return;
         }
 
-        auto buffer = std::move(m_buffer);
-        bool unwinding = std::uncaught_exceptions() > 0;
-
-        try {
-            if (!unwinding) {
-                buffer.runtime().finalize_reduction(buffer.id());
-            } else {
-                buffer.runtime().rollback_reduction(buffer.id());
-            }
-        } catch (...) {
-            buffer.runtime().rollback_reduction(buffer.id());
-            throw;
-        }
+        runtime.submit_reduction(
+            m_buffer.id(),
+            *m_scratch,
+            m_region.fold(m_op, data_type_of<T>()),
+            m_memory_id
+        );
+        runtime.release_buffer(*m_scratch);
+        m_scratch.reset();
     }
-
-    layout_type m_layout {};
-    ReductionOp m_op = ReductionOp::Sum;
-    Buffer m_buffer;
-};
-
-/// Deduction guide: CTAD only ever considers the primary `Reduce<T>` template (intentionally
-/// left undefined -- see `launch_arg.hpp`), so this specialization must spell out its own guide
-/// for `Reduce(array)` / `Reduce(array, op)` to deduce through it.
-template<typename T, typename DomainT, typename PolicyT>
-Reduce(const DomainArray<T, DomainT, PolicyT>&, ReductionOp = ReductionOp::Sum)
-    -> Reduce<DomainArray<T, DomainT, PolicyT>>;
-
-/// Reduce-mode access to a `Reduce`-wrapped array. There is no `LaunchArg` specialization for
-/// plain `DomainArray<...>` reduce access -- a buffer must be put into reduction mode first (see
-/// `Reduce`'s constructor), which is what makes reduce access to it representable at all. Holds
-/// a reference rather than a copy since `Reduce` is move-only; safe because every use is confined
-/// to `Context::scope`'s own call, which completes before any temporary argument is destroyed.
-template<typename T, typename DomainT, typename PolicyT>
-class LaunchArg<Reduce<DomainArray<T, DomainT, PolicyT>>> {
-  public:
-    using resolve_type = DomainView<T, Layout<DomainT, PolicyT>>;
-
-    explicit LaunchArg(const Reduce<DomainArray<T, DomainT, PolicyT>>& array) : m_array(array) {}
-
-    void acquire(Runtime& runtime, Requisition& req, MemoryId memory_id) {
-        m_index = req.add_reduction(memory_id, m_array.buffer().id());
-    }
-
-    // Assumes `req` has already been polled to `Poll::Ready` by `Context::scope` -- see the
-    // matching comment on `detail::LaunchArgArray::resolve`.
-    resolve_type resolve(Runtime& runtime, Requisition& req) {
-        auto accessor = req.accessor(m_index);
-        auto* data = static_cast<typename resolve_type::pointer>(accessor.address);
-        return resolve_type(data, m_array.layout());
-    }
-
-    void release(Runtime& runtime, Requisition& req) {}
 
   private:
-    const Reduce<DomainArray<T, DomainT, PolicyT>>& m_array;
+    Buffer m_buffer;
+    region_type m_region;
+    ReductionOp m_op;
+    MemoryId m_memory_id = MemoryId::host();
+    std::optional<BufferId> m_scratch;
     size_t m_index = 0;
+};
+
+}  // namespace detail
+
+template<typename T, typename LayoutT, size_t K>
+class LaunchArg<Reduce<NDArray<T, LayoutT>, K>>: public detail::LaunchArgReduce<T, LayoutT, K> {
+  public:
+    explicit LaunchArg(const Reduce<NDArray<T, LayoutT>, K>& arg) :
+        detail::LaunchArgReduce<T, LayoutT, K>(
+            arg.target.buffer(),
+            arg.target.layout(),
+            arg.op,
+            arg.replication
+        ) {}
+};
+
+template<typename T, typename LayoutT, size_t K>
+class LaunchArg<Reduce<NDAccumulator<T, LayoutT>, K>>:
+    public detail::LaunchArgReduce<T, LayoutT, K> {
+  public:
+    explicit LaunchArg(const Reduce<NDAccumulator<T, LayoutT>, K>& arg) :
+        detail::LaunchArgReduce<T, LayoutT, K>(
+            arg.target.buffer(),
+            arg.target.layout(),
+            arg.op,
+            arg.replication
+        ) {}
+};
+
+template<typename T, typename LayoutT>
+class LaunchArg<Reduce<NDAccumulator<T, LayoutT>, 0>>: public LaunchArg<NDAccumulator<T, LayoutT>> {
+  public:
+    explicit LaunchArg(const Reduce<NDAccumulator<T, LayoutT>, 0>& arg) :
+        LaunchArg<NDAccumulator<T, LayoutT>>(arg.target) {}
 };
 
 }  // namespace kmm

@@ -1,18 +1,24 @@
 #pragma once
 
+#include <algorithm>
+#include <array>
 #include <optional>
 #include <utility>
 
+#include "kmm/api/accumulator.hpp"
 #include "kmm/api/array.hpp"
-#include "kmm/api/scope.hpp"
+#include "kmm/api/reduce.hpp"
+#include "kmm/api/resource_guard.hpp"
 #include "kmm/runtime/identifiers.hpp"
+#include "kmm/runtime/memops/reduction.hpp"
 #include "kmm/runtime/memory_manager.hpp"
-#include "kmm/runtime/requisition.hpp"
+#include "kmm/runtime/resource.hpp"
 #include "kmm/runtime/runtime.hpp"
 
 namespace kmm {
 
-class DeviceContext;
+class Host;
+class Device;
 
 class Context {
   public:
@@ -21,12 +27,12 @@ class Context {
         m_transaction(std::move(transaction)) {}
 
     template<typename T, typename DomainT, typename PolicyT = RowMajor>
-    DomainArray<T, DomainT, PolicyT> array(
+    NDArray<T, Layout<DomainT, PolicyT>> array(
         DomainT domain,
         PolicyT policy = {},
         std::optional<T> fill_value = {}
     ) {
-        return DomainArray<T, DomainT, PolicyT>(
+        return NDArray<T, Layout<DomainT, PolicyT>>(
             runtime(),
             domain,
             policy,
@@ -42,63 +48,89 @@ class Context {
 
     template<typename T, typename PolicyT = RowMajor, typename... ExtentT>
     Array<T, sizeof...(ExtentT)> fill(T value, ExtentT... extents) {
-        return array(shape(extents...), PolicyT {}, value);
+        return array<T>(shape(extents...), PolicyT {}, value);
     }
 
     template<typename T, typename PolicyT = RowMajor, typename... ExtentT>
     Array<T, sizeof...(ExtentT)> ones(ExtentT... extents) {
-        return array(shape(extents...), PolicyT {}, static_cast<T>(1));
+        return array<T>(shape(extents...), PolicyT {}, static_cast<T>(1));
     }
 
     template<typename T, typename PolicyT = RowMajor, typename... ExtentT>
     Array<T, sizeof...(ExtentT)> zeros(ExtentT... extents) {
-        return array(shape(extents...), PolicyT {}, T {});
+        return array<T>(shape(extents...), PolicyT {}, T {});
     }
 
-    template<typename T, typename DomainT, typename PolicyT>
-    DomainArray<T, DomainT, PolicyT> empty_like(const DomainArray<T, DomainT, PolicyT>& that) {
-        return array<T>(that.domain(), PolicyT {});
+    template<typename T, typename LayoutT>
+    NDArray<T, LayoutT> empty_like(const NDArray<T, LayoutT>& that) {
+        return array<T>(that.domain(), typename LayoutT::policy_type {});
     }
 
-    template<typename T, typename DomainT, typename PolicyT>
-    DomainArray<T, DomainT, PolicyT> ones_like(const DomainArray<T, DomainT, PolicyT>& that) {
-        return array<T>(that.domain(), PolicyT {}, static_cast<T>(1));
+    template<typename T, typename LayoutT>
+    NDArray<T, LayoutT> ones_like(const NDArray<T, LayoutT>& that) {
+        return array<T>(that.domain(), typename LayoutT::policy_type {}, static_cast<T>(1));
     }
 
-    template<typename T, typename DomainT, typename PolicyT>
-    DomainArray<T, DomainT, PolicyT> zeros_like(const DomainArray<T, DomainT, PolicyT>& that) {
-        return array<T>(that.domain(), PolicyT {}, T {});
+    template<typename T, typename LayoutT>
+    NDArray<T, LayoutT> zeros_like(const NDArray<T, LayoutT>& that) {
+        return array<T>(that.domain(), typename LayoutT::policy_type {}, T {});
     }
 
-    template<typename T, typename DomainT, typename PolicyT>
-    DomainArray<T, DomainT, PolicyT> copy(const DomainArray<T, DomainT, PolicyT>& that) {
+    template<typename T>
+    Array<T> from_vector(const T* data, size_t nelem) {
+        auto result = empty<T>(nelem);
+        result.buffer().copy_from(data, nelem * sizeof(T), 0, affinity_memory_id());
+        return result;
+    }
+
+    template<typename T>
+    Array<T> from_vector(const std::vector<T>& input) {
+        return from_vector(input.data(), input.size());
+    }
+
+    template<typename T>
+    std::vector<T> to_vector(Array<T> input) {
+        size_t offset = checked_cast<size_t>(input.layout().base_offset());
+        size_t nelem = checked_cast<size_t>(input.layout().size());
+
+        std::vector<T> result;
+        result.resize(nelem);
+        input.buffer()
+            .copy_to(result.data(), nelem * sizeof(T), offset * sizeof(T), affinity_memory_id());
+        return result;
+    }
+
+    template<typename T>
+    Array<T> from_scalar(const T& value) {
+        return from_vector(&value, 1);
+    }
+
+    template<typename T, typename LayoutT>
+    T to_scalar(const NDArray<T, LayoutT>& input) {
+        KMM_ASSERT(input.layout().size() == 1);
+        size_t offset = checked_cast<size_t>(input.layout().base_offset());
+
+        T result;
+        input.buffer().copy_to(&result, sizeof(T), offset * sizeof(T), affinity_memory_id());
+        return result;
+    }
+
+    template<typename T, typename LayoutT>
+    NDArray<T, LayoutT> copy(const NDArray<T, LayoutT>& that) {
         auto result = empty_like(that);
         copy(result, that);
         return result;
     }
 
-    template<
-        typename T,
-        typename DstDomainT,
-        typename DstPolicyT,
-        typename SrcDomainT,
-        typename SrcPolicyT>
-    DeviceEvent copy(
-        DomainArray<T, DstDomainT, DstPolicyT>& dst,
-        const DomainArray<T, SrcDomainT, SrcPolicyT>& src
-    ) {
+    template<typename T, typename DstLayoutT, typename SrcLayoutT>
+    DeviceEvent copy(NDArray<T, DstLayoutT>& dst, const NDArray<T, SrcLayoutT>& src) {
         return copy(dst, src, affinity_memory_id());
     }
 
-    template<
-        typename T,
-        typename DstDomainT,
-        typename DstPolicyT,
-        typename SrcDomainT,
-        typename SrcPolicyT>
+    template<typename T, typename DstLayoutT, typename SrcLayoutT>
     DeviceEvent copy(
-        DomainArray<T, DstDomainT, DstPolicyT>& dst,
-        const DomainArray<T, SrcDomainT, SrcPolicyT>& src,
+        NDArray<T, DstLayoutT>& dst,
+        const NDArray<T, SrcLayoutT>& src,
         MemoryId dst_memory_id
     ) {
         return m_runtime.submit_copy(
@@ -106,29 +138,35 @@ class Context {
             src.buffer().id(),
             make_copy_description(dst.layout(), src.layout(), sizeof(T)),
             dst_memory_id,
+            std::nullopt,
             transaction()
         );
-    }
-
-    template<typename T>
-    Array<T> from_host(const T* data, size_t length) {
-        auto result = empty<T>(length);
-        result.buffer().copy_from(data, length * sizeof(T));
-        return result;
-    }
-
-    template<typename T>
-    Array<T> from_host(const std::vector<T>& data) {
-        return from_host(data.data(), data.size());
     }
 
     void prefetch(const Buffer& buffer, bool invalidate_others = false) {
         buffer.prefetch(affinity_memory_id(), invalidate_others);
     }
 
-    template<typename T, typename DomainT, typename PolicyT>
-    void prefetch(const DomainArray<T, DomainT, PolicyT>& src, bool invalidate_others = false) {
+    template<typename T, typename LayoutT>
+    void prefetch(const NDArray<T, LayoutT>& src, bool invalidate_others = false) {
         prefetch(src.buffer(), invalidate_others);
+    }
+
+    template<typename T, typename PolicyT = RowMajor, typename... ExtentT>
+    NDAccumulator<T, Layout<Shape<sizeof...(ExtentT)>, PolicyT>> accumulator(
+        ReductionOp op,
+        ExtentT... extents
+    ) {
+        return NDAccumulator<T, Layout<Shape<sizeof...(ExtentT)>, PolicyT>>(
+            empty<T, PolicyT>(extents...),
+            op
+        );
+    }
+
+    template<typename T, typename PolicyT = RowMajor, typename... ExtentT>
+    NDAccumulator<T, Layout<Shape<sizeof...(ExtentT)>, PolicyT>> sum_accumulator(ExtentT... extents
+    ) {
+        return accumulator<T, PolicyT>(ReductionOp::Sum, extents...);
     }
 
     const Runtime& runtime() const noexcept {
@@ -159,41 +197,33 @@ class Context {
         m_runtime.synchronize(events);
     }
 
-    DeviceContext gpu(DeviceId device_id = DeviceId(0));
+    /// Returns a `Host` context sharing this context's runtime and transaction.
+    Host host();
 
-    template<typename... Args>
-    Scope<Context, Args...> host_scope(Args&&... args) {
-        auto scope = std::make_unique<ScopeImpl<Args...>>(
-            m_runtime,
-            MemoryId::host(),
-            std::nullopt,
-            m_transaction,
-            std::forward<Args>(args)...
-        );
-        auto context = std::make_unique<Context>(m_runtime, scope->transaction());
-        return Scope<Context, Args...>(std::move(scope), std::move(context));
-    }
-
-    /// Shorthand for `host_scope(args...).apply(fun)`.
-    template<typename Launcher, typename... Args>
-    decltype(auto) host_launch(Launcher&& launcher, Args&&... args) {
-        return host_scope(std::forward<Args>(args)...).apply(std::forward<Launcher>(launcher));
-    }
+    /// Returns a `Device` context targeting `device_id`, sharing this context's runtime and
+    /// transaction.
+    Device gpu(DeviceId device_id = DeviceId(0));
 
     virtual MemoryId affinity_memory_id() const noexcept {
         return MemoryId::host();
     }
 
+    virtual std::optional<GPUStreamRef> affinity_stream() const noexcept {
+        return std::nullopt;
+    }
+
+  protected:
     Runtime m_runtime;
     MemoryTransaction m_transaction;
-};
 
-template<>
-struct scope_invoke<Context> {
-    template<typename ScopeT, typename F>
-    void operator()(Context& context, ScopeT& scope, DeviceEventSet& deps, F&& fun) const {
-        context.runtime().synchronize(scope.dependencies());
-        scope.apply(std::forward<F>(fun), context);
+  private:
+    template<size_t N>
+    static std::array<size_t, N> all_axes() {
+        std::array<size_t, N> result;
+        for (size_t i = 0; i < N; i++) {
+            result[i] = i;
+        }
+        return result;
     }
 };
 

@@ -13,7 +13,7 @@ namespace kmm {
 /// (`CopyDescription`, `FillDescription`, `ReductionDescription`). Kept small and fixed so these
 /// descriptors stay plain, fixed-size, trivially-copyable structs that can be passed by value to
 /// GPU kernels.
-inline constexpr size_t MEMOPS_MAX_DIMS = 3;
+inline constexpr size_t MEMOPS_MAX_DIMS = 4;
 
 /// The extent (number of elements) along a single axis of a `kmm/memops` descriptor.
 using memops_extent_type = signed long long int;

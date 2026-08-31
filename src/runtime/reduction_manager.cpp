@@ -5,9 +5,11 @@
 #include <optional>
 #include <utility>
 
+#include "fmt/format.h"
+
 #include "kmm/core/macros.hpp"
 #include "kmm/core/panic.hpp"
-#include "kmm/runtime/data_interface.hpp"
+#include "kmm/runtime/data_interfaces/flat.hpp"
 #include "kmm/runtime/memops/reduction.hpp"
 #include "kmm/runtime/memory_buffer.hpp"
 #include "kmm/runtime/memory_system.hpp"
@@ -49,9 +51,6 @@ class ReductionStateImpl: public reference_count<ReductionStateImpl> {
 
 KMM_REFCNT_TRAITS_IMPL(ReductionStateImpl)
 
-// Describes folding `count` elements into a destination: `accumulate` is `false` for the first
-// source folded into a given destination (overwrites whatever was there) and `true` for every
-// subsequent one (combined with what's already there).
 static ReductionDescription describe_reduction(
     ReductionOp op,
     DataType dtype,
@@ -59,16 +58,30 @@ static ReductionDescription describe_reduction(
     bool accumulate
 ) {
     auto elem_stride = static_cast<memops_stride_type>(data_type_size(dtype));
-    auto group_stride = elem_stride;
+    auto copy_stride = elem_stride * static_cast<memops_stride_type>(count);
 
-    ReductionDescription description;
-    description.dtype = dtype;
-    description.operation = op;
-    description.add_dimension(static_cast<memops_extent_type>(count), group_stride, elem_stride);
-    description.reduction_extent = 1;
-    description.reduction_stride = elem_stride;
+    ReductionDescription description(dtype, op);
+    description.add_dimension(static_cast<memops_extent_type>(count), elem_stride, elem_stride);
+    description.reduction_extent = static_cast<memops_extent_type>(1);
+    description.reduction_stride = copy_stride;
     description.accumulate = accumulate;
     return description;
+}
+
+// Allocates a fresh `count`-element buffer to accumulate a reduction into (used both by
+// `acquire_partial` and by `ReductionJob` when no already-acquired partial can be reused as-is
+// as the accumulation target for its group).
+static MemoryBuffer allocate_reduction_buffer(
+    MemoryManager& memory_manager,
+    refcnt_ptr<MemorySystem> memory_system,
+    DataType dtype,
+    size_t count,
+    const std::string& name
+) {
+    size_t elem_size = data_type_size(dtype);
+    auto layout = BufferLayout {elem_size * count, elem_size};
+    auto data = std::make_unique<FlatDataInterface>(layout, std::move(memory_system));
+    return memory_manager.create_buffer(std::move(data), name);
 }
 
 ReductionManager::ReductionManager(
@@ -96,7 +109,6 @@ MemoryBuffer ReductionManager::acquire_partial(
 ) {
     KMM_ASSERT(!is_submitted(reduction));
 
-    // if a stream hint is provided, try to find a existing partial on the same stream and mem.
     if (!stream_hint.is_null()) {
         for (const auto& partials : reduction->partials) {
             if (partials.memory_id == memory_id && partials.stream_hint == stream_hint) {
@@ -105,17 +117,35 @@ MemoryBuffer ReductionManager::acquire_partial(
         }
     }
 
-    size_t elem_size = data_type_size(reduction->dtype);
-    auto layout = BufferLayout {elem_size * reduction->count, elem_size};
-
-    auto data = std::make_unique<FlatDataInterface>(layout, std::move(m_memory_system));
-    auto buffer = m_memory_manager.create_buffer(
-        std::move(data),
+    auto buffer = allocate_reduction_buffer(
+        m_memory_manager,
+        m_memory_system,
+        reduction->dtype,
+        reduction->count,
         "reduction-partial:" + reduction->home_buffer->name
     );
 
     reduction->partials.push_back({buffer, memory_id, stream_hint});
     return buffer;
+}
+
+void ReductionManager::check_compatible(
+    const ReductionState& reduction,
+    ReductionOp op,
+    DataType dtype
+) const {
+    KMM_ASSERT(reduction);
+
+    if (reduction->op != op || reduction->dtype != dtype) {
+        throw std::runtime_error(fmt::format(
+            "reduction contribution does not match the reduction opened by `begin_reduction`: "
+            "expected op={}, dtype={}, but got op={}, dtype={}",
+            reduction_op_name(reduction->op),
+            data_type_name(reduction->dtype),
+            reduction_op_name(op),
+            data_type_name(dtype)
+        ));
+    }
 }
 
 struct PartialFold {
@@ -126,7 +156,7 @@ struct PartialFold {
     Poll poll_ready(MemoryManager& manager, const MemoryTransaction& parent) {
         if (!request) {
             auto transaction = manager.create_transaction(parent);
-            request = manager.create_request(buffer, memory_id, Access::ReadOnly, transaction);
+            request = manager.create_request(buffer, memory_id, AccessKind::ReadOnly, transaction);
         }
 
         return manager.poll_request(DeviceStreamId::null(), request);
@@ -204,7 +234,7 @@ struct ReductionMemoryJob {
         MemoryId memory_id,
         MemoryBuffer home_buffer,
         bool home_buffer_initialized,
-        std::vector<MemoryBuffer> buffers = {}
+        std::vector<AcquiredPartial> buffers = {}
     ) :
         reduction(reduction),
         memory_id(memory_id),
@@ -213,10 +243,12 @@ struct ReductionMemoryJob {
         partials.reserve(buffers.size());
 
         for (auto& buffer : buffers) {
-            partials.emplace_back(memory_id, std::move(buffer));
+            partials.emplace_back(memory_id, std::move(buffer.buffer));
         }
     }
 
+    // Partials added this way (e.g. the collapsed result of a per-memory group job) are already
+    // folded down to a single value per output element.
     void add_partial(MemoryBuffer buffer) {
         partials.emplace_back(memory_id, std::move(buffer));
     }
@@ -238,7 +270,7 @@ struct ReductionMemoryJob {
         if (!home_req) {
             transaction = manager.create_transaction();
             home_req =
-                manager.create_request(home_buffer, memory_id, Access::Exclusive, transaction);
+                manager.create_request(home_buffer, memory_id, AccessKind::Exclusive, transaction);
         }
 
         DeviceStream stream_hint = {};
@@ -353,7 +385,9 @@ struct ReductionJob {
         ReductionState reduction,
         MemoryId memory_id,
         MemoryBuffer home_buffer,
-        std::vector<AcquiredPartial> buffers
+        std::vector<AcquiredPartial> buffers,
+        MemoryManager& memory_manager,
+        refcnt_ptr<MemorySystem> memory_system
     ) {
         std::stable_sort(buffers.begin(), buffers.end(), [](const auto& a, const auto& b) {
             return a.memory_id < b.memory_id;
@@ -362,13 +396,14 @@ struct ReductionJob {
         size_t index = 0;
         while (index < buffers.size()) {
             auto group_memory_id = buffers[index].memory_id;
-            auto group_home_buffer = buffers[index].buffer;
+
+            std::vector<AcquiredPartial> partials;
+            MemoryBuffer group_home_buffer = buffers[index].buffer;
+            bool group_home_initialized = true;
             index++;
 
-            std::vector<MemoryBuffer> partials;
-
             while (index < buffers.size() && buffers[index].memory_id == group_memory_id) {
-                partials.push_back(buffers[index].buffer);
+                partials.push_back(buffers[index]);
                 index++;
             }
 
@@ -376,7 +411,7 @@ struct ReductionJob {
                 reduction,
                 group_memory_id,
                 std::move(group_home_buffer),
-                /* home_buffer_initialized = */ true,
+                group_home_initialized,
                 std::move(partials)
             ));
         }
@@ -424,11 +459,18 @@ struct ReductionJob {
 
         final_reduction->release(manager);
         final_reduction = nullptr;
+
+        for (auto& buffer : owned_buffers) {
+            manager.release_buffer(buffer);
+        }
+
+        owned_buffers.clear();
     }
 
   private:
     std::vector<std::unique_ptr<ReductionMemoryJob>> group_jobs;
     std::unique_ptr<ReductionMemoryJob> final_reduction;
+    std::vector<MemoryBuffer> owned_buffers;
 };
 
 void ReductionManager::submit_reduction(ReductionState& reduction, MemoryId memory_id) {
@@ -437,7 +479,9 @@ void ReductionManager::submit_reduction(ReductionState& reduction, MemoryId memo
         reduction,
         memory_id,
         reduction->home_buffer,
-        reduction->partials
+        reduction->partials,
+        m_memory_manager,
+        m_memory_system
     );
 }
 

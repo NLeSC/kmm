@@ -4,14 +4,14 @@
 
 using namespace kmm;
 
-TEST_CASE("DomainView default construction") {
+TEST_CASE("NDView default construction") {
     ViewMut<int, 2> view;
 
     CHECK(view.data() == nullptr);
     CHECK(view.is_empty());
 }
 
-TEST_CASE("make_view/DomainView basics") {
+TEST_CASE("make_view/NDView basics") {
     int data[20];
     for (int i = 0; i < 20; i++) {
         data[i] = i;
@@ -49,7 +49,7 @@ TEST_CASE("make_view with an explicit stride policy") {
     CHECK_FALSE(view.is_contiguous(MemoryOrder::RowMajor));
 }
 
-TEST_CASE("DomainView::access") {
+TEST_CASE("NDView::access") {
     int data[20];
     for (int i = 0; i < 20; i++) {
         data[i] = i;
@@ -75,7 +75,7 @@ TEST_CASE("DomainView::access") {
     }
 }
 
-TEST_CASE("DomainView::move_origin") {
+TEST_CASE("NDView::move_origin") {
     int data[20];
     for (int i = 0; i < 20; i++) {
         data[i] = i;
@@ -105,7 +105,7 @@ TEST_CASE("DomainView::move_origin") {
     }
 }
 
-TEST_CASE("DomainView::restrict_bounds/restrict_axis") {
+TEST_CASE("NDView::restrict_bounds/restrict_axis") {
     int data[20];
     for (int i = 0; i < 20; i++) {
         data[i] = i;
@@ -132,7 +132,7 @@ TEST_CASE("DomainView::restrict_bounds/restrict_axis") {
     }
 }
 
-TEST_CASE("DomainView::zero_origin") {
+TEST_CASE("NDView::zero_origin") {
     int data[20];
     for (int i = 0; i < 20; i++) {
         data[i] = i;
@@ -147,7 +147,7 @@ TEST_CASE("DomainView::zero_origin") {
     CHECK(zo(1, 4) == view(2, 4));
 }
 
-TEST_CASE("DomainView::drop_axis") {
+TEST_CASE("NDView::drop_axis") {
     int data[20];
     for (int i = 0; i < 20; i++) {
         data[i] = i;
@@ -163,7 +163,7 @@ TEST_CASE("DomainView::drop_axis") {
     }
 }
 
-TEST_CASE("DomainView::insert_axis") {
+TEST_CASE("NDView::insert_axis") {
     int data[4] = {10, 20, 30, 40};
     auto view = make_view(data, Shape<1, int>(4));
 
@@ -177,7 +177,7 @@ TEST_CASE("DomainView::insert_axis") {
     }
 }
 
-TEST_CASE("DomainView::reverse_axes") {
+TEST_CASE("NDView::reverse_axes") {
     int data[20];
     for (int i = 0; i < 20; i++) {
         data[i] = i;
@@ -195,7 +195,7 @@ TEST_CASE("DomainView::reverse_axes") {
     }
 }
 
-TEST_CASE("DomainView::slice_axis") {
+TEST_CASE("NDView::slice_axis") {
     int data[20];
     for (int i = 0; i < 20; i++) {
         data[i] = i;
@@ -231,7 +231,7 @@ TEST_CASE("DomainView::slice_axis") {
     }
 }
 
-TEST_CASE("DomainView::slice") {
+TEST_CASE("NDView::slice") {
     int data[24];
     for (int i = 0; i < 24; i++) {
         data[i] = i;
@@ -261,11 +261,11 @@ TEST_CASE("DomainView::slice") {
     }
 }
 
-TEST_CASE("DomainView converting constructor") {
+TEST_CASE("NDView converting constructor") {
     int data[6] = {0, 1, 2, 3, 4, 5};
     auto view = make_view(data, Shape<2, int>(2, 3));
 
-    DomainView<const int, decltype(view)::layout_type> const_view = view;
+    NDView<const int, decltype(view)::layout_type> const_view = view;
 
     CHECK(const_view.data() == data);
     CHECK(const_view(1, 2) == 5);

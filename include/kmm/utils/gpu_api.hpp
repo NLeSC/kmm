@@ -207,10 +207,12 @@ inline kmm::GPUResult gpuEventCreate(kmm::GPUEvent* event) {
     #define gpuMemFree(ptr)        cuMemFree(ptr)
     #define gpuMemFreeHost(ptr)    cuMemFreeHost(ptr)
 
-    #define gpuMemcpyAsync(dst, src, size, stream)     cuMemcpyAsync(dst, src, size, stream)
+    #define gpuMemcpyHtoD(dst, src, size)              cuMemcpyHtoD(dst, src, size)
+    #define gpuMemcpyDtoH(dst, src, size)              cuMemcpyDtoH(dst, src, size)
     #define gpuMemcpy2DAsync(params, stream)           cuMemcpy2DAsync(params, stream)
     #define gpuMemcpyHtoDAsync(dst, src, size, stream) cuMemcpyHtoDAsync(dst, src, size, stream)
     #define gpuMemcpyDtoHAsync(dst, src, size, stream) cuMemcpyDtoHAsync(dst, src, size, stream)
+    #define gpuMemcpyDtoDAsync(dst, src, size, stream) cuMemcpyDtoDAsync(dst, src, size, stream)
     #define gpuMemcpyPeerAsync(dst, dstCtx, src, srcCtx, size, stream) \
         cuMemcpyPeerAsync(dst, dstCtx, src, srcCtx, size, stream)
 
@@ -237,10 +239,12 @@ inline kmm::GPUResult gpuEventCreate(kmm::GPUEvent* event) {
     #define gpuMemFree(ptr)        hipMemFree(ptr)
     #define gpuMemFreeHost(ptr)    hipMemFreeHost(ptr)
 
-    #define gpuMemcpyAsync(dst, src, size, stream)     hipMemcpyAsync(dst, src, size, stream)
+    #define gpuMemcpyHtoD(dst, src, size)              hipMemcpyHtoD(dst, src, size)
+    #define gpuMemcpyDtoH(dst, src, size)              hipMemcpyDtoH(dst, src, size)
     #define gpuMemcpy2DAsync(params, stream)           hipMemcpyParam2DAsync(params, stream)
     #define gpuMemcpyHtoDAsync(dst, src, size, stream) hipMemcpyHtoDAsync(dst, src, size, stream)
     #define gpuMemcpyDtoHAsync(dst, src, size, stream) hipMemcpyDtoHAsync(dst, src, size, stream)
+    #define gpuMemcpyDtoDAsync(dst, src, size, stream) hipMemcpyDtoDAsync(dst, src, size, stream)
     #define gpuMemcpyPeerAsync(dst, dstCtx, src, srcCtx, size, stream) \
         hipMemcpyPeerAsync(dst, dstCtx, src, srcCtx, size, stream)
 
@@ -284,5 +288,39 @@ inline kmm::GPUResult gpuMemHostAlloc(void** ptr, size_t size) {
     return cuMemHostAlloc(ptr, size, CU_MEMHOSTALLOC_PORTABLE | CU_MEMHOSTALLOC_DEVICEMAP);
 #elif defined(KMM_USE_HIP)
     return hipHostMalloc(ptr, size, hipHostMallocPortable | hipHostMallocMapped);
+#endif
+}
+
+// Translates a pointer returned by `gpuMemHostAlloc` into the pointer a device should use to
+// access the same memory. Under UVA (the default on every supported CUDA/HIP device) this is
+// numerically identical to `host_ptr`, but the driver call is the only portable way to obtain it.
+inline kmm::GPUResult gpuMemHostGetDevicePointer(kmm::GPUDeviceptr* dptr, void* host_ptr) {
+#if defined(KMM_USE_CUDA)
+    return cuMemHostGetDevicePointer(dptr, host_ptr, 0);
+#elif defined(KMM_USE_HIP)
+    return hipHostGetDevicePointer(reinterpret_cast<void**>(dptr), host_ptr, 0);
+#endif
+}
+
+// Sentinel `GPUDevice` value that requests prefetching to host memory rather than a device, for
+// use as `dst_device` in `gpuMemPrefetchAsync`.
+inline kmm::GPUDevice gpuCpuDeviceId() {
+#if defined(KMM_USE_CUDA)
+    return CU_DEVICE_CPU;
+#elif defined(KMM_USE_HIP)
+    return hipCpuDeviceId;
+#endif
+}
+
+inline kmm::GPUResult gpuMemPrefetchAsync(
+    kmm::GPUDeviceptr ptr,
+    size_t nbytes,
+    kmm::GPUDevice dst_device,
+    kmm::GPUStream stream
+) {
+#if defined(KMM_USE_CUDA)
+    return cuMemPrefetchAsync(ptr, nbytes, dst_device, stream);
+#elif defined(KMM_USE_HIP)
+    return hipMemPrefetchAsync(reinterpret_cast<const void*>(ptr), nbytes, dst_device, stream);
 #endif
 }

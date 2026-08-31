@@ -3,7 +3,7 @@
 #include <type_traits>
 #include <utility>
 
-#include "kmm/api/device_context.hpp"
+#include "kmm/api/device.hpp"
 #include "kmm/api/kernel.hpp"
 #include "kmm/core/macros.hpp"
 #include "kmm/core/point.hpp"
@@ -33,7 +33,7 @@ __global__ void parallel_for_kernel(Shape<N, IndexT> shape, F fun, Args... args)
 }
 }  // namespace detail
 
-/// Launcher (for use with `DeviceContext::scope`/`DeviceContext::launch`) that applies `fun` to
+/// Launcher (for use with `Device::access`/`DeviceGuard::parallel_for`) that applies `fun` to
 /// every point of the N-dimensional index space `shape`, one GPU thread per point. `fun` is
 /// called as `fun(point, args...)`, where `point` is the thread's `Point<N>` coordinate and
 /// `args...` are the views resolved by `scope`.

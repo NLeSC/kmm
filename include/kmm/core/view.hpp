@@ -31,11 +31,11 @@ struct DeviceAccessor {
 
 namespace detail {
 
-// Tag for DomainView's raw (pointer, layout) constructor: pointer is already offset-adjusted, so
-// it must NOT be shifted again by layout.base_offset(). A free type (not a per-DomainView
-// nested type) so it's the same type across every DomainView<T, LayoutT> instantiation --
-// with_layout() below constructs a DomainView<T, NewLayoutT> that differs from the enclosing
-// DomainView<T, LayoutT>.
+// Tag for NDView's raw (pointer, layout) constructor: pointer is already offset-adjusted, so
+// it must NOT be shifted again by layout.base_offset(). A free type (not a per-NDView
+// nested type) so it's the same type across every NDView<T, LayoutT> instantiation --
+// with_layout() below constructs a NDView<T, NewLayoutT> that differs from the enclosing
+// NDView<T, LayoutT>.
 struct view_raw_ctor_tag {};
 
 template<typename ViewT, size_t... Is>
@@ -71,15 +71,15 @@ class ViewAccessor {
 };
 
 template<typename DerivedT, size_t N>
-class DomainViewBase {
+class NDViewBase {
   public:
     // The `typename = ...` constrains this to index types that convert directly to a scalar
-    // `index_type` (e.g. `int`), so it does not compete with `DomainView`'s non-template
+    // `index_type` (e.g. `int`), so it does not compete with `NDView`'s non-template
     // `operator[](const ndindex_type&)` overload for `Vec`/`Point` indices (which do not convert
     // to a scalar `index_type`). `Self` (defaulted to `DerivedT`) makes the default argument
     // depend on this function template's own parameters rather than solely on the enclosing
     // class template's `DerivedT`, deferring its instantiation to call time -- `DerivedT` is
-    // still incomplete while `DomainViewBase` is being instantiated as its base class.
+    // still incomplete while `NDViewBase` is being instantiated as its base class.
     template<
         typename IndexT,
         typename Self = DerivedT,
@@ -92,10 +92,10 @@ class DomainViewBase {
 };
 
 // Rank 0 has no axis to chain-index into. Deleted (rather than simply absent) so that
-// DomainView<T, LayoutT>'s `using base_type::operator[];` always has a member to name, regardless
+// NDView<T, LayoutT>'s `using base_type::operator[];` always has a member to name, regardless
 // of rank; actually calling this is a compile error with a clear cause.
 template<typename DerivedT>
-class DomainViewBase<DerivedT, 0> {
+class NDViewBase<DerivedT, 0> {
   public:
     template<typename IndexT>
     void operator[](IndexT) const = delete;
@@ -108,13 +108,13 @@ class DomainViewBase<DerivedT, 0> {
 
 /// A dense or strided view over a multi-dimensional array.
 template<typename T, typename LayoutT, typename AccessorT = AnyAccessor>
-class DomainView: public detail::DomainViewBase<DomainView<T, LayoutT, AccessorT>, LayoutT::rank> {
-    using base_type = detail::DomainViewBase<DomainView<T, LayoutT, AccessorT>, LayoutT::rank>;
+class NDView: public detail::NDViewBase<NDView<T, LayoutT, AccessorT>, LayoutT::rank> {
+    using base_type = detail::NDViewBase<NDView<T, LayoutT, AccessorT>, LayoutT::rank>;
 
   public:
     using base_type::operator[];
 
-    using self_type = DomainView<T, LayoutT, AccessorT>;
+    using self_type = NDView<T, LayoutT, AccessorT>;
     using layout_type = LayoutT;
     using element_type = T;
     using pointer = T*;
@@ -130,7 +130,7 @@ class DomainView: public detail::DomainViewBase<DomainView<T, LayoutT, AccessorT
     using ndstrides_type = typename layout_type::ndstrides_type;
 
     template<typename NewLayoutT>
-    using rebind_layout = DomainView<T, NewLayoutT, AccessorT>;
+    using rebind_layout = NDView<T, NewLayoutT, AccessorT>;
 
     template<size_t Axis>
     using drop_axis_type = rebind_layout<typename layout_type::template drop_axis_type<Axis>>;
@@ -173,11 +173,11 @@ class DomainView: public detail::DomainViewBase<DomainView<T, LayoutT, AccessorT
 
     /// Constructs an empty (null) view.
     KMM_HOST_DEVICE
-    constexpr DomainView() = default;
+    constexpr NDView() = default;
 
     /// Constructs a view from a pointer already adjusted for the layout's base offset.
     KMM_HOST_DEVICE
-    constexpr DomainView(
+    constexpr NDView(
         detail::view_raw_ctor_tag,
         pointer data,
         layout_type layout,
@@ -189,16 +189,16 @@ class DomainView: public detail::DomainViewBase<DomainView<T, LayoutT, AccessorT
 
     /// Constructs a view over the given data pointer and layout.
     KMM_HOST_DEVICE
-    constexpr DomainView(pointer data, layout_type layout, AccessorT accessor = {}) :
-        DomainView(detail::view_raw_ctor_tag {}, data + layout.base_offset(), layout, accessor) {}
+    constexpr NDView(pointer data, layout_type layout, AccessorT accessor = {}) :
+        NDView(detail::view_raw_ctor_tag {}, data + layout.base_offset(), layout, accessor) {}
 
     /// Converting constructor from a view over a compatible element/layout type with the same
     /// accessor tag (converting between AnyAccessor and DeviceAccessor is not allowed). Carries
     /// over the source view's accessor value rather than default-constructing a new one, so any
     /// accessor state survives the conversion.
     template<typename U, typename OtherLayoutT>
-    KMM_HOST_DEVICE constexpr DomainView(const DomainView<U, OtherLayoutT, AccessorT>& that) :
-        DomainView(that.data(), that.layout(), that.accessor()) {}
+    KMM_HOST_DEVICE constexpr NDView(const NDView<U, OtherLayoutT, AccessorT>& that) :
+        NDView(that.data(), that.layout(), that.accessor()) {}
 
     /// Returns the underlying data pointer.
     KMM_HOST_DEVICE
@@ -420,7 +420,7 @@ template<
     typename PolicyT = RowMajor,
     typename IndexT = default_index_type,
     typename AccessorT = AnyAccessor>
-using View = DomainView<const T, Layout<Shape<N, IndexT>, PolicyT>, AccessorT>;
+using View = NDView<const T, Layout<Shape<N, IndexT>, PolicyT>, AccessorT>;
 
 /// A mutable view over a Shape<N, IndexT> domain with the given policy. See `View` for the
 /// read-only counterpart.
@@ -430,7 +430,7 @@ template<
     typename PolicyT = RowMajor,
     typename IndexT = default_index_type,
     typename AccessorT = AnyAccessor>
-using ViewMut = DomainView<T, Layout<Shape<N, IndexT>, PolicyT>, AccessorT>;
+using ViewMut = NDView<T, Layout<Shape<N, IndexT>, PolicyT>, AccessorT>;
 
 /// A read-only view over a Bounds<N, IndexT> domain with the given policy -- a view over a
 /// sub-region/window of a larger domain, whose origin need not start at index 0 (unlike `View`,
@@ -441,7 +441,7 @@ template<
     typename PolicyT = RowMajor,
     typename IndexT = default_index_type,
     typename AccessorT = AnyAccessor>
-using SubView = DomainView<const T, Layout<Bounds<N, IndexT>, PolicyT>, AccessorT>;
+using SubView = NDView<const T, Layout<Bounds<N, IndexT>, PolicyT>, AccessorT>;
 
 /// A mutable view over a Bounds<N, IndexT> domain with the given policy. See `SubView` for the
 /// read-only counterpart.
@@ -451,7 +451,7 @@ template<
     typename PolicyT = RowMajor,
     typename IndexT = default_index_type,
     typename AccessorT = AnyAccessor>
-using SubViewMut = DomainView<T, Layout<Bounds<N, IndexT>, PolicyT>, AccessorT>;
+using SubViewMut = NDView<T, Layout<Bounds<N, IndexT>, PolicyT>, AccessorT>;
 
 /// A read-only view over a Shape<N, IndexT> domain whose data may only be dereferenced from
 /// device (GPU) code. Use `DeviceViewMut` for a mutable view, or `DeviceSubView` for the
@@ -511,7 +511,7 @@ KMM_HOST_DEVICE ViewMut<T, N, PolicyT, IndexT, AccessorT> make_view(
 
 }  // namespace kmm
 
-// DomainView has no base class to delegate to (other than the internal ViewAccessor/DomainViewBase
+// NDView has no base class to delegate to (other than the internal ViewAccessor/NDViewBase
 // storage helpers), so this prints/hashes it as the tuple of its two constituent parts (the raw
 // pointer and the layout), matching how Layout itself is printed.
 #if !KMM_IS_RTC
@@ -521,12 +521,12 @@ KMM_HOST_DEVICE ViewMut<T, N, PolicyT, IndexT, AccessorT> make_view(
 
 namespace kmm {
 template<typename T, typename LayoutT, typename AccessorT>
-std::ostream& operator<<(std::ostream& stream, const DomainView<T, LayoutT, AccessorT>& view) {
-    return stream << "DomainView(data=" << static_cast<const void*>(view.data())
+std::ostream& operator<<(std::ostream& stream, const NDView<T, LayoutT, AccessorT>& view) {
+    return stream << "NDView(data=" << static_cast<const void*>(view.data())
                   << ", layout=" << view.layout() << ")";
 }
 }  // namespace kmm
 
 template<typename T, typename LayoutT, typename AccessorT>
-struct fmt::formatter<kmm::DomainView<T, LayoutT, AccessorT>>: fmt::ostream_formatter {};
+struct fmt::formatter<kmm::NDView<T, LayoutT, AccessorT>>: fmt::ostream_formatter {};
 #endif

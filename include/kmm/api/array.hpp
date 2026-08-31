@@ -16,21 +16,18 @@
 #include "kmm/runtime/identifiers.hpp"
 #include "kmm/runtime/memops/copy.hpp"
 #include "kmm/runtime/memops/fill.hpp"
-#include "kmm/runtime/requisition.hpp"
+#include "kmm/runtime/resource.hpp"
 
 namespace kmm {
 
-template<typename T, typename DomainT, typename PolicyT = RowMajor>
-class DomainArray: public ArrayBase {
-    template<typename, typename, typename>
-    friend class DomainArray;
-
+template<typename T, typename LayoutT>
+class NDArray: public ArrayBase {
   public:
-    using self_type = DomainArray<T, DomainT, PolicyT>;
+    using self_type = NDArray<T, LayoutT>;
     using element_type = T;
-    using domain_type = DomainT;
-    using policy_type = PolicyT;
-    using layout_type = Layout<DomainT, PolicyT>;
+    using layout_type = LayoutT;
+    using domain_type = typename layout_type::domain_type;
+    using policy_type = typename layout_type::policy_type;
     static constexpr size_t rank = layout_type::rank;
     using mapping_type = typename layout_type::mapping_type;
     using index_type = typename layout_type::index_type;
@@ -41,12 +38,9 @@ class DomainArray: public ArrayBase {
     using stride_type = typename layout_type::stride_type;
     using ndstrides_type = typename layout_type::ndstrides_type;
 
-    /// The `DomainArray` sharing this array's element type but over a different `Layout`,
+    /// The `NDArray` sharing this array's element type but over a different `Layout`,
     template<typename NewLayoutT>
-    using rebind_layout = DomainArray<  //
-        T,
-        typename NewLayoutT::domain_type,
-        typename NewLayoutT::policy_type>;
+    using rebind_layout = NDArray<T, NewLayoutT>;
 
     using zero_origin_type = rebind_layout<typename layout_type::zero_origin_type>;
     using move_origin_type = rebind_layout<typename layout_type::move_origin_type>;
@@ -86,14 +80,14 @@ class DomainArray: public ArrayBase {
     template<typename... Slices>
     using slice_type = rebind_layout<typename layout_type::template slice_type<Slices...>>;
 
-    DomainArray() = default;
+    NDArray() = default;
 
-    DomainArray(layout_type layout) : m_layout(layout) {}
+    NDArray(layout_type layout) : m_layout(layout) {}
 
-    DomainArray(domain_type domain, policy_type policy = {}) :
-        DomainArray(make_layout(domain, policy).normalize_offset()) {}
+    NDArray(domain_type domain, policy_type policy = {}) :
+        NDArray(make_layout(domain, policy).normalize_offset()) {}
 
-    DomainArray(
+    NDArray(
         Runtime runtime,
         layout_type layout,
         std::optional<T> fill_value = std::nullopt,
@@ -108,23 +102,21 @@ class DomainArray: public ArrayBase {
         )),
         m_layout(layout.normalize_offset()) {}
 
-    DomainArray(
+    NDArray(
         Runtime runtime,
         domain_type domain,
         policy_type policy = {},
         std::optional<T> fill_value = std::nullopt,
         std::optional<MemoryId> home = std::nullopt
     ) :
-        DomainArray(runtime, make_layout(domain, policy), fill_value, home) {
+        NDArray(runtime, make_layout(domain, policy), fill_value, home) {
         KMM_ASSERT(!domain.is_empty());
         KMM_ASSERT(!make_layout(domain, policy).is_empty());
         KMM_ASSERT(!make_layout(domain, policy).offset_span().is_empty());
     }
 
-    template<typename OtherDomainT, typename OtherPolicyT>
-    DomainArray(const DomainArray<T, OtherDomainT, OtherPolicyT>& that) :
-        ArrayBase(that),
-        m_layout(that.layout()) {}
+    template<typename OtherLayoutT>
+    NDArray(const NDArray<T, OtherLayoutT>& that) : ArrayBase(that), m_layout(that.layout()) {}
 
     const layout_type& layout() const noexcept {
         return m_layout;
@@ -203,6 +195,39 @@ class DomainArray: public ArrayBase {
     /// Whether this array covers zero elements.
     bool is_empty() const noexcept {
         return m_layout.is_empty();
+    }
+
+    template<typename DstLayoutT>
+    DeviceEvent copy_to(NDArray<T, DstLayoutT>& dst, MemoryId memory_id) const {
+        return runtime().submit_copy(
+            dst.buffer().id(),
+            buffer().id(),
+            make_copy_description(dst.layout(), m_layout, sizeof(T)),
+            memory_id
+        );
+    }
+
+    template<typename DstLayoutT>
+    DeviceEvent copy_to(NDArray<T, DstLayoutT>& dst) const {
+        return copy_to(dst, dst.buffer().home().value_or(MemoryId::host()));
+    }
+
+    template<typename DstPolicyT = policy_type>
+    rebind_layout<Layout<domain_type, DstPolicyT>> copy(MemoryId home, DstPolicyT dst_policy)
+        const {
+        rebind_layout<Layout<domain_type, DstPolicyT>>
+            result(runtime(), domain(), dst_policy, std::nullopt, home);
+
+        copy_to(result, home);
+        return result;
+    }
+
+    self_type copy(MemoryId home) const {
+        return copy(home, policy_type {});
+    }
+
+    self_type copy() const {
+        return copy(buffer().home().value_or(MemoryId::host()));
     }
 
     /// Returns this array rebased so its domain starts at the zero index.
@@ -311,7 +336,10 @@ class DomainArray: public ArrayBase {
     }
 
   private:
-    DomainArray(Buffer buffer, layout_type layout) noexcept :
+    template<typename, typename>
+    friend class NDArray;
+
+    NDArray(Buffer buffer, layout_type layout) noexcept :
         ArrayBase(std::move(buffer)),
         m_layout(layout) {}
 
@@ -319,86 +347,94 @@ class DomainArray: public ArrayBase {
 };
 
 template<typename T, size_t N = 1, typename PolicyT = RowMajor>
-using Array = DomainArray<T, Shape<N>, PolicyT>;
+using Array = NDArray<T, Layout<Shape<N>, PolicyT>>;
 
 template<typename T, size_t N = 1, typename PolicyT = RowMajor>
-using SubArray = DomainArray<T, Bounds<N>, PolicyT>;
+using SubArray = NDArray<T, Layout<Bounds<N>, PolicyT>>;
+
+template<typename T, size_t N = 1>
+using StridedArray = Array<T, N, Strided>;
+
+template<typename T, size_t N = 1>
+using StridedSubArray = SubArray<T, N, Strided>;
+
+template<typename T>
+using Scalar = NDArray<T, Layout<Shape<0>, RowMajor>>;
 
 namespace detail {
 
-/// Shared implementation of `LaunchArg` for `DomainArray<T, DomainT, PolicyT>`, parameterized on the access
-/// mode granted to the resolved view: `AccessMode::Read` yields a `DomainView<const T, LayoutT>`,
-/// `AccessMode::ReadWrite` a `DomainView<T, LayoutT>`.
-template<typename T, typename DomainT, typename PolicyT, AccessMode Mode>
+/// Shared implementation of `LaunchArg` for `NDArray<T, LayoutT>`, parameterized on the access
+/// mode granted to the resolved view: `AccessMode::Read` yields a `NDView<const T, LayoutT>`,
+/// `AccessMode::ReadWrite` a `NDView<T, LayoutT>`.
+template<typename T, typename LayoutT, AccessMode Mode>
 class LaunchArgArray {
   public:
     using view_element_type = std::conditional_t<Mode == AccessMode::Read, const T, T>;
-    using resolve_type = DomainView<view_element_type, Layout<DomainT, PolicyT>>;
+    using resolve_type = NDView<view_element_type, LayoutT>;
 
-    explicit LaunchArgArray(const DomainArray<T, DomainT, PolicyT>& array) : m_array(array) {}
+    explicit LaunchArgArray(const NDArray<T, LayoutT>& array) : m_array(array) {}
 
-    void acquire(Runtime& runtime, Requisition& req, MemoryId memory_id) {
-        m_index = req.add(memory_id, m_array.buffer().id(), Mode);
+    void acquire(Runtime& runtime, ResourceRequest& requests, MemoryId memory_id) {
+        m_index = requests.add(memory_id, m_array.buffer().id(), Mode);
     }
 
-    resolve_type resolve(Runtime& runtime, Requisition& req) {
-        auto accessor = req.accessor(m_index);
+    resolve_type resolve(Runtime& runtime, const ResourceGrant& grant) {
+        auto accessor = grant.accessor(m_index);
         auto* data = static_cast<typename resolve_type::pointer>(accessor.address);
         return resolve_type(data, m_array.layout());
     }
 
-    void release(Runtime& runtime, Requisition& req) {}
+    void release(Runtime& runtime) {}
 
   private:
-    DomainArray<T, DomainT, PolicyT> m_array;
+    NDArray<T, LayoutT> m_array;
     size_t m_index = 0;
 };
 
 }  // namespace detail
 
-/// Read-only access to a `DomainArray` (the default when passed to `Context::scope` unwrapped).
-template<typename T, typename DomainT, typename PolicyT>
-class LaunchArg<DomainArray<T, DomainT, PolicyT>>:
-    public detail::LaunchArgArray<T, DomainT, PolicyT, AccessMode::Read> {
+/// Read-only access to a `NDArray` (the default when passed to `Device::scope`/`Host::scope` unwrapped).
+template<typename T, typename LayoutT>
+class LaunchArg<NDArray<T, LayoutT>>: public detail::LaunchArgArray<T, LayoutT, AccessMode::Read> {
   public:
-    using detail::LaunchArgArray<T, DomainT, PolicyT, AccessMode::Read>::LaunchArgArray;
+    using detail::LaunchArgArray<T, LayoutT, AccessMode::Read>::LaunchArgArray;
 };
 
-/// Read-only access to a `DomainArray` explicitly wrapped in `read(...)`.
-template<typename T, typename DomainT, typename PolicyT>
-class LaunchArg<Read<DomainArray<T, DomainT, PolicyT>>>:
-    public detail::LaunchArgArray<T, DomainT, PolicyT, AccessMode::Read> {
+/// Read-only access to a `NDArray` explicitly wrapped in `read(...)`.
+template<typename T, typename LayoutT>
+class LaunchArg<Read<NDArray<T, LayoutT>>>:
+    public detail::LaunchArgArray<T, LayoutT, AccessMode::Read> {
   public:
-    explicit LaunchArg(Read<DomainArray<T, DomainT, PolicyT>> arg) :
-        detail::LaunchArgArray<T, DomainT, PolicyT, AccessMode::Read>(arg.value) {}
+    explicit LaunchArg(Read<NDArray<T, LayoutT>> arg) :
+        detail::LaunchArgArray<T, LayoutT, AccessMode::Read>(arg.value) {}
 };
 
-/// Read-write access to a `DomainArray` wrapped in `write(...)`. If `arg.value` is not yet
+/// Read-write access to a `NDArray` wrapped in `write(...)`. If `arg.value` is not yet
 /// allocated (i.e. it has no backing buffer, only a layout), a new array is allocated on `runtime`
 /// during `acquire()` and assigned back to `arg.value`, so the caller observes the allocation too.
-template<typename T, typename DomainT, typename PolicyT>
-class LaunchArg<Write<DomainArray<T, DomainT, PolicyT>>>:
-    public detail::LaunchArgArray<T, DomainT, PolicyT, AccessMode::ReadWrite> {
+template<typename T, typename LayoutT>
+class LaunchArg<Write<NDArray<T, LayoutT>>>:
+    public detail::LaunchArgArray<T, LayoutT, AccessMode::ReadWrite> {
   public:
-    explicit LaunchArg(Write<DomainArray<T, DomainT, PolicyT>> arg) :
-        detail::LaunchArgArray<T, DomainT, PolicyT, AccessMode::ReadWrite>(arg.value),
+    explicit LaunchArg(Write<NDArray<T, LayoutT>> arg) :
+        detail::LaunchArgArray<T, LayoutT, AccessMode::ReadWrite>(arg.value),
         m_target(&arg.value) {}
 
-    void acquire(Runtime& runtime, Requisition& req, MemoryId memory_id) {
+    void acquire(Runtime& runtime, ResourceRequest& requests, MemoryId memory_id) {
         if (!*m_target) {
-            *m_target = DomainArray<T, DomainT, PolicyT>(runtime, m_target->layout());
+            *m_target = NDArray<T, LayoutT>(runtime, m_target->layout());
             *this = LaunchArg(write(*m_target));
         }
 
-        detail::LaunchArgArray<T, DomainT, PolicyT, AccessMode::ReadWrite>::acquire(
+        detail::LaunchArgArray<T, LayoutT, AccessMode::ReadWrite>::acquire(
             runtime,
-            req,
+            requests,
             memory_id
         );
     }
 
   private:
-    DomainArray<T, DomainT, PolicyT>* m_target;
+    NDArray<T, LayoutT>* m_target;
 };
 
 }  // namespace kmm

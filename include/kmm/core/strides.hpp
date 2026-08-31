@@ -142,7 +142,7 @@ class Strides:
     constexpr Strides(StridesT... strides) : base_type(strides...) {}
 
     /// Construct from another strides object. Throws exception on mismatched types.
-    template<typename... OtherStridesT>
+    template<typename... OtherStridesT, typename = enable_if_t<sizeof...(OtherStridesT) == rank>>
     KMM_HOST_DEVICE constexpr Strides(const Strides<OtherStridesT...>& that) :
         Strides(that, make_index_sequence<rank>()) {}
 
@@ -183,7 +183,8 @@ class Strides:
     template<typename... OtherStridesT, size_t... Is>
     KMM_HOST_DEVICE constexpr Strides(const Strides<OtherStridesT...>& that, IndexSequence<Is...>) :
         base_type(checked_cast<StridesT>(that.get(ConstIndex<Is> {}))...) {
-        // TODO what if sizeof..(OtherStridesT) > sizeof...(StridesT)?
+        // Only reached via the public converting constructor, which is constrained to
+        // sizeof...(OtherStridesT) == rank, so `that` always has exactly `rank` axes here.
     }
 
     template<typename IndexT, size_t... Is>

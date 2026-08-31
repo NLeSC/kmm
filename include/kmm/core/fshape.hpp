@@ -244,6 +244,24 @@ struct domain_traits<FShape<N, IndexT>> {
         return permute_axes(domain, drop_index_sequence<rank, Axis>());
     }
 
+    /// Runtime-axis counterpart of `drop_axis<Axis>`. The result type only depends on `N` (not on
+    /// which axis is dropped), so `axis` does not need to be known at compile time here.
+    KMM_HOST_DEVICE
+    static constexpr drop_axis_type<0> drop_axis(const domain_type& domain, size_t axis) {
+        KMM_ASSERT(axis < N);
+        drop_axis_type<0> result;
+        size_t j = 0;
+
+        for (size_t i = 0; is_less(i, N); i++) {
+            if (i != axis) {
+                result[j] = domain[i];
+                j++;
+            }
+        }
+
+        return result;
+    }
+
     template<size_t... Is>
     using permute_axes_type = FShape<sizeof...(Is), index_type>;
 

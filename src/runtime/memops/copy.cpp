@@ -10,29 +10,6 @@
 
 namespace kmm {
 
-static void copy_dim(
-    const std::byte* src,
-    std::byte* dst,
-    const CopyDim* dims,
-    size_t num_dims,
-    size_t element_size
-) {
-    if (num_dims == 0) {
-        std::memcpy(dst, src, element_size);
-        return;
-    }
-
-    for (memops_extent_type i = 0; i < dims->extent; i++) {
-        copy_dim(
-            src + i * dims->src_stride,
-            dst + i * dims->dst_stride,
-            dims + 1,
-            num_dims - 1,
-            element_size
-        );
-    }
-}
-
 static Range<ptrdiff_t> dim_offset_range(
     ptrdiff_t base_offset,
     const CopyDim* dims,
@@ -114,6 +91,29 @@ CopyDescription CopyDescription::simplify() const {
     return result;
 }
 
+static void copy_dim(
+    const std::byte* src,
+    std::byte* dst,
+    const CopyDim* dims,
+    size_t num_dims,
+    size_t element_size
+) {
+    if (num_dims == 0) {
+        std::memcpy(dst, src, element_size);
+        return;
+    }
+
+    for (memops_extent_type i = 0; i < dims->extent; i++) {
+        copy_dim(
+            src + i * dims->src_stride,
+            dst + i * dims->dst_stride,
+            dims + 1,
+            num_dims - 1,
+            element_size
+        );
+    }
+}
+
 void copy(const void* src_addr, void* dst_addr, const CopyDescription& description) {
     copy_dim(
         static_cast<const std::byte*>(src_addr) + description.src_offset,
@@ -137,7 +137,7 @@ void copy_async(
     size_t element_size = description.element_size;
     if (n == 0) {
         // No axes: a single contiguous run of `element_size` bytes.
-        KMM_GPU_CHECK(gpuMemcpyAsync(
+        KMM_GPU_CHECK(gpuMemcpyDtoDAsync(
             (GPUDeviceptr)dst_addr,
             (GPUDeviceptr)src_addr,
             element_size,
@@ -156,11 +156,11 @@ void copy_async(
         CUDA_MEMCPY2D copy_params;
         std::memset(&copy_params, 0, sizeof(copy_params));
 
-        copy_params.srcMemoryType = CU_MEMORYTYPE_UNIFIED;
+        copy_params.srcMemoryType = CU_MEMORYTYPE_DEVICE;
         copy_params.srcDevice = (GPUDeviceptr)src_addr;
         copy_params.srcPitch = static_cast<size_t>(dim.src_stride);
 
-        copy_params.dstMemoryType = CU_MEMORYTYPE_UNIFIED;
+        copy_params.dstMemoryType = CU_MEMORYTYPE_DEVICE;
         copy_params.dstDevice = (GPUDeviceptr)dst_addr;
         copy_params.dstPitch = static_cast<size_t>(dim.dst_stride);
 
@@ -168,6 +168,7 @@ void copy_async(
         copy_params.Height = static_cast<size_t>(dim.extent);
 
         KMM_GPU_CHECK(gpuMemcpy2DAsync(&copy_params, stream));
+        return;
     }
 #endif
 

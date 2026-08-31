@@ -64,9 +64,43 @@ struct FillDescription {
     /// The extent and per-axis stride, ordered from the outermost to the innermost axis.
     FillDim dims[MEMOPS_MAX_DIMS] = {};
 
+    FillDescription() = default;
+
+    KMM_HOST_DEVICE
+    explicit FillDescription(FillValue value) : value(value) {}
+
     /// Appends an axis to this description. `stride` must be given in bytes.
+    ///
+    /// An axis of extent one is dropped (it is visited exactly once, so its stride never
+    /// contributes to addressing). Otherwise, this axis is checked against every existing axis
+    /// for contiguity and folded into the first one it is contiguous with instead of consuming a
+    /// new slot. This keeps `num_dims` from growing unnecessarily, which matters since `dims`
+    /// only has room for `MEMOPS_MAX_DIMS` axes.
     KMM_HOST_DEVICE
     void add_dimension(memops_extent_type extent, memops_stride_type stride) {
+        if (extent == 1) {
+            return;
+        }
+
+        for (size_t i = 0; i < num_dims; i++) {
+            FillDim& dim = dims[i];
+
+            // `dim` is the outer neighbor of the new axis: it keeps its extent, but adopts the
+            // new axis's (smaller) stride as its own.
+            if (dim.stride == stride * extent) {
+                dim.extent *= extent;
+                dim.stride = stride;
+                return;
+            }
+
+            // `dim` is the inner neighbor of the new axis: the new axis's stride already
+            // matches `dim`'s span, so only `dim`'s extent needs to grow.
+            if (stride == dim.stride * dim.extent) {
+                dim.extent *= extent;
+                return;
+            }
+        }
+
         KMM_ASSERT(num_dims < MEMOPS_MAX_DIMS);
         dims[num_dims] = FillDim {extent, stride};
         num_dims++;

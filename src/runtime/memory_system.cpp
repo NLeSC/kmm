@@ -8,6 +8,7 @@
 #include "kmm/runtime/allocators/device.hpp"
 #include "kmm/runtime/allocators/device_pool.hpp"
 #include "kmm/runtime/allocators/limit.hpp"
+#include "kmm/runtime/allocators/managed.hpp"
 #include "kmm/runtime/allocators/pinned.hpp"
 #include "kmm/runtime/device_data_streams.hpp"
 #include "kmm/runtime/memory_system.hpp"
@@ -16,11 +17,13 @@
 namespace kmm {
 
 struct MemorySystem::DeviceState {
-    DeviceState(GPUContext context, std::unique_ptr<Allocator> allocator) :
+    DeviceState(GPUContext context, GPUDevice ordinal, std::unique_ptr<Allocator> allocator) :
         context(context),
+        ordinal(ordinal),
         allocator(std::move(allocator)) {}
 
     GPUContext context;
+    GPUDevice ordinal;
     std::unique_ptr<Allocator> allocator;
 
     MemoryStats stats;
@@ -69,10 +72,15 @@ static std::unique_ptr<Allocator> make_device_allocator(
     size_t limit = config.device_memory_limit;
 
     if (config.device_memory_keep_free > 0) {
-        size_t reserved = config.device_memory_keep_free < device_memory_size
-            ? device_memory_size - config.device_memory_keep_free
-            : 0;
-        limit = std::min(limit, reserved);
+        if (device_memory_size <= config.device_memory_keep_free) {
+            throw std::runtime_error(fmt::format(
+                "cannot reserve {} bytes on GPU, only {} bytes are available",
+                config.device_memory_keep_free,
+                device_memory_size
+            ));
+        }
+
+        limit = std::min(limit, device_memory_size - config.device_memory_keep_free);
     }
 
     switch (config.device_memory_kind) {
@@ -83,9 +91,6 @@ static std::unique_ptr<Allocator> make_device_allocator(
         case DeviceMemoryKind::PrivatePool:
             allocator =
                 std::make_unique<DevicePoolAllocator>(context, DevicePoolKind::Create, limit);
-            break;
-        case DeviceMemoryKind::CachingPool:
-            allocator = std::make_unique<DeviceMemoryAllocator>(context);
             break;
         default:
             allocator = std::make_unique<DeviceMemoryAllocator>(context);
@@ -125,11 +130,16 @@ MemorySystem::MemorySystem(
         m_num_devices > 0 ? system_info.device(DeviceId(0)).context() : nullptr;
     m_host_allocator = make_host_allocator(config, events, host_context);
 
+    if (m_num_devices > 0) {
+        m_managed_allocator = std::make_unique<ManagedMemoryAllocator>(host_context);
+    }
+
     for (size_t i = 0; i < m_num_devices; i++) {
         const auto& info = system_info.device(DeviceId(i));
 
         m_devices[i] = std::make_unique<DeviceState>(
             info.context(),
+            info.device_ordinal(),
             make_device_allocator(config, events, info.context(), info.total_memory_size())
         );
     }
@@ -346,6 +356,101 @@ void MemorySystem::deallocate_host(
         m_events.wait_on_event(stream_hint, deps_in);
         m_host_allocator->deallocate_async(DeviceStream {m_events, stream_hint}, ptr, layout);
     }
+}
+
+AllocResult MemorySystem::allocate_managed(
+    BufferLayout layout,
+    void** ptr_out,
+    const DeviceStreamId& stream_hint,
+    DeviceEventSet& deps_out
+) {
+    if (!m_managed_allocator) {
+        return AllocResult::ErrorUnsupported;
+    }
+
+    AllocResult result;
+
+    if (stream_hint.is_null()) {
+        result = m_managed_allocator->allocate(layout, ptr_out);
+    } else {
+        result = m_managed_allocator
+                     ->allocate_async(DeviceStream {m_events, stream_hint}, layout, ptr_out);
+
+        deps_out.insert(m_events.record(stream_hint));
+    }
+
+    if (result == AllocResult::Success) {
+        m_managed_stats.record_allocation(layout.size_in_bytes);
+    }
+
+    spdlog::trace(
+        "allocate {} bytes of managed memory (addr: {}, result: {})",
+        layout.size_in_bytes,
+        *ptr_out,
+        static_cast<int>(result)
+    );
+
+    return result;
+}
+
+void MemorySystem::deallocate_managed(
+    void* ptr,
+    BufferLayout layout,
+    const DeviceStreamId& stream_hint,
+    const DeviceEventSet& deps_in
+) {
+    spdlog::trace("deallocate {} bytes of managed memory (addr: {})", layout.size_in_bytes, ptr);
+
+    m_managed_stats.record_deallocation(layout.size_in_bytes);
+
+    if (stream_hint.is_null()) {
+        m_managed_allocator->deallocate(ptr, layout);
+    } else {
+        m_events.wait_on_event(stream_hint, deps_in);
+        m_managed_allocator->deallocate_async(DeviceStream {m_events, stream_hint}, ptr, layout);
+    }
+}
+
+void MemorySystem::prefetch_managed(
+    MemoryId memory_id,
+    void* ptr,
+    BufferLayout layout,
+    const DeviceStreamId& stream_hint,
+    const DeviceEventSet& deps
+) {
+    if (stream_hint.is_null() || !memory_id.is_device()) {
+        return;
+    }
+
+    auto device_id = memory_id.as_device();
+    if (!same_context(device_id, stream_hint)) {
+        return;
+    }
+
+    spdlog::trace(
+        "prefetch {} bytes of managed memory to {} (addr: {})",
+        layout.size_in_bytes,
+        memory_id,
+        ptr
+    );
+
+    GPUContextGuard guard {device_state(device_id).context};
+    m_events.wait_on_event(stream_hint, deps);
+
+    KMM_GPU_CHECK(gpuMemPrefetchAsync(
+        reinterpret_cast<GPUDeviceptr>(ptr),
+        layout.size_in_bytes,
+        device_state(device_id).ordinal,
+        m_events.get(stream_hint)
+    ));
+}
+
+void* MemorySystem::translate_host_pointer(DeviceId device_id, void* host_ptr) const {
+    GPUContextGuard guard {device_state(device_id).context};
+
+    GPUDeviceptr dptr;
+    KMM_GPU_CHECK(gpuMemHostGetDevicePointer(&dptr, host_ptr));
+    return reinterpret_cast<void*>(dptr);
 }
 
 bool MemorySystem::same_context(kmm::DeviceId device_id, const kmm::DeviceStreamId& stream_hint) {
@@ -673,6 +778,19 @@ DeviceEvent MemorySystem::fill_device(
             return checked_mul<size_t>(description.num_elements(), description.value.length);
         }
     );
+}
+
+std::future<void> MemorySystem::fill_host(
+    void* addr,
+    const FillDescription& description,
+    const DeviceEventSet& deps_in
+) {
+    spdlog::trace("fill host memory (addr: {})", addr);
+
+    return std::async(std::launch::async, [this, addr, description, deps_in] {
+        m_events.synchronize(deps_in);
+        fill(addr, description);
+    });
 }
 
 DeviceEvent MemorySystem::reduce_device(

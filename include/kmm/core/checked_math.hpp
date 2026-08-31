@@ -23,6 +23,16 @@ struct wider_type<T, numeric_type_tag::unsigned_int> {
 template<typename T>
 using wider_t = typename wider_type<T>::type;
 
+// `value < 0` guarded so it never becomes a "comparison of unsigned with zero" for unsigned `T`.
+template<typename T>
+KMM_HOST_DEVICE constexpr bool is_negative(T value) {
+    if constexpr (numeric_type_traits<T>::tag == numeric_type_tag::signed_int) {
+        return value < static_cast<T>(0);
+    } else {
+        return false;
+    }
+}
+
 template<typename L, typename R, typename O>
 struct checked_add_impl {
     KMM_HOST_DEVICE
@@ -31,8 +41,8 @@ struct checked_add_impl {
             + static_cast<uint64_t>(static_cast<wider_t<R>>(right));
         *output = static_cast<O>(sum);
 
-        bool left_negative = left < static_cast<L>(0);
-        bool right_negative = right < static_cast<R>(0);
+        bool left_negative = is_negative(left);
+        bool right_negative = is_negative(right);
         bool carry = sum < static_cast<uint64_t>(static_cast<wider_t<L>>(left));
         bool sum_negative = numeric_type_traits<O>::is_signed && (static_cast<int64_t>(sum) < 0);
 
@@ -61,8 +71,8 @@ struct checked_sub_impl {
             - static_cast<uint64_t>(static_cast<wider_t<R>>(right));
         *output = static_cast<O>(diff);
 
-        bool left_negative = left < static_cast<L>(0);
-        bool right_negative = right < static_cast<R>(0);
+        bool left_negative = is_negative(left);
+        bool right_negative = is_negative(right);
         bool borrow = static_cast<uint64_t>(static_cast<wider_t<L>>(left))
             < static_cast<uint64_t>(static_cast<wider_t<R>>(right));
         bool diff_negative = numeric_type_traits<O>::is_signed && static_cast<int64_t>(diff) < 0;
@@ -90,18 +100,52 @@ template<typename L, typename R, typename O>
 struct checked_mul_impl {
     KMM_HOST_DEVICE
     static constexpr bool apply(L left, R right, O* output) {
-        //        // Perform multiplication in wider type
-        //        *output = static_cast<O>(static_cast<__int128>(left) * static_cast<__int128>(right));
-        //
-        //        // Check if overflow could have occurred
-        //        using wider_t = unsigned __int128;
-        //        bool n = is_negative(left) != is_negative(right);
-        //        wider_t a = is_negative(left) ? -static_cast<wider_t>(left) : static_cast<wider_t>(left);
-        //        wider_t b = is_negative(right) ? -static_cast<wider_t>(right) : static_cast<wider_t>(right);
-        //        wider_t p = a * b;
-        //        return n ? p <= -static_cast<wider_t>(numeric_type_traits<O>::min_inclusive)
-        //                 : p <= static_cast<wider_t>(numeric_type_traits<O>::max_inclusive);
+#if KMM_IS_DEVICE
+        // Fast path when every operand is signed
+        if constexpr (numeric_type_traits<L>::is_signed && //
+                      numeric_type_traits<R>::is_signed && //
+                      numeric_type_traits<O>::is_signed) {
+            int64_t l = static_cast<int64_t>(left);
+            int64_t r = static_cast<int64_t>(right);
+            int64_t lo = static_cast<int64_t>(static_cast<uint64_t>(l) * static_cast<uint64_t>(r));
+
+            // must have same sign.
+            if (__mul64hi(l, r) != (lo >> 63)) {
+                return false;
+            }
+
+            *output = static_cast<O>(lo);
+            return is_convertible_impl<int64_t, O>::apply(lo);
+        }
+
+        // General path (mixed signedness): reduce both operands to unsigned magnitudes, use the
+        // hardware high-multiply to detect a product wider than 64 bits, then reapply the sign.
+        uint64_t al = static_cast<uint64_t>(static_cast<wider_t<L>>(left));
+        uint64_t ar = static_cast<uint64_t>(static_cast<wider_t<R>>(right));
+
+        if (is_negative(left)) {
+            al = -al;
+        }
+
+        if (is_negative(right)) {
+            ar = -ar;
+        }
+
+        if (__umul64hi(al, ar) != 0) {
+            return false;
+        }
+
+        uint64_t magnitude = al * ar;
+        bool result_negative = is_negative(left) != is_negative(right);
+
+        if (result_negative) {
+            return checked_sub_impl<uint64_t, uint64_t, O>::apply(uint64_t(0), magnitude, output);
+        } else {
+            return checked_add_impl<uint64_t, uint64_t, O>::apply(uint64_t(0), magnitude, output);
+        }
+#else
         return !__builtin_mul_overflow(left, right, output);
+#endif
     }
 };
 
@@ -127,15 +171,19 @@ struct checked_div_impl {
             }
         }
 
-        uint64_t al = left < static_cast<L>(0)
-            ? -static_cast<uint64_t>(static_cast<wider_t<L>>(left))
-            : static_cast<uint64_t>(static_cast<wider_t<L>>(left));
-        uint64_t ar = right < static_cast<R>(0)
-            ? -static_cast<uint64_t>(static_cast<wider_t<R>>(right))
-            : static_cast<uint64_t>(static_cast<wider_t<R>>(right));
+        uint64_t al = static_cast<uint64_t>(static_cast<wider_t<L>>(left));
+        uint64_t ar = static_cast<uint64_t>(static_cast<wider_t<R>>(right));
+
+        if (is_negative(left)) {
+            al = -al;
+        }
+
+        if (is_negative(right)) {
+            ar = -ar;
+        }
 
         uint64_t magnitude = al / ar;
-        bool result_negative = (left < static_cast<L>(0)) != (right < static_cast<R>(0));
+        bool result_negative = is_negative(left) != is_negative(right);
 
         if (result_negative) {
             return checked_sub_impl<uint64_t, uint64_t, O>::apply(uint64_t(0), magnitude, output);
@@ -168,15 +216,19 @@ struct checked_rem_impl {
             return is_convertible_impl<int64_t, O>::apply(magnitude);
         }
 
-        uint64_t al = left < static_cast<L>(0)
-            ? -static_cast<uint64_t>(static_cast<wider_t<L>>(left))
-            : static_cast<uint64_t>(static_cast<wider_t<L>>(left));
-        uint64_t ar = right < static_cast<R>(0)
-            ? -static_cast<uint64_t>(static_cast<wider_t<R>>(right))
-            : static_cast<uint64_t>(static_cast<wider_t<R>>(right));
+        uint64_t al = static_cast<uint64_t>(static_cast<wider_t<L>>(left));
+        uint64_t ar = static_cast<uint64_t>(static_cast<wider_t<R>>(right));
+
+        if (is_negative(left)) {
+            al = -al;
+        }
+
+        if (is_negative(right)) {
+            ar = -ar;
+        }
 
         uint64_t magnitude = al % ar;
-        bool result_negative = left < static_cast<L>(0);  // sign follows dividend
+        bool result_negative = is_negative(left);  // sign follows dividend
 
         if (result_negative) {
             return checked_sub_impl<uint64_t, uint64_t, O>::apply(uint64_t(0), magnitude, output);

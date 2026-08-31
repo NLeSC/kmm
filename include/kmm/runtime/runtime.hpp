@@ -8,6 +8,7 @@
 
 #include "kmm/runtime/device_data_streams.hpp"
 #include "kmm/runtime/memops/fill.hpp"
+#include "kmm/runtime/memops/reduction.hpp"
 #include "kmm/runtime/memops/types.hpp"
 #include "kmm/runtime/memory_manager.hpp"
 #include "kmm/runtime/memory_system.hpp"
@@ -17,7 +18,8 @@
 namespace kmm {
 
 class RuntimeImpl;
-class Requisition;
+class ResourceRequest;
+class ResourceGrant;
 
 /// Top-level handle to the KMM runtime: owns the system's `SystemInfo`, `DeviceStreamRegistry`,
 /// `MemorySystem`, and `MemoryManager`, and exposes the buffer/request operations built on top of
@@ -121,7 +123,7 @@ class Runtime {
      * This is just a hint. The runtime system might ignore the request (for example, if out of
      * memory or if the buffer is currently locked by another thread).
      */
-    void prefetch_buffer(BufferId id, MemoryId memory_id, bool invalid_others = false);
+    void prefetch_buffer(BufferId id, MemoryId memory_id, bool invalidate_others = false);
 
     /**
      * Mark a buffer as poisoned, so future accesses to it rethrow `reason` instead of succeeding.
@@ -134,6 +136,14 @@ class Runtime {
      * Returns a memory that currently holds a valid copy of the buffer, if any.
      */
     std::optional<MemoryId> find_valid_memory(BufferId) const;
+
+    /**
+     * Returns the buffer's home memory, if it has one. The home is either the memory passed to
+     * `create_buffer`, or (if none was passed) the memory of the first access ever granted to
+     * the buffer; it is `nullopt` only for a buffer that has never been created with an explicit
+     * home and has not yet been accessed.
+     */
+    std::optional<MemoryId> buffer_home(BufferId) const;
 
     /**
      * Returns whether the given memory currently holds a valid copy of the buffer.
@@ -156,20 +166,28 @@ class Runtime {
     void invalidate_buffer(BufferId id);
 
     /**
-     * Submit a requisition. If a stream is provided, all required dependencies will be put onto
-     * the stream and this method returns immediately. If no stream is provided, the method blocks
-     * until the dependencies are available.
+     * Submit a batch of buffer requests. If a stream is provided, all required dependencies will
+     * be put onto the stream and this method returns immediately. If no stream is provided, the
+     * method blocks until the dependencies are available. Every request is granted by the time
+     * this returns; hand the result to `release` once the access is done.
      */
-    void submit(
-        Requisition& req,
+    ResourceGrant submit(
+        ResourceRequest requests,
         std::optional<GPUStreamRef> stream = std::nullopt,
-        MemoryTransaction parent = nullptr
+        MemoryTransaction parent = {}
     );
 
     /**
-     * Release a submitted requisition, allowing others to access its buffers once `deps` complete.
+     * Release a grant obtained from `submit`, allowing others to access its buffers once `deps`
+     * complete. `grant` is neither movable nor copyable, so it is taken by reference.
      */
-    void release(Requisition& req, DeviceEventSet deps = {});
+    void release(ResourceGrant& grant, DeviceEventSet deps = {});
+
+    /**
+     * Poisons every buffer `grant` accessed for write/reduce, so future accesses to them rethrow
+     * `reason` instead of succeeding. See `poison_buffer`.
+     */
+    void poison(const ResourceGrant& grant, std::exception_ptr reason) noexcept;
 
     /**
      * Block the calling thread until the given device event has completed.
@@ -188,12 +206,28 @@ class Runtime {
 
     /**
      * Copy from the given src buffer to the given dst buffer according to the given description.
+     * If a stream is provided, it is used as a hint for where to schedule the required transfers.
      */
     DeviceEvent submit_copy(
         BufferId dst_id,
         BufferId src_id,
         CopyDescription description,
         MemoryId memory_id,
+        std::optional<GPUStreamRef> stream = std::nullopt,
+        MemoryTransaction parent = {}
+    );
+
+    /**
+     * Reduce from the given src buffer into the given dst buffer according to the given
+     * description. Both buffers are accessed in `memory_id`, fetching src there first if needed.
+     * If a stream is provided, it is used as a hint for where to schedule the required work.
+     */
+    DeviceEvent submit_reduction(
+        BufferId dst_id,
+        BufferId src_id,
+        ReductionDescription description,
+        MemoryId memory_id,
+        std::optional<GPUStreamRef> stream = std::nullopt,
         MemoryTransaction parent = {}
     );
 

@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <future>
 #include <limits>
 #include <memory>
 
@@ -10,6 +11,7 @@
 #include "kmm/core/macros.hpp"
 #include "kmm/runtime/allocators/device.hpp"
 #include "kmm/runtime/allocators/pinned.hpp"
+#include "kmm/runtime/device_data_streams.hpp"
 #include "kmm/runtime/device_event.hpp"
 #include "kmm/runtime/device_stream.hpp"
 #include "kmm/runtime/identifiers.hpp"
@@ -66,6 +68,30 @@ class MemorySystem: public reference_count<MemorySystem> {
         BufferLayout layout,
         const DeviceStreamId& stream_hint,
         const DeviceEventSet& deps_in
+    );
+
+    void* translate_host_pointer(DeviceId device_id, void* host_ptr) const;
+
+    AllocResult allocate_managed(
+        BufferLayout layout,
+        void** ptr_out,
+        const DeviceStreamId& stream_hint,
+        DeviceEventSet& deps_out
+    );
+
+    void deallocate_managed(
+        void* ptr,
+        BufferLayout layout,
+        const DeviceStreamId& stream_hint,
+        const DeviceEventSet& deps_in
+    );
+
+    void prefetch_managed(
+        MemoryId memory_id,
+        void* ptr,
+        BufferLayout layout,
+        const DeviceStreamId& stream_hint,
+        const DeviceEventSet& deps
     );
 
     AllocResult allocate_device(
@@ -140,6 +166,15 @@ class MemorySystem: public reference_count<MemorySystem> {
         const DeviceEventSet& deps_in
     );
 
+    /// Fill host memory at `addr` according to `description`. Runs on a background thread since
+    /// this is a CPU-bound operation; the returned future becomes ready once `deps_in` have
+    /// completed and the fill has finished.
+    std::future<void> fill_host(
+        void* addr,
+        const FillDescription& description,
+        const DeviceEventSet& deps_in
+    );
+
     DeviceEvent reduce_device(
         DeviceId device_id,
         GPUDeviceptr src_addr,
@@ -162,6 +197,8 @@ class MemorySystem: public reference_count<MemorySystem> {
     DeviceDataStreams m_streams;
     std::unique_ptr<Allocator> m_host_allocator;
     MemoryStats m_host_stats;
+    std::unique_ptr<Allocator> m_managed_allocator;
+    MemoryStats m_managed_stats;
     std::array<std::unique_ptr<DeviceState>, MAX_DEVICES> m_devices;
     size_t m_num_devices = 0;
     bool m_peer_access[MAX_DEVICES][MAX_DEVICES] {};

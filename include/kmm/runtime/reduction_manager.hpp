@@ -40,6 +40,12 @@ class ReductionManager {
         const DeviceStreamId& stream_hint
     );
 
+    /// Check that a contribution combining with `op` over `dtype` elements is compatible with the
+    /// parameters this reduction was opened with by `begin_reduction`. Throws `std::runtime_error`
+    /// on a mismatch, since the partials are folded using the reduction's own op/dtype and a
+    /// mismatch would silently produce a wrong result.
+    void check_compatible(const ReductionState& reduction, ReductionOp op, DataType dtype) const;
+
     /// Transition the reduction from open (i.e., partial buffers can still be acquired) to
     /// active (i.e., the reduction will be performed).
     void submit_reduction(ReductionState& reduction, MemoryId memory_id);

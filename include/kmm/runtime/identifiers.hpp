@@ -2,6 +2,7 @@
 
 #include <functional>
 #include <iostream>
+#include <string>
 
 #include "fmt/ostream.h"
 
@@ -73,6 +74,9 @@ class MemoryId {
     KMM_INLINE static constexpr MemoryId device(DeviceId id) {
         return MemoryId {Kind::Device, id};
     }
+
+    // Parses strings such as "host", "cpu", "gpu", "cuda", "gpu:0", "cuda:1", "device:2".
+    MemoryId(const std::string& name);
 
     KMM_INLINE
     bool is_host() const noexcept {

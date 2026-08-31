@@ -41,7 +41,7 @@ struct MemoryRequestImpl: BufferQueueNode, DeviceQueueNode, reference_count<Memo
         uint64_t id,
         refcnt_ptr<MemoryBufferImpl> buffer,
         MemoryId memory_id,
-        Access mode,
+        AccessKind mode,
         NotifyHandle callback
     ) :
         BufferQueueNode(memory_id, mode, callback),
@@ -474,7 +474,7 @@ MemoryTransaction MemoryManager::create_transaction(MemoryTransaction parent) {
 MemoryRequest MemoryManager::create_request(
     const MemoryBuffer& buffer,
     MemoryId memory_id,
-    Access mode,
+    AccessKind mode,
     MemoryTransaction parent,
     NotifyHandle callback
 ) {
@@ -597,7 +597,11 @@ void MemoryManager::release_request(MemoryRequest request, const DeviceEventSet&
     KMM_ASSERT(req->state == MemoryRequestImpl::State::Released);
 }
 
-void MemoryManager::prefetch_buffer(const MemoryBuffer& buffer, MemoryId memory_id, Access mode) {
+void MemoryManager::prefetch_buffer(
+    const MemoryBuffer& buffer,
+    MemoryId memory_id,
+    AccessKind mode
+) {
     auto stream_hint = DeviceStreamId::null();
     MemoryRequest req;
 
@@ -688,13 +692,13 @@ void MemoryManager::make_progress() {
     //
 }
 
-std::ostream& operator<<(std::ostream& stream, Access access) {
+std::ostream& operator<<(std::ostream& stream, AccessKind access) {
     switch (access) {
-        case Access::ReadOnly:
+        case AccessKind::ReadOnly:
             return stream << "ReadOnly";
-        case Access::SharedWrite:
+        case AccessKind::SharedWrite:
             return stream << "SharedWrite";
-        case Access::Exclusive:
+        case AccessKind::Exclusive:
             return stream << "Exclusive";
         default:
             return stream << "???";

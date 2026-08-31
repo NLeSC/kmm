@@ -4,7 +4,7 @@
 
 namespace kmm {
 
-class ManagedMemoryAllocator: Allocator {
+class ManagedMemoryAllocator: public Allocator {
   public:
     ManagedMemoryAllocator(
         GPUContext context
