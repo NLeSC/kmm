@@ -6,6 +6,7 @@
 #include "kmm/runtime/memops/reduction.hpp"
 
 using namespace kmm;
+using namespace kmm::memops;
 
 TEST_CASE("reduce (CPU)") {
     // Reduce a (4, 3) row-major input down to 4 outputs by summing over the trailing axis.
@@ -33,6 +34,74 @@ TEST_CASE("reduce (CPU)") {
     reduce(src.data(), dst.data(), description);
 
     CHECK(dst == std::vector<float> {6, 15, 24, 33});
+}
+
+TEST_CASE("reduce bitwise (CPU)") {
+    // Reduce a (3, 2) row-major input down to 3 outputs, folding over the trailing axis.
+    std::vector<int32_t> src = {
+        0b1100,
+        0b1010,  //
+        0b0110,
+        0b0011,  //
+        0b1111,
+        0b0101  //
+    };
+    std::vector<int32_t> dst(3, 0);
+
+    auto description = [&](ReductionOp op) {
+        ReductionDescription d(DataType::Int32, op);
+        d.add_dimension(3, 2 * sizeof(int32_t), sizeof(int32_t));
+        d.reduction_extent = 2;
+        d.reduction_stride = sizeof(int32_t);
+        return d;
+    };
+
+    SECTION("BitwiseAnd") {
+        reduce(src.data(), dst.data(), description(ReductionOp::BitwiseAnd));
+        CHECK(dst == std::vector<int32_t> {0b1000, 0b0010, 0b0101});
+    }
+
+    SECTION("BitwiseOr") {
+        reduce(src.data(), dst.data(), description(ReductionOp::BitwiseOr));
+        CHECK(dst == std::vector<int32_t> {0b1110, 0b0111, 0b1111});
+    }
+
+    SECTION("rejects a floating-point data type") {
+        auto d = description(ReductionOp::BitwiseAnd);
+        d.dtype = DataType::Float32;
+        CHECK_THROWS(reduce(src.data(), dst.data(), d));
+    }
+}
+
+TEST_CASE("reduce key-value / argmax (CPU)") {
+    // Fold 4 (key, value) pairs down to a single pair.
+    std::vector<KeyValue<double>> src = {
+        {0, 3.0},
+        {1, 7.0},
+        {2, 1.0},
+        {3, 5.0},
+    };
+    std::vector<KeyValue<double>> dst(1);
+
+    ReductionDescription description(DataType::KeyValueFloat64, ReductionOp::Max);
+    description.reduction_extent = 4;
+    description.reduction_stride = sizeof(KeyValue<double>);
+
+    SECTION("Max keeps the largest value with its key") {
+        reduce(src.data(), dst.data(), description);
+        CHECK(dst[0] == KeyValue<double> {1, 7.0});
+    }
+
+    SECTION("Min keeps the smallest value with its key") {
+        description.operation = ReductionOp::Min;
+        reduce(src.data(), dst.data(), description);
+        CHECK(dst[0] == KeyValue<double> {2, 1.0});
+    }
+
+    SECTION("rejects an unsupported operator") {
+        description.operation = ReductionOp::Sum;
+        CHECK_THROWS(reduce(src.data(), dst.data(), description));
+    }
 }
 
 TEST_CASE("ReductionDescription::src_range/dst_range") {

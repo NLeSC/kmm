@@ -8,11 +8,20 @@
 namespace kmm {
 
 /// Shared core of `CopyDescription::simplify`, `FillDescription::simplify`, and
-/// `ReductionDescription::simplify`: collapses to a single empty axis if any input axis has
-/// extent zero, otherwise drops axes with extent one (they are visited exactly once, so their
-/// stride never contributes to addressing), sorts the remaining axes into descending stride
-/// order using `less`, and merges adjacent axes whenever `try_merge` reports that the outer axis
-/// simply repeats the inner axis's memory layout without gaps.
+/// `ReductionDescription::simplify`. Normalizes the axis list into one of exactly two canonical
+/// forms:
+///
+///  - *empty* (some axis has extent zero or negative): a single axis with `extent == 0` and every
+///    stride zero. The offending axis's real strides are discarded, so every empty description
+///    simplifies to the same value regardless of which axis vanished.
+///  - *non-empty*: axes with extent one are dropped (they are visited exactly once, so their
+///    stride never contributes to addressing), the rest are sorted into descending stride order
+///    using `less`, and adjacent axes are merged whenever `try_merge` reports that the outer axis
+///    simply repeats the inner axis's memory layout without gaps. The result has zero axes (a
+///    single element) or only axes with `extent >= 2`, no two of which are mergeable.
+///
+/// So `extent < 0` and `extent == 1` never survive `simplify`, and `extent == 0` survives only as
+/// the single all-zero sentinel axis.
 ///
 /// The extent-zero case is handled up front, rather than folded into `try_merge` like the
 /// contiguous-merge case, for two reasons: there may be no preceding axis yet to fold it into
@@ -31,15 +40,23 @@ size_t simplify_dims(const Dim* dims, size_t num_dims, Dim* out, Less less, TryM
     size_t n = 0;
 
     for (size_t i = 0; i < num_dims; i++) {
-        if (dims[i].extent <= 0) {
-            out[0] = dims[i];
+        Dim dim = dims[i];
+
+        // A zero (or negative, which describes the same nothing) extent makes the whole
+        // operation empty. Collapse to one canonical all-zero axis.
+        if (dim.extent <= 0) {
+            out[0] = Dim {};
+            out[0].extent = 0;
             return 1;
         }
 
-        if (dims[i].extent > 1) {
-            out[n] = dims[i];
-            n++;
+        // Drop axes of extent one: visited exactly once, so their stride never affects addressing.
+        if (dim.extent == 1) {
+            continue;
         }
+
+        out[n] = dim;
+        n++;
     }
 
     // bubble sort

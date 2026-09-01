@@ -4,6 +4,7 @@
 #include "simplify_dims.hpp"
 
 #include "kmm/core/checked_compare.hpp"
+#include "kmm/core/integer_fun.hpp"
 #include "kmm/core/panic.hpp"
 #include "kmm/runtime/memops/copy.hpp"
 
@@ -55,14 +56,34 @@ Range<ptrdiff_t> CopyDescription::dst_range() const {
 CopyDescription CopyDescription::simplify() const {
     CopyDescription result = *this;
 
+    for (size_t i = 0; i < result.num_dims; i++) {
+        CopyDim& dim = result.dims[i];
+
+        // zero extent means no copy at all.
+        if (dim.extent <= 0) {
+            return CopyDescription {0};
+        }
+
+        // Rewrite a negative primary stride to positive
+        if (dim.dst_stride < 0) {
+            result.src_offset += (dim.extent - 1) * dim.src_stride;
+            result.dst_offset += (dim.extent - 1) * dim.dst_stride;
+
+            dim.src_stride = -dim.src_stride;
+            dim.dst_stride = -dim.dst_stride;
+        }
+    }
+
     result.num_dims = simplify_dims(
-        dims,
-        num_dims,
+        result.dims,
+        result.num_dims,
         result.dims,
         [](const CopyDim& a, const CopyDim& b) {
-            // Descending stride order, ties broken by `dst_stride`.
-            return a.src_stride != b.src_stride ? a.src_stride > b.src_stride
-                                                : a.dst_stride > b.dst_stride;
+            // Descending stride order, keyed on `dst_stride` (ties broken by `src_stride`): it
+            // matters more that writes to the innermost axis coalesce than that reads do.
+            return a.dst_stride != b.dst_stride
+                ? unsigned_abs(a.dst_stride) > unsigned_abs(b.dst_stride)
+                : unsigned_abs(a.src_stride) > unsigned_abs(b.src_stride);
         },
         [](CopyDim& outer, const CopyDim& inner) {
             if (outer.src_stride == inner.src_stride * inner.extent

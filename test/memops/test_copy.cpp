@@ -5,6 +5,7 @@
 #include "kmm/runtime/memops/copy.hpp"
 
 using namespace kmm;
+using namespace kmm::memops;
 
 TEST_CASE("copy (CPU)") {
     std::vector<int> src = {1, 2, 3, 4, 5, 6};
@@ -148,6 +149,49 @@ TEST_CASE("CopyDescription::simplify sorts and merges contiguous axes") {
     CHECK(result.dims[1].extent == 12);
     CHECK(result.dims[1].src_stride == 2 * static_cast<ptrdiff_t>(sizeof(int)));
     CHECK(result.dims[1].dst_stride == 2 * static_cast<ptrdiff_t>(sizeof(int)));
+}
+
+TEST_CASE("CopyDescription::simplify normalizes negative strides") {
+    // An axis walked backwards on both sides. `simplify` flips its iteration order (shifting the
+    // offsets to the last element and negating the strides), after which the axis is contiguous
+    // with the element and gets folded away entirely.
+    CopyDescription description(sizeof(int));
+    description.add_dimension(
+        4,
+        -static_cast<memops_stride_type>(sizeof(int)),
+        -static_cast<memops_stride_type>(sizeof(int))
+    );
+
+    CopyDescription result = description.simplify();
+
+    CHECK(result.num_dims == 0);
+    CHECK(result.element_size == 4 * sizeof(int));
+    CHECK(result.src_offset == -3 * static_cast<ptrdiff_t>(sizeof(int)));
+    CHECK(result.dst_offset == -3 * static_cast<ptrdiff_t>(sizeof(int)));
+}
+
+TEST_CASE("CopyDescription::simplify normalizes a negative stride on one side only") {
+    // The axis is forward in the source but reversed in the destination. `simplify` keys on the
+    // (non-zero) `dst_stride`, so it flips the iteration order to make `dst_stride` positive,
+    // leaving `src_stride` negative, and still merges the two contiguous axes.
+    CopyDescription description(sizeof(int));
+    description.add_dimension(
+        3,
+        4 * sizeof(int),
+        -4 * static_cast<memops_stride_type>(sizeof(int))
+    );
+    description.add_dimension(
+        4,
+        1 * sizeof(int),
+        -1 * static_cast<memops_stride_type>(sizeof(int))
+    );
+
+    CopyDescription result = description.simplify();
+
+    REQUIRE(result.num_dims == 1);
+    CHECK(result.dims[0].extent == 12);
+    CHECK(result.dims[0].src_stride == -1 * static_cast<ptrdiff_t>(sizeof(int)));
+    CHECK(result.dims[0].dst_stride == 1 * static_cast<ptrdiff_t>(sizeof(int)));
 }
 
 TEST_CASE("CopyDescription::simplify drops axes with extent one") {

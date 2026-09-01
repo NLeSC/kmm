@@ -67,6 +67,13 @@ KMM_HOST_DEVICE constexpr T round_up_to_multiple(T input, T multiple) {
     return checked_add(input, delta);
 }
 
+/// Return the absolute value of `input` as the corresponding unsigned integer type.
+template<typename T, typename U = typename detail::numeric_type_traits<T>::unsigned_type>
+KMM_HOST_DEVICE constexpr U unsigned_abs(T input) {
+    U magnitude = static_cast<U>(input);
+    return detail::is_negative(input) ? static_cast<U>(U(0) - magnitude) : magnitude;
+}
+
 /// Return the smallest integer that is a power of two and is not less than `input`.
 template<typename T>
 KMM_HOST_DEVICE constexpr T round_up_to_power_of_two(T input) {

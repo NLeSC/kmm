@@ -8,24 +8,58 @@
 
 namespace kmm {
 
+void FillDescription::add_dimension(memops_extent_type extent, memops_stride_type stride) {
+    // add the dimensions
+    if (num_dims < MEMOPS_MAX_DIMS) {
+        dims[num_dims] = FillDim {extent, stride};
+        num_dims++;
+        return;
+    }
+
+    // could not add the dimensions, try to fuse it with one of the existing dimensions
+    for (auto& dim : this->dims) {
+        // `dim` is the outer neighbor of the new axis or has extent 1
+        if (dim.stride == stride * extent || dim.extent == 1) {
+            dim.extent *= extent;
+            dim.stride = stride;
+            return;
+        }
+
+        // `dim` is the inner neighbor of the new axis
+        if (stride == dim.stride * dim.extent) {
+            dim.extent *= extent;
+            return;
+        }
+    }
+
+    throw std::runtime_error(
+        "cannot add dimension to `FillDescription`, exceeds maximum number of dimensions"
+    );
+}
+
 FillDescription FillDescription::simplify() const {
     FillDescription result = *this;
 
     for (size_t i = 0; i < result.num_dims; i++) {
         FillDim& dim = result.dims[i];
 
-        // handle negative strides
-        if (dim.stride < 0) {
-            if (dim.extent > 0) {
-                result.offset += (dim.extent - 1) * dim.stride;
-            }
+        // A zero or negative extent makes the whole fill empty. `simplify_dims` handles this.
+        if (dim.extent <= 0) {
+            continue;
+        }
 
+        // Rewrite negative strides to positive, shifting `offset` to the far end of the axis so
+        // the same elements are still visited. (`simplify_dims` handles negative extents.)
+        if (dim.stride < 0) {
+            result.offset += (dim.extent - 1) * dim.stride;
             dim.stride = -dim.stride;
         }
 
-        // handle negative extents
-        if (dim.extent < 0) {
-            dim.extent = 0;
+        // A zero stride revisits the same address `extent` times; for `fill` those repeated
+        // writes are redundant, so collapse the axis to a single element and let `simplify_dims`
+        // drop it.
+        if (dim.stride == 0) {
+            dim.extent = 1;
         }
     }
 

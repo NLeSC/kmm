@@ -5,6 +5,7 @@
 #include "kmm/runtime/memops/reduction.hpp"
 
 using namespace kmm;
+using namespace kmm::memops;
 
 namespace {
 // Minimal duck-typed stand-in for `kmm::Layout`, avoiding a dependency on `kmm/core/layout.hpp`

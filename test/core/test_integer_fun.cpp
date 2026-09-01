@@ -1,4 +1,5 @@
 #include <stdexcept>
+#include <type_traits>
 
 #include "catch2/catch_all.hpp"
 
@@ -147,6 +148,20 @@ TEST_CASE("round_up_to_multiple") {
     // INT_MAX/UINT_MAX are odd, so rounding up to a multiple of 2 overflows.
     CHECK_THROWS(round_up_to_multiple(INT_MAX, 2));
     CHECK_THROWS(round_up_to_multiple(UINT_MAX, u32(2)));
+}
+
+TEST_CASE("unsigned_abs") {
+    CHECK(unsigned_abs(i32(0)) == u32(0));
+    CHECK(unsigned_abs(i32(5)) == u32(5));
+    CHECK(unsigned_abs(i32(-5)) == u32(5));
+    CHECK(unsigned_abs(INT_MAX) == u32(INT_MAX));
+    CHECK(unsigned_abs(INT_MIN) == u32(INT_MAX) + u32(1));
+
+    CHECK(unsigned_abs(u32(0)) == u32(0));
+    CHECK(unsigned_abs(u32(5)) == u32(5));
+    CHECK(unsigned_abs(UINT_MAX) == UINT_MAX);
+
+    STATIC_REQUIRE(std::is_same_v<decltype(unsigned_abs(i32(0))), u32>);
 }
 
 TEST_CASE("round_up_to_power_of_two") {

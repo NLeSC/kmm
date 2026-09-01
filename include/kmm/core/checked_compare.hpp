@@ -91,6 +91,7 @@ struct numeric_type_traits<bool> {
     struct numeric_type_traits<unsigned T> {                                              \
         static constexpr bool is_signed = false;                                          \
         static constexpr numeric_type_tag tag = numeric_type_tag::unsigned_int;           \
+        using unsigned_type = T;                                                          \
                                                                                           \
         static constexpr unsigned T min_inclusive = 0;                                    \
         static constexpr unsigned T max_inclusive = ~static_cast<unsigned T>(0);          \

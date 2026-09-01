@@ -146,6 +146,9 @@ struct ReductionDescription {
     /// `input_stride`/`output_stride` equal the inner axis's `extent * input_stride`/
     /// `extent * output_stride`). Does not touch `reduction_extent`/`reduction_stride`, since
     /// those describe a different axis (the one reduced over, shared by every output element).
+    ///
+    /// If some batch axis has extent zero, `dims` collapses to a single axis with `extent == 0`
+    /// and all strides zero (so no output elements are produced); see `is_noop`.
     ReductionDescription simplify() const;
 
     /// Returns the half-open range of byte offsets (relative to `src_addr`) that this reduction
@@ -159,8 +162,9 @@ struct ReductionDescription {
 
     /// Returns `true` if this reduction combines exactly one input element into each output
     /// element without accumulating into the previous value: every `combine(identity, value)`
-    /// then reduces to `value` (for all of `Sum`/`Product`/`Min`/`Max`), so the reduction is
-    /// equivalent to a plain strided copy from `src_addr` to `dst_addr`. See `as_copy`.
+    /// then reduces to `value` (for all of `Sum`/`Product`/`Min`/`Max`/`BitwiseAnd`/`BitwiseOr`),
+    /// so the reduction is equivalent to a plain strided copy from `src_addr` to `dst_addr`. See
+    /// `as_copy`.
     KMM_HOST_DEVICE
     bool is_equivalent_to_copy() const {
         return reduction_extent == 1 && !accumulate;
@@ -188,7 +192,8 @@ struct ReductionDescription {
     /// need not read or write anything. That happens when no output elements are produced at all
     /// (`num_outputs() == 0`), or when zero input elements are combined into each output
     /// (`reduction_extent == 0`) while accumulating: every output becomes
-    /// `combine(previous, identity) == previous` for all of `Sum`/`Product`/`Min`/`Max`.
+    /// `combine(previous, identity) == previous` for all of
+    /// `Sum`/`Product`/`Min`/`Max`/`BitwiseAnd`/`BitwiseOr`.
     KMM_HOST_DEVICE
     bool is_noop() const {
         return num_outputs() == 0 || (reduction_extent == 0 && accumulate);
@@ -262,6 +267,9 @@ namespace memops {
 
 /// Reduces `src_addr` into `dst_addr` on the CPU, according to `description`. Blocks until the
 /// reduction has completed.
+///
+/// `src_addr`/`dst_addr` and every offset/stride in `description` are assumed to be aligned to the
+/// element type; descriptions built by `make_reduction_description` always satisfy this.
 void reduce(const void* src_addr, void* dst_addr, const ReductionDescription& description);
 
 /// @}

@@ -1,11 +1,12 @@
 #include <cstddef>
 #include <cstdint>
-#include <cstring>
-#include <limits>
+#include <stdexcept>
 
+#include "reduction_traits.hpp"
 #include "simplify_dims.hpp"
 
 #include "kmm/core/const_value.hpp"
+#include "kmm/core/integer_fun.hpp"
 #include "kmm/core/panic.hpp"
 #include "kmm/runtime/memops/copy.hpp"
 #include "kmm/runtime/memops/fill.hpp"
@@ -21,7 +22,7 @@ ReductionDescription ReductionDescription::simplify() const {
         num_dims,
         result.dims,
         [](const ReductionDim& a, const ReductionDim& b) {
-            return a.input_stride > b.input_stride;
+            return unsigned_abs(a.input_stride) > unsigned_abs(b.input_stride);
         },
         [](ReductionDim& outer, const ReductionDim& inner) {
             if (outer.input_stride == inner.input_stride * inner.extent
@@ -139,66 +140,32 @@ FillDescription ReductionDescription::as_fill() const {
     return result;
 }
 
-/// Per-`ReductionOp` identity element and combining function, specialized per `T`/`Op` so that
-/// `reduce_leaf` below has no runtime branch or function-pointer indirection to pick the operator.
+/// Returns the identity for `T`/`Op` when that is a supported reduction (see
+/// `is_reduction_supported`), otherwise throws instead of failing to compile.
 template<typename T, ReductionOp Op>
-struct ReduceTraits;
-
-template<typename T>
-struct ReduceTraits<T, ReductionOp::Sum> {
-    static T identity() {
-        return static_cast<T>(0);
+static FillValue reduction_identity_checked() {
+    if constexpr (memops::is_reduction_supported<T, Op>) {
+        return FillValue::from(memops::ReductionTraits<T, Op>::identity());
+    } else {
+        throw std::runtime_error("reduction operator not supported for this data type");
     }
-
-    static T combine(T a, T b) {
-        return static_cast<T>(a + b);
-    }
-};
-
-template<typename T>
-struct ReduceTraits<T, ReductionOp::Product> {
-    static T identity() {
-        return static_cast<T>(1);
-    }
-
-    static T combine(T a, T b) {
-        return static_cast<T>(a * b);
-    }
-};
-
-template<typename T>
-struct ReduceTraits<T, ReductionOp::Min> {
-    static T identity() {
-        return std::numeric_limits<T>::max();
-    }
-
-    static T combine(T a, T b) {
-        return a < b ? a : b;
-    }
-};
-
-template<typename T>
-struct ReduceTraits<T, ReductionOp::Max> {
-    static T identity() {
-        return std::numeric_limits<T>::lowest();
-    }
-
-    static T combine(T a, T b) {
-        return a > b ? a : b;
-    }
-};
+}
 
 template<typename T>
 static FillValue reduction_identity_typed(ReductionOp op) {
     switch (op) {
         case ReductionOp::Sum:
-            return FillValue::from(ReduceTraits<T, ReductionOp::Sum>::identity());
+            return reduction_identity_checked<T, ReductionOp::Sum>();
         case ReductionOp::Product:
-            return FillValue::from(ReduceTraits<T, ReductionOp::Product>::identity());
+            return reduction_identity_checked<T, ReductionOp::Product>();
         case ReductionOp::Min:
-            return FillValue::from(ReduceTraits<T, ReductionOp::Min>::identity());
+            return reduction_identity_checked<T, ReductionOp::Min>();
         case ReductionOp::Max:
-            return FillValue::from(ReduceTraits<T, ReductionOp::Max>::identity());
+            return reduction_identity_checked<T, ReductionOp::Max>();
+        case ReductionOp::BitwiseAnd:
+            return reduction_identity_checked<T, ReductionOp::BitwiseAnd>();
+        case ReductionOp::BitwiseOr:
+            return reduction_identity_checked<T, ReductionOp::BitwiseOr>();
     }
 
     KMM_PANIC("invalid reduction operator");
@@ -206,18 +173,10 @@ static FillValue reduction_identity_typed(ReductionOp op) {
 
 FillValue reduction_identity(DataType dtype, ReductionOp op) {
     switch (dtype) {
-        case DataType::Int8:
-            return reduction_identity_typed<int8_t>(op);
-        case DataType::Int16:
-            return reduction_identity_typed<int16_t>(op);
         case DataType::Int32:
             return reduction_identity_typed<int32_t>(op);
         case DataType::Int64:
             return reduction_identity_typed<int64_t>(op);
-        case DataType::Uint8:
-            return reduction_identity_typed<uint8_t>(op);
-        case DataType::Uint16:
-            return reduction_identity_typed<uint16_t>(op);
         case DataType::Uint32:
             return reduction_identity_typed<uint32_t>(op);
         case DataType::Uint64:
@@ -226,6 +185,10 @@ FillValue reduction_identity(DataType dtype, ReductionOp op) {
             return reduction_identity_typed<float>(op);
         case DataType::Float64:
             return reduction_identity_typed<double>(op);
+        case DataType::KeyValueInt64:
+            return reduction_identity_typed<KeyValue<int64_t>>(op);
+        case DataType::KeyValueFloat64:
+            return reduction_identity_typed<KeyValue<double>>(op);
         case DataType::Unknown:
             break;
     }
@@ -240,21 +203,22 @@ static void reduce_leaf(
     E reduction_extent,
     memops_stride_type reduction_stride
 ) {
-    T acc = ReduceTraits<T, Op>::identity();
+    // `src`/`dst` and every stride are assumed to be `T`-aligned. This holds for any description
+    // built by `make_reduction_description`, which derives every offset and stride from
+    // `element_size == sizeof(T)`.
+    T acc = memops::ReductionTraits<T, Op>::identity();
 
     for (memops_extent_type i = 0; i < reduction_extent; i++) {
-        T value;
-        std::memcpy(&value, src + i * reduction_stride, sizeof(T));
-        acc = ReduceTraits<T, Op>::combine(acc, value);
+        T value = *reinterpret_cast<const T*>(src + i * reduction_stride);
+        acc = memops::ReductionTraits<T, Op>::combine(acc, value);
     }
 
     if constexpr (Accumulate) {
-        T previous;
-        std::memcpy(&previous, dst, sizeof(T));
-        acc = ReduceTraits<T, Op>::combine(previous, acc);
+        T previous = *reinterpret_cast<const T*>(dst);
+        acc = memops::ReductionTraits<T, Op>::combine(previous, acc);
     }
 
-    std::memcpy(dst, &acc, sizeof(T));
+    *reinterpret_cast<T*>(dst) = acc;
 }
 
 /// Recurses over the batch axes with `Rank` (the number of remaining axes) as a template
@@ -363,6 +327,23 @@ static void reduce_op(
     }
 }
 
+/// Runs `reduce_op<T, Op>` when that combination is a supported reduction (see
+/// `is_reduction_supported`), otherwise throws instead of failing to compile. This is what lets
+/// `reduce_typed` list every operator unconditionally even for element types that only support a
+/// subset (integers-only for the bitwise ops, `KeyValue` only for `Min`/`Max`).
+template<typename T, ReductionOp Op>
+static void reduce_op_checked(
+    const void* src_addr,
+    void* dst_addr,
+    const ReductionDescription& description
+) {
+    if constexpr (memops::is_reduction_supported<T, Op>) {
+        reduce_op<T, Op>(src_addr, dst_addr, description);
+    } else {
+        throw std::runtime_error("reduction operator not supported for this data type");
+    }
+}
+
 template<typename T>
 static void reduce_typed(
     const void* src_addr,
@@ -371,13 +352,17 @@ static void reduce_typed(
 ) {
     switch (description.operation) {
         case ReductionOp::Sum:
-            return reduce_op<T, ReductionOp::Sum>(src_addr, dst_addr, description);
+            return reduce_op_checked<T, ReductionOp::Sum>(src_addr, dst_addr, description);
         case ReductionOp::Product:
-            return reduce_op<T, ReductionOp::Product>(src_addr, dst_addr, description);
+            return reduce_op_checked<T, ReductionOp::Product>(src_addr, dst_addr, description);
         case ReductionOp::Min:
-            return reduce_op<T, ReductionOp::Min>(src_addr, dst_addr, description);
+            return reduce_op_checked<T, ReductionOp::Min>(src_addr, dst_addr, description);
         case ReductionOp::Max:
-            return reduce_op<T, ReductionOp::Max>(src_addr, dst_addr, description);
+            return reduce_op_checked<T, ReductionOp::Max>(src_addr, dst_addr, description);
+        case ReductionOp::BitwiseAnd:
+            return reduce_op_checked<T, ReductionOp::BitwiseAnd>(src_addr, dst_addr, description);
+        case ReductionOp::BitwiseOr:
+            return reduce_op_checked<T, ReductionOp::BitwiseOr>(src_addr, dst_addr, description);
     }
 
     KMM_PANIC("invalid reduction operator");
@@ -403,18 +388,10 @@ void reduce(const void* src_addr, void* dst_addr, const ReductionDescription& de
     switch (simplified.dtype) {
         case DataType::Unknown:
             break;
-        case DataType::Int8:
-            return reduce_typed<int8_t>(src_addr, dst_addr, simplified);
-        case DataType::Int16:
-            return reduce_typed<int16_t>(src_addr, dst_addr, simplified);
         case DataType::Int32:
             return reduce_typed<int32_t>(src_addr, dst_addr, simplified);
         case DataType::Int64:
             return reduce_typed<int64_t>(src_addr, dst_addr, simplified);
-        case DataType::Uint8:
-            return reduce_typed<uint8_t>(src_addr, dst_addr, simplified);
-        case DataType::Uint16:
-            return reduce_typed<uint16_t>(src_addr, dst_addr, simplified);
         case DataType::Uint32:
             return reduce_typed<uint32_t>(src_addr, dst_addr, simplified);
         case DataType::Uint64:
@@ -423,6 +400,10 @@ void reduce(const void* src_addr, void* dst_addr, const ReductionDescription& de
             return reduce_typed<float>(src_addr, dst_addr, simplified);
         case DataType::Float64:
             return reduce_typed<double>(src_addr, dst_addr, simplified);
+        case DataType::KeyValueInt64:
+            return reduce_typed<KeyValue<int64_t>>(src_addr, dst_addr, simplified);
+        case DataType::KeyValueFloat64:
+            return reduce_typed<KeyValue<double>>(src_addr, dst_addr, simplified);
     }
 
     KMM_PANIC("invalid data type");

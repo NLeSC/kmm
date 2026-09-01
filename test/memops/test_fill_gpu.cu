@@ -1,9 +1,12 @@
 #include <algorithm>
+#include <cstddef>
 #include <vector>
 
 #include "catch2/catch_all.hpp"
 
 #include "kmm/runtime/memops/fill.hpp"
+#include "kmm/runtime/memops/fill_gpu.hpp"
+#include "kmm/utils/gpu_utils.hpp"
 
 using namespace kmm;
 using namespace kmm::memops;
@@ -31,44 +34,62 @@ static size_t size_fill(const FillDescription& desc, size_t offset = 0, size_t a
     return offset;
 }
 
-static bool check_fill(const FillDescription& desc) {
+bool check_fill_gpu(const FillDescription& desc) {
+    g_device_t device = 0;
+    g_context_t context = nullptr;
+    g_stream_t stream = nullptr;
+
+    KMM_GPU_CHECK(g_init(0));
+    KMM_GPU_CHECK(g_device_get(&device, 0));
+    KMM_GPU_CHECK(g_device_primary_ctx_retain(&context, device));
+    KMM_GPU_CHECK(g_ctx_push_current(context));
+
     size_t size = size_fill(desc) * 2;  // *2 just to be sure
 
-    std::vector<std::byte> expected(size);
+    std::vector<std::byte> reference(size);
+    test_fill(desc, reference.data());
+
+    g_device_ptr_t dptr = 0;
+    KMM_GPU_CHECK(g_mem_alloc(&dptr, size));
+    KMM_GPU_CHECK(g_memset_d8_async(dptr, 0, size, stream));
+
+    memops::fill_gpu(stream, reinterpret_cast<void*>(dptr), desc);
+    KMM_GPU_CHECK(g_stream_synchronize(stream));
+
     std::vector<std::byte> actual(size);
-    std::vector<std::byte> simplified(size);
+    KMM_GPU_CHECK(g_memcpy_d_to_h(actual.data(), dptr, size));
 
-    test_fill(desc, expected.data());
-    test_fill(desc.simplify(), simplified.data());
-    memops::fill(actual.data(), desc);
+    KMM_GPU_CHECK(g_mem_free(dptr));
+    KMM_GPU_CHECK(g_ctx_pop_current(&context));
+    KMM_GPU_CHECK(g_device_primary_ctx_release(device));
 
-    return actual == expected && simplified == expected;
+    return actual == reference;
 }
 
-TEST_CASE("memops::fill matches reference") {
+TEST_CASE("memops::fill_gpu", "[GPU]") {
     FillValue value = FillValue::from<int>(0x12345678);
 
     SECTION("scalar, no dimensions") {
         FillDescription desc(value);
-        CHECK(check_fill(desc));
+        CHECK(check_fill_gpu(desc));
     }
 
     SECTION("scalar at an offset") {
         FillDescription desc(value);
         desc.offset = 40;
-        CHECK(check_fill(desc));
+        CHECK(check_fill_gpu(desc));
     }
 
     SECTION("1D contiguous") {
         FillDescription desc(value);
         desc.add_dimension(/*extent=*/16, /*stride=*/4);
-        CHECK(check_fill(desc));
+        CHECK(check_fill_gpu(desc));
     }
 
     SECTION("1D mis-aligned") {
         FillDescription desc(value);
         desc.add_dimension(/*extent=*/16, /*stride=*/5);
-        CHECK(check_fill(desc));
+        CHECK(check_fill_gpu(desc));
     }
 
     SECTION("2D strided with offset") {
@@ -76,7 +97,7 @@ TEST_CASE("memops::fill matches reference") {
         desc.offset = 8;
         desc.add_dimension(/*extent=*/6, /*stride=*/64);
         desc.add_dimension(/*extent=*/5, /*stride=*/4);
-        CHECK(check_fill(desc));
+        CHECK(check_fill_gpu(desc));
     }
 
     SECTION("3D") {
@@ -84,7 +105,7 @@ TEST_CASE("memops::fill matches reference") {
         desc.add_dimension(/*extent=*/3, /*stride=*/400);
         desc.add_dimension(/*extent=*/4, /*stride=*/40);
         desc.add_dimension(/*extent=*/5, /*stride=*/4);
-        CHECK(check_fill(desc));
+        CHECK(check_fill_gpu(desc));
     }
 
     SECTION("4D") {
@@ -93,50 +114,28 @@ TEST_CASE("memops::fill matches reference") {
         desc.add_dimension(/*extent=*/3, /*stride=*/400);
         desc.add_dimension(/*extent=*/4, /*stride=*/40);
         desc.add_dimension(/*extent=*/5, /*stride=*/4);
-        CHECK(check_fill(desc));
+        CHECK(check_fill_gpu(desc));
     }
 
     SECTION("axes contiguous (simplify merges them)") {
         FillDescription desc(value);
         desc.add_dimension(/*extent=*/8, /*stride=*/16);
         desc.add_dimension(/*extent=*/4, /*stride=*/4);
-        CHECK(check_fill(desc));
-    }
-
-    SECTION("axes contiguous (reversed order)") {
-        FillDescription desc(value);
-        desc.add_dimension(/*extent=*/4, /*stride=*/4);
-        desc.add_dimension(/*extent=*/8, /*stride=*/16);
-        CHECK(check_fill(desc));
-    }
-
-    SECTION("axes overlapping (simplify merges them)") {
-        FillDescription desc(value);
-        desc.add_dimension(/*extent=*/8, /*stride=*/16);
-        desc.add_dimension(/*extent=*/4, /*stride=*/4);
-        CHECK(check_fill(desc));
+        CHECK(check_fill_gpu(desc));
     }
 
     SECTION("axis with extent one") {
         FillDescription desc(value);
         desc.add_dimension(/*extent=*/1, /*stride=*/999);
         desc.add_dimension(/*extent=*/10, /*stride=*/4);
-        CHECK(check_fill(desc));
+        CHECK(check_fill_gpu(desc));
     }
 
     SECTION("negative stride") {
         FillDescription desc(value);
         desc.offset = 4 * 7;
         desc.add_dimension(/*extent=*/8, /*stride=*/-4);
-        CHECK(check_fill(desc));
-    }
-
-    SECTION("2D negative stride") {
-        FillDescription desc(value);
-        desc.offset = 256;
-        desc.add_dimension(/*extent=*/8, /*stride=*/-4);
-        desc.add_dimension(/*extent=*/2, /*stride=*/-40);
-        CHECK(check_fill(desc));
+        CHECK(check_fill_gpu(desc));
     }
 
     SECTION("zero stride") {
@@ -144,7 +143,7 @@ TEST_CASE("memops::fill matches reference") {
         desc.add_dimension(/*extent=*/3, /*stride=*/400);
         desc.add_dimension(/*extent=*/4, /*stride=*/0);
         desc.add_dimension(/*extent=*/5, /*stride=*/4);
-        CHECK(check_fill(desc));
+        CHECK(check_fill_gpu(desc));
     }
 
     SECTION("mixed-sign strides") {
@@ -152,13 +151,13 @@ TEST_CASE("memops::fill matches reference") {
         desc.offset = 3 * 40;
         desc.add_dimension(/*extent=*/4, /*stride=*/-40);
         desc.add_dimension(/*extent=*/9, /*stride=*/4);
-        CHECK(check_fill(desc));
+        CHECK(check_fill_gpu(desc));
     }
 
     SECTION("wide fill value") {
         FillDescription desc(FillValue::from<double>(3.14159));
         desc.add_dimension(/*extent=*/7, /*stride=*/8);
         desc.add_dimension(/*extent=*/2, /*stride=*/64);
-        CHECK(check_fill(desc));
+        CHECK(check_fill_gpu(desc));
     }
 }

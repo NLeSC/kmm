@@ -45,12 +45,19 @@ struct CopyDescription {
     explicit CopyDescription(size_t element_size) : element_size(element_size) {}
 
     /// Appends an axis to this description. `src_stride`/`dst_stride` must be given in bytes.
+    ///
+    /// An axis of extent one is dropped (it is visited exactly once, so its stride never
+    /// contributes to addressing).
     KMM_HOST_DEVICE
     void add_dimension(
         memops_extent_type extent,
         memops_stride_type src_stride,
         memops_stride_type dst_stride
     ) {
+        if (extent == 1) {
+            return;
+        }
+
         KMM_ASSERT(num_dims < MEMOPS_MAX_DIMS);
         dims[num_dims] = CopyDim {extent, src_stride, dst_stride};
         num_dims++;
@@ -68,6 +75,12 @@ struct CopyDescription {
         return result;
     }
 
+    /// Returns `true` if this copy reads and writes nothing because some axis has extent zero.
+    KMM_HOST_DEVICE
+    bool is_empty() const {
+        return num_elements() == 0;
+    }
+
     /// Returns the half-open range of byte offsets (relative to `src_addr`) that this copy
     /// will read from.
     Range<ptrdiff_t> src_range() const;
@@ -76,8 +89,11 @@ struct CopyDescription {
     /// will write to.
     Range<ptrdiff_t> dst_range() const;
 
-    /// Returns an equivalent description in canonical form. Axes are sorted by decreasing
-    /// stride (i.e. largest stride is first) and
+    /// Returns an equivalent description in canonical form: axes are sorted by decreasing stride
+    /// (largest first) and adjacent contiguous axes are merged, so backends (e.g. `copy_gpu`) that
+    /// only special-case a few axes see the smallest `num_dims`. An empty copy (some axis of
+    /// extent zero) collapses to a single axis with `extent == 0` and all strides zero; see
+    /// `is_empty`.
     CopyDescription simplify() const;
 };
 
