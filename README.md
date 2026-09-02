@@ -84,5 +84,5 @@ int main() {
 
 ## License
 
-KMM is made available under the terms of the Apache License version 2.0, see the file LICENSE for details.
+KMM is made available under the terms of the Apache License version 2.0, see the LICENSE file for details.
 
