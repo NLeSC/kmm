@@ -74,6 +74,13 @@ KMM_HOST_DEVICE constexpr U unsigned_abs(T input) {
     return detail::is_negative(input) ? static_cast<U>(U(0) - magnitude) : magnitude;
 }
 
+/// Returns `true` if `left` is exactly divisible by `right` (i.e. `left % right == 0`).
+/// Returns `false` otherwise. This function accepts mixed inputs having different signedness.
+template<typename L, typename R>
+KMM_HOST_DEVICE constexpr bool is_divisible(L left, R right) {
+    return right != R {0} && unsigned_abs(left) % unsigned_abs(right) == 0U;
+}
+
 /// Return the smallest integer that is a power of two and is not less than `input`.
 template<typename T>
 KMM_HOST_DEVICE constexpr T round_up_to_power_of_two(T input) {

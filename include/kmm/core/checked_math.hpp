@@ -364,18 +364,6 @@ KMM_HOST_DEVICE constexpr T checked_rem(T left, T right) {
     return checked_rem<T, T, T>(left, right);
 }
 
-/// Returns `true` if `left` is exactly divisible by `right` (i.e. `left % right == 0`).
-/// Returns `false` otherwise
-template<typename L, typename R>
-KMM_HOST_DEVICE constexpr bool is_divisible(L left, R right) {
-    // A non-zero remainder always has a smaller magnitude than `right`, but for two large
-    // unsigned operands it may still not fit in `int64_t`; in that case it cannot be zero, so
-    // `apply` returning `false` already gives the right answer.
-    int64_t remainder {};
-    return detail::checked_rem_impl<L, R, int64_t>::apply(left, right, &remainder)
-        && remainder == 0;
-}
-
 /// Returns `-input`, throwing on overflow.
 template<typename T>
 KMM_HOST_DEVICE constexpr T checked_neg(const T& input) {

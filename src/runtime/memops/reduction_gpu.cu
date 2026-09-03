@@ -1,397 +1,429 @@
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
-#include <stdexcept>
+#include <cstring>
+#include <iostream>
+#include <optional>
 
-#include "cub/block/block_reduce.cuh"
 #include "reduction_traits.hpp"
 
-#include "kmm/core/const_value.hpp"
+#include "kmm/core/checked_compare.hpp"
 #include "kmm/core/integer_fun.hpp"
 #include "kmm/core/vec.hpp"
-#include "kmm/runtime/memops/fill_gpu.hpp"
+#include "kmm/runtime/memops/reduction.hpp"
 #include "kmm/runtime/memops/reduction_gpu.hpp"
+#include "kmm/utils/gpu_utils.hpp"
 
 namespace kmm::memops {
 
+struct ReductionPlan {
+    const void* src_addr;
+    void* dst_addr;
+    bool accumulate;
+    size_t reduction_extent;
+    ptrdiff_t reduction_stride;
+    size_t num_dims;
+    size_t extents[MEMOPS_MAX_DIMS] = {};
+    ptrdiff_t input_strides[MEMOPS_MAX_DIMS] = {};
+    ptrdiff_t output_strides[MEMOPS_MAX_DIMS] = {};
+
+    template<typename T>
+    bool is_aligned() const {
+        if (!is_divisible(reinterpret_cast<uintptr_t>(src_addr), alignof(T))) {
+            return false;
+        }
+
+        if (!is_divisible(reinterpret_cast<uintptr_t>(dst_addr), alignof(T))) {
+            return false;
+        }
+
+        if (!is_divisible(reduction_stride, alignof(T))) {
+            return false;
+        }
+
+        for (size_t i = 0; i < num_dims; i++) {
+            if (!is_divisible(input_strides[i], alignof(T))) {
+                return false;
+            }
+
+            if (!is_divisible(output_strides[i], alignof(T))) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+};
+
+ReductionPlan make_plan(
+    const void* src_base,
+    void* dst_base,
+    const ReductionDescription& description
+) {
+    ReductionPlan plan;
+    plan.num_dims = 0;
+    plan.src_addr = static_cast<const std::byte*>(src_base) + description.input_offset;
+    plan.dst_addr = static_cast<std::byte*>(dst_base) + description.output_offset;
+    plan.accumulate = description.accumulate;
+    plan.reduction_stride = description.reduction_stride;
+    plan.reduction_extent =
+        description.reduction_extent > 0 ? size_t(description.reduction_extent) : 0;
+
+    size_t old_rank = description.num_dims;
+    size_t new_rank = 0;
+    ReductionDim dims[MEMOPS_MAX_DIMS] = {};
+    std::copy_n(description.dims, old_rank, dims);
+
+    for (size_t i = 0; i < old_rank; i++) {
+        for (size_t j = i + 1; j < old_rank; j++) {
+            if (unsigned_abs(dims[j].output_stride) < unsigned_abs(dims[i].output_stride)) {
+                std::swap(dims[i], dims[j]);
+            }
+        }
+
+        auto new_dim = dims[i];
+
+        // no reduction needed, just say there is one dim with extent==0
+        if (new_dim.extent <= 0) {
+            plan.extents[0] = 0;
+            new_rank = 1;
+            break;
+        }
+
+        // skip this dimension if it has extent of one
+        if (new_dim.extent == 1) {
+            continue;
+        }
+
+        // if the dst_stride is zero, all values land at the same location. We can effectively consider its
+        // extent to be equal to one.
+        if (new_dim.output_stride == 0) {
+            // TODO: Maybe throw an exception here? Why would you want a dst stride of zero?
+            continue;
+        }
+
+        // fix negative stride by subtracting offset from the pointer
+        if (new_dim.output_stride < 0) {
+            plan.src_addr = static_cast<const std::byte*>(plan.src_addr)
+                + (new_dim.extent - 1) * new_dim.input_stride;
+            plan.dst_addr = static_cast<std::byte*>(plan.dst_addr)
+                + (new_dim.extent - 1) * new_dim.output_stride;
+
+            new_dim.output_stride = -new_dim.output_stride;
+            new_dim.input_stride = -new_dim.input_stride;
+        }
+
+        if (new_rank > 0) {
+            auto k = new_rank - 1;
+
+            if (is_equal(new_dim.output_stride, plan.output_strides[k] * plan.extents[k])
+                && is_equal(new_dim.input_stride, plan.input_strides[k] * plan.extents[k])) {
+                plan.extents[new_rank - 1] *= new_dim.extent;
+                continue;
+            }
+
+            if (is_divisible(new_dim.output_stride, plan.output_strides[k])
+                && is_divisible(new_dim.input_stride, plan.input_strides[k])) {
+                // TODO: should be something smart when the strides are multiples of each other
+            }
+        }
+
+        plan.extents[new_rank] = new_dim.extent;
+        plan.input_strides[new_rank] = new_dim.input_stride;
+        plan.output_strides[new_rank] = new_dim.output_stride;
+        new_rank++;
+    }
+
+    plan.num_dims = new_rank;
+    return plan;
+}
+
+template<uint BlockSize, typename T, ReductionOp Op, size_t Rank>
+__global__ void blockwise_reduce_kernel(
+    void* dst_addr,
+    const void* src_addr,
+    Vec<ptrdiff_t, Rank> input_strides,
+    Vec<ptrdiff_t, Rank> output_strides,
+    Vec<uint, Rank> extents,
+    ptrdiff_t reduction_stride,
+    uint reduction_extent,
+    bool accumulate
+) {
+    uint p[3] = {blockIdx.x, blockIdx.y, blockIdx.z};
+
+#pragma unroll
+    for (size_t i = 0; i < Rank; i++) {
+        dst_addr = static_cast<std::byte*>(dst_addr) + output_strides[i] * ptrdiff_t(p[i]);
+        src_addr = static_cast<const std::byte*>(src_addr) + input_strides[i] * ptrdiff_t(p[i]);
+    }
+
+    T value = ReductionTraits<T, Op>::identity();
+
+    for (uint i = threadIdx.x; i < reduction_extent; i++) {
+        value = ReductionTraits<T, Op>::combine(*static_cast<const T*>(src_addr), value);
+        src_addr = static_cast<const std::byte*>(src_addr) + reduction_stride;
+    }
+
+    KMM_PANIC("reduce block");
+
+    if (threadIdx.x == 0) {
+        if (accumulate) {
+            value = ReductionTraits<T, Op>::combine(*static_cast<const T*>(dst_addr), value);
+        }
+
+        *static_cast<T*>(dst_addr) = value;
+    }
+}
+
+template<typename T, ReductionOp Op>
+void __global__ launch_reduction_kernel_blockwise(g_stream_t stream, const ReductionPlan& plan) {}
+
 template<typename T, ReductionOp Op, size_t Rank>
 __global__ void elementwise_reduce_kernel(
-    const void* src_addr,
     void* dst_addr,
-    Vec<ReductionDim, Rank> dims,
-    memops_extent_type reduction_extent,
-    memops_stride_type reduction_stride,
+    const void* src_addr,
+    Vec<ptrdiff_t, Rank> input_strides,
+    Vec<ptrdiff_t, Rank> output_strides,
+    Vec<uint, Rank> extents,
+    ptrdiff_t reduction_stride,
+    uint reduction_extent,
     bool accumulate
 ) {
     uint p[3] = {
         blockIdx.x * blockDim.x + threadIdx.x,
         blockIdx.y * blockDim.y + threadIdx.y,
-        blockIdx.z * blockDim.z + threadIdx.z
+        blockIdx.z * blockDim.z + threadIdx.z,
     };
 
+#pragma unroll
     for (size_t i = 0; i < Rank; i++) {
-        if (p[i] >= dims[i].extent) {
+        if (p[i] >= extents[i]) {
             return;
         }
 
-        src_addr = static_cast<const std::byte*>(src_addr) + dims[i].input_stride * p[i];
-        dst_addr = static_cast<std::byte*>(dst_addr) + dims[i].output_stride * p[i];
+        dst_addr = static_cast<std::byte*>(dst_addr) + output_strides[i] * ptrdiff_t(p[i]);
+        src_addr = static_cast<const std::byte*>(src_addr) + input_strides[i] * ptrdiff_t(p[i]);
     }
 
-    T result = ReductionTraits<T, Op>::identity();
+    T value = ReductionTraits<T, Op>::identity();
 
-    for (memops_extent_type i = 0; i < reduction_extent; i++) {
-        result = ReductionTraits<T, Op>::combine(result, *static_cast<const T*>(src_addr));
+    for (uint i = 0; i < reduction_extent; i++) {
+        value = ReductionTraits<T, Op>::combine(*static_cast<const T*>(src_addr), value);
         src_addr = static_cast<const std::byte*>(src_addr) + reduction_stride;
     }
 
     if (accumulate) {
-        result = ReductionTraits<T, Op>::combine(result, *static_cast<const T*>(dst_addr));
+        value = ReductionTraits<T, Op>::combine(*static_cast<const T*>(dst_addr), value);
     }
 
-    *static_cast<T*>(dst_addr) = result;
+    *static_cast<T*>(dst_addr) = value;
+}
+
+// Choose a thread-block shape for `elementwise_copy_kernel`.
+template<size_t Rank>
+dim3 compute_block_size(
+    size_t elem_size,
+    Vec<ptrdiff_t, Rank> input_strides,
+    Vec<ptrdiff_t, Rank> output_strides,
+    Vec<size_t, Rank> extents
+) {
+    KMM_TODO();
 }
 
 template<typename T, ReductionOp Op>
-void launch_elementwise_reduce(
-    g_stream_t stream,
-    const void* src_addr,
-    void* dst_addr,
-    const ReductionDescription& description
-) {
-    Vec<ReductionDim, 3> dims;
+void launch_reduction_kernel_elementwise(g_stream_t stream, const ReductionPlan& plan) {
+    KMM_ASSERT(plan.is_aligned<T>());
+    KMM_ASSERT(plan.num_dims <= 3);
+
+    Vec<ptrdiff_t, 3> input_strides;
+    Vec<ptrdiff_t, 3> output_strides;
+    Vec<size_t, 3> extents;
 
     for (size_t i = 0; i < 3; i++) {
-        if (i < description.num_dims) {
-            dims[i] = description.dims[i];
-        } else {
-            // default is extent=1, stride=0
-            dims[i] = ReductionDim {};
+        input_strides[i] = i < plan.num_dims ? plan.input_strides[i] : 0;
+        output_strides[i] = i < plan.num_dims ? plan.output_strides[i] : 0;
+        extents[i] = i < plan.num_dims ? plan.extents[i] : 1u;
+    }
+
+    constexpr size_t TILE_X = size_t(1) << 31;
+    constexpr size_t TILE_YZ = 65535;
+
+    dim3 block_size = compute_block_size(sizeof(T), input_strides, output_strides, extents);
+
+    size_t nx = extents[0];
+    size_t ny = extents[1];
+    size_t nz = extents[2];
+
+    for (size_t ox = 0; ox < nx; ox += TILE_X) {
+        for (size_t oy = 0; oy < ny; oy += TILE_YZ) {
+            for (size_t oz = 0; oz < nz; oz += TILE_YZ) {
+                size_t ex = std::min(TILE_X, nx - ox);
+                size_t ey = std::min(TILE_YZ, ny - oy);
+                size_t ez = std::min(TILE_YZ, nz - oz);
+
+                auto* src_addr = static_cast<const std::byte*>(plan.src_addr);
+                auto* dst_addr = static_cast<std::byte*>(plan.dst_addr);
+                Vec<uint, 3> sub;
+
+                if constexpr (true) {
+                    src_addr += ptrdiff_t(ox) * input_strides[0];
+                    dst_addr += ptrdiff_t(ox) * output_strides[0];
+                    sub[0] = checked_cast<uint>(ex);
+                }
+
+                if constexpr (true) {
+                    src_addr += ptrdiff_t(oy) * input_strides[1];
+                    dst_addr += ptrdiff_t(oy) * output_strides[1];
+                    sub[1] = checked_cast<uint>(ey);
+                }
+
+                if constexpr (true) {
+                    src_addr += ptrdiff_t(oz) * input_strides[2];
+                    dst_addr += ptrdiff_t(oz) * output_strides[2];
+                    sub[2] = checked_cast<uint>(ez);
+                }
+
+                dim3 grid_size = {
+                    checked_cast<uint>(div_ceil<size_t>(ex, block_size.x)),
+                    checked_cast<uint>(div_ceil<size_t>(ey, block_size.y)),
+                    checked_cast<uint>(div_ceil<size_t>(ez, block_size.z)),
+                };
+
+                elementwise_reduce_kernel<T, Op><<<grid_size, block_size, 0, stream>>>(
+                    dst_addr,
+                    src_addr,
+                    input_strides,
+                    output_strides,
+                    sub,
+                    plan.reduction_stride,
+                    checked_cast<uint>(plan.reduction_extent),
+                    plan.accumulate
+                );
+            }
         }
-    }
-
-    dim3 block_size = {256, 1, 1};
-    while (is_less(description.dims[0].extent, block_size.x)) {
-        block_size.x /= 2;
-        block_size.y *= 2;
-    }
-
-    while (is_less(description.dims[1].extent, block_size.y)) {
-        block_size.y /= 2;
-        block_size.z *= 2;
-    }
-
-    dim3 grid_size = {
-        div_ceil(checked_cast<uint>(description.dims[0].extent), block_size.x),
-        div_ceil(checked_cast<uint>(description.dims[1].extent), block_size.y),
-        div_ceil(checked_cast<uint>(description.dims[2].extent), block_size.z),
-    };
-
-    elementwise_reduce_kernel<T, Op><<<grid_size, block_size, 0, stream>>>(
-        static_cast<const std::byte*>(src_addr) + description.input_offset,
-        static_cast<std::byte*>(dst_addr) + description.output_offset,
-        dims,
-        description.reduction_extent,
-        description.reduction_stride,
-        description.accumulate
-    );
-}
-
-template<uint BlockDim, typename T, ReductionOp Op, size_t Rank>
-__global__ void blockwise_reduce_kernel(
-    const void* src_addr,
-    void* dst_addr,
-    Vec<ReductionDim, Rank> dims,
-    memops_extent_type reduction_extent,
-    memops_stride_type reduction_stride,
-    bool accumulate
-) {
-    __shared__ typename cub::BlockReduce<T, BlockDim>::TempStorage smem_storage;
-    cub::BlockReduce<T, BlockDim> block_reduce {smem_storage};
-
-    uint p[3] = {blockIdx.x, blockIdx.y, blockIdx.z};
-
-    for (size_t i = 0; i < Rank; i++) {
-        if (p[i] >= dims[i].extent) {
-            return;
-        }
-
-        src_addr = static_cast<const std::byte*>(src_addr) + dims[i].input_stride * p[i];
-        dst_addr = static_cast<std::byte*>(dst_addr) + dims[i].output_stride * p[i];
-    }
-
-    T result = ReductionTraits<T, Op>::identity();
-
-    for (memops_extent_type i = threadIdx.x; i < reduction_extent; i += BlockDim) {
-        result = ReductionTraits<T, Op>::combine(result, *static_cast<const T*>(src_addr));
-        src_addr = static_cast<const std::byte*>(src_addr) + reduction_stride;
-    }
-
-    result = block_reduce.Reduce(result, ReductionTraits<T, Op>::combine);
-
-    if (threadIdx.x == 0) {
-        if (accumulate) {
-            result = ReductionTraits<T, Op>::combine(result, *static_cast<const T*>(dst_addr));
-        }
-
-        *static_cast<T*>(dst_addr) = result;
     }
 }
 
 template<typename T, ReductionOp Op>
-void launch_blockwise_reduce(
-    g_stream_t stream,
-    const void* src_addr,
-    void* dst_addr,
-    const ReductionDescription& description
-) {
-    static constexpr uint block_size = 256;
+void launch_reduction_kernel_op(g_stream_t stream, const ReductionPlan& plan) {
+    size_t num_dims = plan.num_dims;
 
-    Vec<ReductionDim, 3> dims;
+    if constexpr (!is_reduction_supported<T, Op>) {
+        throw std::runtime_error(
+            "invalid reduction parameters: unsupported operation for data type"
+        );
+    } else if (!plan.is_aligned<T>()) {
+        throw std::runtime_error("invalid reduction parameters: address not aligned for data type");
+    } else if (num_dims > 3) {
+        // The strided kernel handles at most three axes (Rank == 3).
+        size_t k = std::min_element(plan.extents, plan.extents + num_dims) - plan.extents;
 
-    for (size_t i = 0; i < 3; i++) {
-        if (i < description.num_dims) {
-            dims[i] = description.dims[i];
-        } else {
-            // default is extent=1, stride=0
-            dims[i] = ReductionDim {};
+        ReductionPlan sub = plan;
+        sub.num_dims = num_dims - 1;
+
+        // Drop axis `k` from the descriptor arrays, shifting the trailing axes down.
+        for (size_t d = k; d + 1 < num_dims; d++) {
+            sub.extents[d] = plan.extents[d + 1];
+            sub.input_strides[d] = plan.input_strides[d + 1];
+            sub.output_strides[d] = plan.output_strides[d + 1];
         }
-    }
 
-    dim3 grid_size = {
-        checked_cast<uint>(description.dims[0].extent),
-        checked_cast<uint>(description.dims[1].extent),
-        checked_cast<uint>(description.dims[2].extent),
-    };
+        for (size_t i = 0; i < plan.extents[k]; i++) {
+            sub.src_addr =
+                static_cast<const std::byte*>(plan.src_addr) + ptrdiff_t(i) * plan.input_strides[k];
+            sub.dst_addr =
+                static_cast<std::byte*>(plan.dst_addr) + ptrdiff_t(i) * plan.output_strides[k];
+            launch_reduction_kernel_op<T, Op>(stream, sub);
 
-    blockwise_reduce_kernel<block_size, T, Op><<<grid_size, block_size, 0, stream>>>(
-        static_cast<const std::byte*>(src_addr) + description.input_offset,
-        static_cast<std::byte*>(dst_addr) + description.output_offset,
-        dims,
-        description.reduction_extent,
-        description.reduction_stride,
-        description.accumulate
-    );
-}
-
-template<typename T, ReductionOp Op>
-void reduced_typed_op_async(
-    g_stream_t stream,
-    const void* src_addr,
-    void* dst_addr,
-    const ReductionDescription& description
-) {
-    if (description.reduction_extent < 1024) {
-        return launch_elementwise_reduce<T, Op>(stream, src_addr, dst_addr, description);
+            // The next call MUST accumulate into the output of the previous call.
+            sub.accumulate = true;
+        }
     } else {
-        return launch_blockwise_reduce<T, Op>(stream, src_addr, dst_addr, description);
-    }
-}
+        KMM_TODO();
 
-/// Runs `reduced_typed_op_async<T, Op>` when that combination is a supported reduction (see
-/// `is_reduction_supported`), otherwise throws instead of failing to compile. This is what lets
-/// `reduce_typed_async` list every operator unconditionally even for element types that only
-/// support a subset (integers-only for the bitwise ops, `KeyValue` only for `Min`/`Max`).
-template<typename T, ReductionOp Op>
-void reduced_typed_op_checked_async(
-    g_stream_t stream,
-    const void* src_addr,
-    void* dst_addr,
-    const ReductionDescription& description
-) {
-    if constexpr (is_reduction_supported<T, Op>) {
-        reduced_typed_op_async<T, Op>(stream, src_addr, dst_addr, description);
-    } else {
-        throw std::runtime_error("reduction operator not supported for this data type");
+        //        if (plan.reduction_extent > 1024) {
+        //            launch_reduction_kernel_blockwise<T, Op>(stream, plan);
+        //        } else {
+        //            launch_reduction_kernel_elementwise<T, Op>(stream, plan);
+        //        }
     }
 }
 
 template<typename T>
-void reduce_typed_async(
-    g_stream_t stream,
-    const void* src_addr,
-    void* dst_addr,
-    const ReductionDescription& description
-) {
-    switch (description.operation) {
+void launch_reduction_kernel_typed(g_stream_t stream, const ReductionPlan& plan, ReductionOp op) {
+    switch (op) {
         case ReductionOp::Sum:
-            return reduced_typed_op_checked_async<T, ReductionOp::Sum>(
-                stream,
-                src_addr,
-                dst_addr,
-                description
-            );
-        case ReductionOp::Product:
-            return reduced_typed_op_checked_async<T, ReductionOp::Product>(
-                stream,
-                src_addr,
-                dst_addr,
-                description
-            );
-        case ReductionOp::Min:
-            return reduced_typed_op_checked_async<T, ReductionOp::Min>(
-                stream,
-                src_addr,
-                dst_addr,
-                description
-            );
-        case ReductionOp::Max:
-            return reduced_typed_op_checked_async<T, ReductionOp::Max>(
-                stream,
-                src_addr,
-                dst_addr,
-                description
-            );
-        case ReductionOp::BitwiseAnd:
-            return reduced_typed_op_checked_async<T, ReductionOp::BitwiseAnd>(
-                stream,
-                src_addr,
-                dst_addr,
-                description
-            );
-        case ReductionOp::BitwiseOr:
-            return reduced_typed_op_checked_async<T, ReductionOp::BitwiseOr>(
-                stream,
-                src_addr,
-                dst_addr,
-                description
-            );
-    }
-
-    KMM_PANIC("invalid reduction operator");
-}
-
-void do_reduce_gpu(
-    g_stream_t stream,
-    const void* src_addr,
-    void* dst_addr,
-    const ReductionDescription& description
-) {
-    switch (description.dtype) {
-        case DataType::Unknown:
+            launch_reduction_kernel_op<T, ReductionOp::Sum>(stream, plan);
             break;
-        case DataType::Int32:
-            return reduce_typed_async<int32_t>(stream, src_addr, dst_addr, description);
-        case DataType::Int64:
-            return reduce_typed_async<int64_t>(stream, src_addr, dst_addr, description);
-        case DataType::Uint32:
-            return reduce_typed_async<uint32_t>(stream, src_addr, dst_addr, description);
-        case DataType::Uint64:
-            return reduce_typed_async<uint64_t>(stream, src_addr, dst_addr, description);
-        case DataType::Float32:
-            return reduce_typed_async<float>(stream, src_addr, dst_addr, description);
-        case DataType::Float64:
-            return reduce_typed_async<double>(stream, src_addr, dst_addr, description);
-        case DataType::KeyValueInt64:
-            return reduce_typed_async<KeyValue<int64_t>>(stream, src_addr, dst_addr, description);
-        case DataType::KeyValueFloat64:
-            return reduce_typed_async<KeyValue<double>>(stream, src_addr, dst_addr, description);
+        case ReductionOp::Product:
+            launch_reduction_kernel_op<T, ReductionOp::Product>(stream, plan);
+            break;
+        case ReductionOp::Min:
+            launch_reduction_kernel_op<T, ReductionOp::Min>(stream, plan);
+            break;
+        case ReductionOp::Max:
+            launch_reduction_kernel_op<T, ReductionOp::Max>(stream, plan);
+            break;
+        case ReductionOp::BitwiseAnd:
+            launch_reduction_kernel_op<T, ReductionOp::BitwiseAnd>(stream, plan);
+            break;
+        case ReductionOp::BitwiseOr:
+            launch_reduction_kernel_op<T, ReductionOp::BitwiseOr>(stream, plan);
+            break;
+        default:
+            KMM_PANIC("invalid operation for reduction");
     }
-
-    KMM_PANIC("invalid data type");
 }
 
-void do_multilevel_reduce(
+void launch_reduction_kernel(
     g_stream_t stream,
-    const void* src_addr,
-    void* dst_addr,
-    const ReductionDescription& description
+    const ReductionPlan& plan,
+    DataType dtype,
+    ReductionOp op
 ) {
-    memops_extent_type elements_per_block = 1024;
-    auto num_chunks = div_floor(description.reduction_extent, elements_per_block);
-    auto chunk_stride = checked_mul(description.reduction_stride, elements_per_block);
-    auto remaining_chunks = description.reduction_extent % elements_per_block;
-
-    ReductionDescription coarse(description.dtype, description.operation);
-    coarse.input_offset = description.input_offset;
-    coarse.output_offset = 0;
-    coarse.reduction_extent = elements_per_block;
-    coarse.reduction_stride = description.reduction_stride;
-    coarse.accumulate = false;
-
-    memops_extent_type stride = 1;
-
-    for (size_t i = 0; i < description.num_dims; i++) {
-        coarse.add_dimension(description.dims[i].extent, description.dims[i].input_stride, stride);
-
-        stride = checked_mul<memops_extent_type>(stride, description.dims[i].extent);
+    switch (dtype) {
+        case DataType::Int32:
+            launch_reduction_kernel_typed<int32_t>(stream, plan, op);
+            break;
+        case DataType::Int64:
+            launch_reduction_kernel_typed<int64_t>(stream, plan, op);
+            break;
+        case DataType::Uint32:
+            launch_reduction_kernel_typed<uint32_t>(stream, plan, op);
+            break;
+        case DataType::Uint64:
+            launch_reduction_kernel_typed<uint64_t>(stream, plan, op);
+            break;
+        case DataType::Float32:
+            launch_reduction_kernel_typed<float>(stream, plan, op);
+            break;
+        case DataType::Float64:
+            launch_reduction_kernel_typed<double>(stream, plan, op);
+            break;
+        case DataType::KeyValueInt64:
+            launch_reduction_kernel_typed<KeyValue<int64_t>>(stream, plan, op);
+            break;
+        case DataType::KeyValueFloat64:
+            launch_reduction_kernel_typed<KeyValue<double>>(stream, plan, op);
+            break;
+        default:
+            KMM_PANIC("invalid data type for reduction");
     }
-
-    coarse.add_dimension(num_chunks, chunk_stride, stride);
-
-    ReductionDescription fine(description.dtype, description.operation);
-    fine.input_offset = 0;
-    fine.output_offset = description.output_offset;
-    fine.reduction_extent = num_chunks;
-    fine.reduction_stride = stride;
-    fine.accumulate = description.accumulate;
-
-    for (size_t i = 0; i < description.num_dims; i++) {
-        fine.add_dimension(
-            description.dims[i].extent,
-            coarse.dims[i].output_stride,
-            description.dims[i].output_stride
-        );
-    }
-
-    ReductionDescription remainder(description.dtype, description.operation);
-    remainder.input_offset = description.input_offset + num_chunks * description.reduction_stride;
-    remainder.output_offset = description.output_offset;
-    remainder.reduction_extent = remaining_chunks;
-    remainder.reduction_stride = description.reduction_stride;
-    remainder.accumulate = true;
-
-    for (size_t i = 0; i < description.num_dims; i++) {
-        remainder.add_dimension(
-            description.dims[i].extent,
-            description.dims[i].input_stride,
-            description.dims[i].output_stride
-        );
-    }
-}
-
-size_t reduce_gpu_scratch_size(const ReductionDescription& description) {
-    // The multi-level reduction path (the only consumer of scratch memory) is not enabled yet,
-    // so `reduce_gpu` currently needs no scratch buffer for any description.
-    (void)description;
-    return 0;
 }
 
 void reduce_gpu(
     g_stream_t stream,
-    const void* src_addr,
-    void* dst_addr,
+    const void* src_base,
+    void* dst_base,
     void* scratch_addr,
     const ReductionDescription& description
 ) {
-    // Unused until the multi-level reduction path is enabled (see `reduce_gpu_scratch_size`).
-    (void)scratch_addr;
+    auto plan = make_plan(src_base, dst_base, description);
+    launch_reduction_kernel(stream, plan, description.dtype, description.operation);
+}
 
-    ReductionDescription simplified = description.simplify();
-
-    if (simplified.is_noop()) {
-        return;
-    }
-
-    if (simplified.is_equivalent_to_copy()) {
-        copy_gpu(stream, src_addr, dst_addr, simplified.as_copy());
-        return;
-    }
-
-    if (simplified.is_equivalent_to_fill()) {
-        fill_gpu(stream, dst_addr, simplified.as_fill());
-        return;
-    }
-    //
-    //    if (simplified.reduction_extent > 1024 * 256) {
-    //        do_multilevel_reduce(
-    //            stream,
-    //            src_addr,
-    //            dst_addr,
-    //            description
-    //        );
-    //    }
-
-    do_reduce_gpu(stream, src_addr, dst_addr, simplified);
+size_t reduce_gpu_scratch_size(const ReductionDescription& description) {
+    return 0;
 }
 
 }  // namespace kmm::memops

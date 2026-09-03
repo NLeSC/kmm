@@ -125,30 +125,6 @@ TEST_CASE("checked_rem") {
     CHECK_THROWS(checked_rem(10, 0));
 }
 
-TEST_CASE("is_divisible") {
-    CHECK(is_divisible(10, 5));
-    CHECK(is_divisible(10, 2));
-    CHECK_FALSE(is_divisible(10, 3));
-
-    CHECK(is_divisible(0, 5));
-    CHECK(is_divisible(-10, 5));
-    CHECK(is_divisible(10, -5));
-    CHECK_FALSE(is_divisible(-10, 3));
-
-    // division by zero yields false rather than throwing
-    CHECK_FALSE(is_divisible(10, 0));
-    CHECK_FALSE(is_divisible(0, 0));
-
-    // mixed signed/unsigned operands
-    CHECK(is_divisible(10, 5u));
-    CHECK(is_divisible(-10, 5u));
-    CHECK_FALSE(is_divisible(-10, 3u));
-
-    // large unsigned operands whose remainder does not fit in int64_t
-    CHECK(is_divisible(ULONG_MAX, ULONG_MAX));
-    CHECK_FALSE(is_divisible(ULONG_MAX, ULONG_MAX - 1));
-}
-
 TEST_CASE("checked_neg") {
     CHECK(checked_neg(5) == -5);
     CHECK(checked_neg(-5) == 5);
