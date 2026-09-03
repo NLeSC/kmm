@@ -50,6 +50,12 @@ namespace kmm {
 /// reason for the panic.
 [[noreturn]] void panic(const char* filename, int lineno, const char* message);
 #else
+    #if defined(__CUDACC__)
+        #include <cuda_runtime.h>
+    #elif defined(__HIPCC__)
+        #include <hip/hip_runtime.h>
+    #endif
+
 [[noreturn]] KMM_DEVICE void panic(const char* filename, int lineno, const char* message) {
     printf(
         "[block=(%u,%u,%u) thread=(%u,%u,%u)] PANIC at %s:%d: %s\n",

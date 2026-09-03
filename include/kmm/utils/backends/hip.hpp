@@ -7,6 +7,7 @@
 #include <rocblas/rocblas.h>
 
 #include "kmm/core/macros.hpp"
+#include "kmm/utils/gpu_utils.hpp"
 
 namespace kmm {
 

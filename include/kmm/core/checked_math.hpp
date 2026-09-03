@@ -3,6 +3,16 @@
 #include "kmm/core/checked_compare.hpp"
 #include "kmm/core/macros.hpp"
 
+// __mul64hi/__umul64hi are bare compiler builtins under CUDA, but HIP only declares them once its
+// runtime header is included.
+#if KMM_IS_DEVICE
+    #if defined(__CUDACC__)
+        #include <cuda_runtime.h>
+    #elif defined(__HIPCC__)
+        #include <hip/hip_runtime.h>
+    #endif
+#endif
+
 namespace kmm {
 
 namespace detail {
