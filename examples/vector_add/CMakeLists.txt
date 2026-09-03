@@ -6,6 +6,8 @@ if(KMM_USE_CUDA)
             PROPERTIES
             CUDA_ARCHITECTURES "80"
     )
+    # KMM_LAMBDA expands to a __device__-annotated lambda, which nvcc only accepts with this flag.
+    target_compile_options(vector_add PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:--extended-lambda>)
 endif()
 
 if(KMM_USE_HIP)

@@ -176,7 +176,7 @@ static inline g_result_t g_memcpy_peer_async(
     size_t ByteCount,
     g_stream_t hStream
 ) {
-    return hipMemcpyPeerAsync(dstDevicePtr, dstDevice, srcDevicePtr, srcDevice, ByteCount, hStream);
+    return hipMemcpyPeerAsync(dstAddr, dstDevice, srcAddr, srcDevice, ByteCount, hStream);
 }
 
 // Memory Fill Operations
