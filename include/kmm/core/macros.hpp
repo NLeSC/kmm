@@ -26,8 +26,8 @@
 #elif defined(__HIPCC__)
     // HIP
     // TODO: using __forceinline__ breaks compilation, it needs to be investigated
-    #define KMM_HOST_DEVICE          __host__ __device__
-    #define KMM_DEVICE               __device__ __forceinline__
+    #define KMM_HOST_DEVICE          __host__ __device__ inline __attribute__((always_inline))
+    #define KMM_DEVICE               __device__ inline __attribute__((always_inline))
     #define KMM_HOST_DEVICE_NOINLINE __host__ __device__
     #define KMM_DEVICE_NOINLINE      __device__
     #define KMM_LAMBDA               [=] __device__
