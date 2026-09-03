@@ -6,7 +6,7 @@
 #include <hip/hip_runtime.h>
 #include <rocblas/rocblas.h>
 
-#include "kmm/utils/macros.hpp"
+#include "kmm/core/macros.hpp"
 
 namespace kmm {
 

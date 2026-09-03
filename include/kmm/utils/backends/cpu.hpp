@@ -2,7 +2,7 @@
 
 #include <cstddef>
 
-#include "kmm/utils/macros.hpp"
+#include "kmm/core/macros.hpp"
 
 namespace kmm {
 
