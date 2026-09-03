@@ -76,7 +76,16 @@ using gpu_mem_pool_attr_t = hipMemPoolAttr;
 #define g_stream_destroy                hipStreamDestroy
 #define g_stream_wait_event             hipStreamWaitEvent
 
-g_result_t g_stream_get_ctx(g_stream_t, g_context_t*);
+static inline g_result_t g_stream_get_ctx(g_stream_t, g_context_t*) {
+    // HIP has no equivalent of `cuStreamGetCtx`. Instead, resolve the device
+    // the stream was created on and reuse its primary context, which is what
+    // `SystemInfo` already treats as "the" context for that device.
+    g_device_t device;
+
+    g_stream_get_device(hStream, &device);
+    g_device_primary_ctx_retain(pctx, device);
+    g_device_primary_ctx_release(device);
+}
 
 // Event Management Constants & Functions
 
@@ -131,23 +140,29 @@ g_result_t g_stream_get_ctx(g_stream_t, g_context_t*);
 #define g_memcpy_d_to_d       hipMemcpyDtoD
 #define g_memcpy_d_to_d_async hipMemcpyDtoDAsync
 
-g_result_t g_memcpy_async(
+static inline g_result_t g_memcpy_async(
     g_device_ptr_t dst,
     g_device_ptr_t src,
     size_t ByteCount,
     g_stream_t hStream
-);
+) {
+    return hipMemcpyAsync(dst, src, ByteCount, hipMemcpyDefault, hStream);
+}
 
-g_result_t g_memcpy_h_to_d_async(
+static inline g_result_t g_memcpy_h_to_d_async(
     g_device_ptr_t dstDevice,
     const void* srcHost,
     size_t ByteCount,
     g_stream_t hStream
-);
+) {
+    return hipMemcpyHtoDAsync(dstDevice, const_cast<void*>(srcHost), ByteCount, hStream);
+}
 
-g_result_t g_memcpy_h_to_d(g_device_ptr_t dstDevice, const void* srcHost, size_t ByteCount);
+static inline g_result_t g_memcpy_h_to_d(g_device_ptr_t dstDevice, const void* srcHost, size_t ByteCount) {
+    return hipMemcpyHtoD(dstDevice, const_cast<void*>(srcHost), ByteCount);
+}
 
-g_result_t g_memcpy_peer_async(
+static inline g_result_t g_memcpy_peer_async(
     g_device_ptr_t,
     g_context_t,
     g_device_t,
@@ -156,7 +171,9 @@ g_result_t g_memcpy_peer_async(
     g_device_t,
     size_t,
     g_stream_t
-);
+) {
+    return hipMemcpyPeerAsync(dstDevicePtr, dstDevice, srcDevicePtr, srcDevice, ByteCount, hStream);
+}
 
 // Memory Fill Operations
 
@@ -230,6 +247,9 @@ using blas_handle_t = rocblas_handle;
 #define blas_set_stream        rocblas_set_stream
 #define blas_destroy           rocblas_destroy_handle
 #define blas_get_status_string rocblas_status_to_string
-const char* blas_get_status_name(blas_status_t);
+
+static inline const char* blas_get_status_name(blas_status_t) {
+    return "";
+}
 
 }  // namespace kmm

@@ -29,15 +29,9 @@ file(GLOB_RECURSE sources
   "${PROJECT_SOURCE_DIR}/src/*.cu"
 )
 
-# Backend implementation files each implement the same symbols against a backend-specific
-# header (see include/kmm/utils/backends.hpp), so only the active backend's file may be compiled.
-list(FILTER sources EXCLUDE REGEX "src/utils/backends/(cuda|hip|cpu)\\.cpp$")
+list(FILTER sources EXCLUDE REGEX "src/utils/backends/cpu.cpp")
 
-if(KMM_USE_CUDA)
-  list(APPEND sources "${PROJECT_SOURCE_DIR}/src/utils/backends/cuda.cpp")
-elseif(KMM_USE_HIP)
-  list(APPEND sources "${PROJECT_SOURCE_DIR}/src/utils/backends/hip.cpp")
-else()
+if(NOT KMM_USE_CUDA AND NOT KMM_USE_HIP)
   list(APPEND sources "${PROJECT_SOURCE_DIR}/src/utils/backends/cpu.cpp")
 endif()
 
