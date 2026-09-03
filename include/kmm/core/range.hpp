@@ -211,7 +211,7 @@ KMM_HOST_DEVICE constexpr Range<T> operator-(const Range<T>& range, const T& off
 }
 
 template<typename T>
-class Range<T>::iterator {
+struct Range<T>::iterator {
   public:
     using value_type = T;
     using difference_type =

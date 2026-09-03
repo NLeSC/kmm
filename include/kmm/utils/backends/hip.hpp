@@ -82,9 +82,9 @@ static inline g_result_t g_stream_get_ctx(g_stream_t hStream, g_context_t* pctx)
     // `SystemInfo` already treats as "the" context for that device.
     g_device_t device;
 
-    g_stream_get_device(hStream, &device);
-    g_device_primary_ctx_retain(pctx, device);
-    g_device_primary_ctx_release(device);
+    KMM_GPU_CHECK(g_stream_get_device(hStream, &device));
+    KMM_GPU_CHECK(g_device_primary_ctx_retain(pctx, device));
+    KMM_GPU_CHECK(g_device_primary_ctx_release(device));
 }
 
 // Event Management Constants & Functions
