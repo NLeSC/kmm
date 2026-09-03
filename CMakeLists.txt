@@ -156,7 +156,13 @@ elseif(KMM_USE_HIP)
   set(CMAKE_MODULE_PATH "${HIP_PATH}/cmake" ${CMAKE_MODULE_PATH})
   find_package(HIP REQUIRED)
   find_package(ROCBLAS REQUIRED)
-  set_source_files_properties(${sources} PROPERTIES LANGUAGE HIP)
+  # CMake only recognizes .cu as CUDA by default, so the actual GPU kernel files (which need to be
+  # compiled by amdclang++'s HIP frontend) must be reassigned explicitly. Plain .cpp files must
+  # stay as CXX -- forcing them to HIP too makes amdclang++ run a device-code compilation pass on
+  # files with no device code, which fails since they never include <hip/hip_runtime.h>.
+  set(hip_kernel_sources ${sources})
+  list(FILTER hip_kernel_sources INCLUDE REGEX "\\.cu$")
+  set_source_files_properties(${hip_kernel_sources} PROPERTIES LANGUAGE HIP)
   target_link_libraries(${PROJECT_NAME}
           PUBLIC
           hip::host
