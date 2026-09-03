@@ -250,16 +250,16 @@ TEST_CASE("checked_add (stress test)", "[.][slow]") {
     stress_test_checked_add<int, int, int>();
     stress_test_checked_add<uint, uint, uint>();
     stress_test_checked_add<long, long, long>();
-    stress_test_checked_add<ulong, ulong, ulong>();
+    stress_test_checked_add<unsigned long, unsigned long, unsigned long>();
 
-    stress_test_checked_add<long, ulong, long>();
+    stress_test_checked_add<long, unsigned long, long>();
     stress_test_checked_add<long, long, long>();
-    stress_test_checked_add<long, ulong, ulong>();
-    stress_test_checked_add<long, long, ulong>();
-    stress_test_checked_add<ulong, ulong, long>();
-    stress_test_checked_add<ulong, long, long>();
-    stress_test_checked_add<ulong, ulong, ulong>();
-    stress_test_checked_add<ulong, long, ulong>();
+    stress_test_checked_add<long, unsigned long, unsigned long>();
+    stress_test_checked_add<long, long, unsigned long>();
+    stress_test_checked_add<unsigned long, unsigned long, long>();
+    stress_test_checked_add<unsigned long, long, long>();
+    stress_test_checked_add<unsigned long, unsigned long, unsigned long>();
+    stress_test_checked_add<unsigned long, long, unsigned long>();
 }
 
 template<typename O, typename L, typename R>
@@ -271,16 +271,16 @@ TEST_CASE("checked_sub (stress test)", "[.][slow]") {
     stress_test_checked_sub<int, int, int>();
     stress_test_checked_sub<uint, uint, uint>();
     stress_test_checked_sub<long, long, long>();
-    stress_test_checked_sub<ulong, ulong, ulong>();
+    stress_test_checked_sub<unsigned long, unsigned long, unsigned long>();
 
-    stress_test_checked_sub<long, ulong, long>();
+    stress_test_checked_sub<long, unsigned long, long>();
     stress_test_checked_sub<long, long, long>();
-    stress_test_checked_sub<long, ulong, ulong>();
-    stress_test_checked_sub<long, long, ulong>();
-    stress_test_checked_sub<ulong, ulong, long>();
-    stress_test_checked_sub<ulong, long, long>();
-    stress_test_checked_sub<ulong, ulong, ulong>();
-    stress_test_checked_sub<ulong, long, ulong>();
+    stress_test_checked_sub<long, unsigned long, unsigned long>();
+    stress_test_checked_sub<long, long, unsigned long>();
+    stress_test_checked_sub<unsigned long, unsigned long, long>();
+    stress_test_checked_sub<unsigned long, long, long>();
+    stress_test_checked_sub<unsigned long, unsigned long, unsigned long>();
+    stress_test_checked_sub<unsigned long, long, unsigned long>();
 }
 
 template<typename O, typename L, typename R>
@@ -300,16 +300,16 @@ TEST_CASE("checked_mul (stress test)", "[.][slow]") {
     stress_test_checked_mul<int, int, int>();
     stress_test_checked_mul<uint, uint, uint>();
     stress_test_checked_mul<long, long, long>();
-    stress_test_checked_mul<ulong, ulong, ulong>();
+    stress_test_checked_mul<unsigned long, unsigned long, unsigned long>();
 
-    stress_test_checked_mul<long, ulong, long>();
+    stress_test_checked_mul<long, unsigned long, long>();
     stress_test_checked_mul<long, long, long>();
-    stress_test_checked_mul<long, ulong, ulong>();
-    stress_test_checked_mul<long, long, ulong>();
-    stress_test_checked_mul<ulong, ulong, long>();
-    stress_test_checked_mul<ulong, long, long>();
-    stress_test_checked_mul<ulong, ulong, ulong>();
-    stress_test_checked_mul<ulong, long, ulong>();
+    stress_test_checked_mul<long, unsigned long, unsigned long>();
+    stress_test_checked_mul<long, long, unsigned long>();
+    stress_test_checked_mul<unsigned long, unsigned long, long>();
+    stress_test_checked_mul<unsigned long, long, long>();
+    stress_test_checked_mul<unsigned long, unsigned long, unsigned long>();
+    stress_test_checked_mul<unsigned long, long, unsigned long>();
 }
 
 template<typename O, typename L, typename R>
@@ -324,16 +324,16 @@ TEST_CASE("checked_div (stress test)", "[.][slow]") {
     stress_test_checked_div<int, int, int>();
     stress_test_checked_mul<uint, uint, uint>();
     stress_test_checked_div<long, long, long>();
-    stress_test_checked_div<ulong, ulong, ulong>();
+    stress_test_checked_div<unsigned long, unsigned long, unsigned long>();
 
-    stress_test_checked_div<long, ulong, long>();
+    stress_test_checked_div<long, unsigned long, long>();
     stress_test_checked_div<long, long, long>();
-    stress_test_checked_div<long, ulong, ulong>();
-    stress_test_checked_div<long, long, ulong>();
-    stress_test_checked_div<ulong, ulong, long>();
-    stress_test_checked_div<ulong, long, long>();
-    stress_test_checked_div<ulong, ulong, ulong>();
-    stress_test_checked_div<ulong, long, ulong>();
+    stress_test_checked_div<long, unsigned long, unsigned long>();
+    stress_test_checked_div<long, long, unsigned long>();
+    stress_test_checked_div<unsigned long, unsigned long, long>();
+    stress_test_checked_div<unsigned long, long, long>();
+    stress_test_checked_div<unsigned long, unsigned long, unsigned long>();
+    stress_test_checked_div<unsigned long, long, unsigned long>();
 }
 
 template<typename O, typename L, typename R>
@@ -348,14 +348,14 @@ TEST_CASE("checked_rem (stress test)", "[.][slow]") {
     stress_test_checked_rem<int, int, int>();
     stress_test_checked_mul<uint, uint, uint>();
     stress_test_checked_rem<long, long, long>();
-    stress_test_checked_rem<ulong, ulong, ulong>();
+    stress_test_checked_rem<unsigned long, unsigned long, unsigned long>();
 
-    stress_test_checked_rem<long, ulong, long>();
+    stress_test_checked_rem<long, unsigned long, long>();
     stress_test_checked_rem<long, long, long>();
-    stress_test_checked_rem<long, ulong, ulong>();
-    stress_test_checked_rem<long, long, ulong>();
-    stress_test_checked_rem<ulong, ulong, long>();
-    stress_test_checked_rem<ulong, long, long>();
-    stress_test_checked_rem<ulong, ulong, ulong>();
-    stress_test_checked_rem<ulong, long, ulong>();
+    stress_test_checked_rem<long, unsigned long, unsigned long>();
+    stress_test_checked_rem<long, long, unsigned long>();
+    stress_test_checked_rem<unsigned long, unsigned long, long>();
+    stress_test_checked_rem<unsigned long, long, long>();
+    stress_test_checked_rem<unsigned long, unsigned long, unsigned long>();
+    stress_test_checked_rem<unsigned long, long, unsigned long>();
 }
