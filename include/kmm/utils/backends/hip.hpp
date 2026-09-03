@@ -76,7 +76,7 @@ using gpu_mem_pool_attr_t = hipMemPoolAttr;
 #define g_stream_destroy                hipStreamDestroy
 #define g_stream_wait_event             hipStreamWaitEvent
 
-static inline g_result_t g_stream_get_ctx(g_stream_t, g_context_t*) {
+static inline g_result_t g_stream_get_ctx(g_stream_t hStream, g_context_t* pctx) {
     // HIP has no equivalent of `cuStreamGetCtx`. Instead, resolve the device
     // the stream was created on and reuse its primary context, which is what
     // `SystemInfo` already treats as "the" context for that device.
@@ -158,19 +158,23 @@ static inline g_result_t g_memcpy_h_to_d_async(
     return hipMemcpyHtoDAsync(dstDevice, const_cast<void*>(srcHost), ByteCount, hStream);
 }
 
-static inline g_result_t g_memcpy_h_to_d(g_device_ptr_t dstDevice, const void* srcHost, size_t ByteCount) {
+static inline g_result_t g_memcpy_h_to_d(
+    g_device_ptr_t dstDevice,
+    const void* srcHost,
+    size_t ByteCount
+) {
     return hipMemcpyHtoD(dstDevice, const_cast<void*>(srcHost), ByteCount);
 }
 
 static inline g_result_t g_memcpy_peer_async(
-    g_device_ptr_t,
-    g_context_t,
-    g_device_t,
-    g_device_ptr_t,
-    g_context_t,
-    g_device_t,
-    size_t,
-    g_stream_t
+    g_device_ptr_t dstAddr,
+    g_context_t dstContext,
+    g_device_t dstDevice,
+    g_device_ptr_t srcAddr,
+    g_context_t srcContext,
+    g_device_t srcDevice,
+    size_t ByteCount,
+    g_stream_t hStream
 ) {
     return hipMemcpyPeerAsync(dstDevicePtr, dstDevice, srcDevicePtr, srcDevice, ByteCount, hStream);
 }
