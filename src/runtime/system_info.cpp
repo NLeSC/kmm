@@ -43,21 +43,15 @@ int DeviceInfo::attribute(g_device_attribute_t attrib) const {
 }
 
 int DeviceInfo::max_threads_per_block() const {
-    return attribute(CU_DEVICE_ATTRIBUTE_MAX_THREADS_PER_BLOCK);
+    return attribute(G_DEVICE_ATTRIBUTE_MAX_THREADS_PER_BLOCK);
 }
 
 dim3 DeviceInfo::max_block_dim() const {
-#if defined(KMM_USE_CUDA)
+#if defined(KMM_USE_CUDA) || defined(KMM_USE_HIP)
     return dim3(
-        static_cast<unsigned int>(attribute(CU_DEVICE_ATTRIBUTE_MAX_BLOCK_DIM_X)),
-        static_cast<unsigned int>(attribute(CU_DEVICE_ATTRIBUTE_MAX_BLOCK_DIM_Y)),
-        static_cast<unsigned int>(attribute(CU_DEVICE_ATTRIBUTE_MAX_BLOCK_DIM_Z))
-    );
-#elif defined(KMM_USE_HIP)
-    return dim3(
-        static_cast<unsigned int>(attribute(GPU_DEVICE_ATTRIBUTE_MAX_BLOCK_DIM_X)),
-        static_cast<unsigned int>(attribute(GPU_DEVICE_ATTRIBUTE_MAX_BLOCK_DIM_Y)),
-        static_cast<unsigned int>(attribute(GPU_DEVICE_ATTRIBUTE_MAX_BLOCK_DIM_Z))
+        static_cast<unsigned int>(attribute(G_DEVICE_ATTRIBUTE_MAX_BLOCK_DIM_X)),
+        static_cast<unsigned int>(attribute(G_DEVICE_ATTRIBUTE_MAX_BLOCK_DIM_Y)),
+        static_cast<unsigned int>(attribute(G_DEVICE_ATTRIBUTE_MAX_BLOCK_DIM_Z))
     );
 #else
     throw std::runtime_error("unsupported operation");

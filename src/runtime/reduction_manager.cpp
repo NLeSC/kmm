@@ -181,6 +181,7 @@ struct PartialFold {
                 memops::reduce(peer_addr, home_addr, description);
             });
         } else {
+#if defined(KMM_USE_CUDA) || defined(KMM_USE_HIP)
             // This path does not provide a scratch buffer, so it only supports reductions that
             // need none.
             KMM_ASSERT(memops::reduce_gpu_scratch_size(description) == 0);
@@ -196,6 +197,9 @@ struct PartialFold {
             );
 
             completion_deps.insert(event);
+#else
+            throw std::runtime_error("unsupported operation");
+#endif
         }
     }
 

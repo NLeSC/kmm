@@ -46,6 +46,7 @@ using gpu_mem_pool_attr_t = cudaMemPoolAttr;
 #define G_DEVICE_ATTRIBUTE_MAX_GRID_DIM_Z           CU_DEVICE_ATTRIBUTE_MAX_GRID_DIM_Z
 #define G_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MAJOR CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MAJOR
 #define G_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MINOR CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MINOR
+#define GPU_ERROR_PEER_ACCESS_ALREADY_ENABLED       CUDA_ERROR_PEER_ACCESS_ALREADY_ENABLED
 
 #define g_init                       cuInit
 #define g_device_get_count           cuDeviceGetCount
@@ -53,21 +54,26 @@ using gpu_mem_pool_attr_t = cudaMemPoolAttr;
 #define g_device_get_name            cuDeviceGetName
 #define g_device_total_mem           cuDeviceTotalMem
 #define g_device_get_attribute       cuDeviceGetAttribute
+#define g_device_can_access_peer     cuDeviceCanAccessPeer
 #define g_ctx_get_device             cuCtxGetDevice
+#define g_ctx_get_id                 cuCtxGetId
 #define g_ctx_create                 cuCtxCreate
 #define g_ctx_destroy                cuCtxDestroy
 #define g_device_primary_ctx_retain  cuDevicePrimaryCtxRetain
 #define g_device_primary_ctx_release cuDevicePrimaryCtxRelease
 #define g_ctx_push_current           cuCtxPushCurrent
 #define g_ctx_pop_current            cuCtxPopCurrent
+#define g_ctx_enable_peer_access     cuCtxEnablePeerAccess
 
 // Stream Management Constants & Functions
 
 #define G_STREAM_NON_BLOCKING           CU_STREAM_NON_BLOCKING
 #define g_ctx_get_stream_priority_range cuCtxGetStreamPriorityRange
-#define g_stream_create_with_priority   cuStreamCreateWithPriority
-#define g_stream_get_ctx                cuStreamGetCtx
 #define g_stream_create                 cuStreamCreate
+#define g_stream_create_with_priority   cuStreamCreateWithPriority
+#define g_stream_get_device             cuStreamGetDevice
+#define g_stream_get_ctx                cuStreamGetCtx
+#define g_stream_get_id                 cuStreamGetId
 #define g_stream_query                  cuStreamQuery
 #define g_stream_synchronize            cuStreamSynchronize
 #define g_stream_destroy                cuStreamDestroy
@@ -107,12 +113,10 @@ using gpu_mem_pool_attr_t = cudaMemPoolAttr;
 #define gpu_free                      cudaFree
 #define g_mem_host_alloc              cuMemHostAlloc
 #define g_mem_free_host               cuMemFreeHost
-#define g_mem_alloc_manged            cuMemAllocManaged
+#define g_pointer_get_attribute       cuPointerGetAttribute
+#define g_mem_alloc_managed           cuMemAllocManaged
 #define g_mem_host_get_device_pointer cuMemHostGetDevicePointer
 #define g_mem_prefetch_async          cuMemPrefetchAsync
-#define g_pointer_get_attribute       cuPointerGetAttribute
-#define g_device_can_access_peer      cuDeviceCanAccessPeer
-#define g_ctx_enable_peer_access      cuCtxEnablePeerAccess
 
 // Memory Copy Operations
 

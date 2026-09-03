@@ -92,19 +92,24 @@ enum g_pointer_attribute_t {};
 #define G_DEVICE_ATTRIBUTE_MAX_GRID_DIM_Z           g_device_attribute_t(7)
 #define G_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MAJOR g_device_attribute_t(75)
 #define G_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MINOR g_device_attribute_t(76)
+#define GPU_ERROR_PEER_ACCESS_ALREADY_ENABLED       704
 
 g_result_t g_init(unsigned int);
 g_result_t g_device_get_count(int*);
 g_result_t g_device_get(g_device_t*, int);
 g_result_t g_device_get_name(char*, int, g_device_t);
+g_result_t g_device_total_mem(size_t*, g_device_t);
 g_result_t g_device_get_attribute(int*, g_device_attribute_t, g_device_t);
+g_result_t g_device_can_access_peer(int*, g_device_t, g_device_t);
 g_result_t g_ctx_get_device(g_device_t*);
+g_result_t g_ctx_get_id(g_context_t, unsigned long long*);
 g_result_t g_ctx_create(g_context_t*, unsigned int, g_device_t);
 g_result_t g_ctx_destroy(g_context_t);
 g_result_t g_device_primary_ctx_retain(g_context_t*, g_device_t);
 g_result_t g_device_primary_ctx_release(g_device_t);
 g_result_t g_ctx_push_current(g_context_t);
 g_result_t g_ctx_pop_current(g_context_t*);
+g_result_t g_ctx_enable_peer_access(g_context_t, unsigned int);
 
 // Stream Management Constants & Functions
 
@@ -112,7 +117,11 @@ g_result_t g_ctx_pop_current(g_context_t*);
 #define G_EVENT_WAIT_DEFAULT  g_event_wait_flags_t(0)
 
 g_result_t g_ctx_get_stream_priority_range(int*, int*);
+g_result_t g_stream_create(g_stream_t*, unsigned int);
 g_result_t g_stream_create_with_priority(g_stream_t*, unsigned int, int);
+g_result_t g_stream_get_device(g_stream_t, g_device_t*);
+g_result_t g_stream_get_id(g_stream_t, unsigned long long*);
+g_result_t g_stream_get_ctx(g_stream_t, g_context_t*);
 g_result_t g_stream_query(g_stream_t);
 g_result_t g_stream_synchronize(g_stream_t);
 g_result_t g_stream_destroy(g_stream_t);
@@ -141,6 +150,7 @@ gpu_error_t gpu_event_elapsed_time(float* ms, g_event_t start, g_event_t stop);
 #define G_MEMORYTYPE_DEVICE                G_MEMORYTYPE_DEVICE
 #define G_POINTER_ATTRIBUTE_MEMORY_TYPE    g_pointer_attribute_t(2)
 #define G_POINTER_ATTRIBUTE_DEVICE_ORDINAL g_pointer_attribute_t(9)
+#define G_MEM_ATTACH_GLOBAL                1
 
 g_result_t g_mem_get_info(size_t*, size_t*);
 g_result_t gpu_mem_get_info(size_t*, size_t*);
@@ -151,6 +161,9 @@ gpu_error_t gpu_free(g_device_ptr_t);
 g_result_t g_mem_host_alloc(void**, size_t, unsigned int);
 g_result_t g_mem_free_host(void*);
 g_result_t g_pointer_get_attribute(void*, g_pointer_attribute_t, g_device_ptr_t);
+g_result_t g_mem_alloc_managed(g_device_ptr_t*, size_t, unsigned int);
+g_result_t g_mem_host_get_device_pointer(g_device_ptr_t*, void*, unsigned int);
+g_result_t g_mem_prefetch_async(g_device_ptr_t, size_t, int, g_stream_t);
 
 // Memory Copy Operations
 

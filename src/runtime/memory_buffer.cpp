@@ -309,8 +309,9 @@ Poll MemoryBufferImpl::ensure_alloc_valid(const DeviceStreamId& stream_hint, Mem
             loc.mark_valid(event);
             return Poll::Ready;
         }
-    } else if (memory_id.is_host() || peer_id.is_host()
-               || data->is_copy_supported(peer_id, memory_id)) {
+    } else if (
+        memory_id.is_host() || peer_id.is_host() || data->is_copy_supported(peer_id, memory_id)
+    ) {
         // copy D2H or H2D or D2D (if possible)
         return poll_copy(stream_hint, peer_id, memory_id);
     } else {

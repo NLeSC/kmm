@@ -148,8 +148,6 @@ MemorySystem::MemorySystem(
         );
     }
 
-    static auto GPU_ERROR_PEER_ACCESS_ALREADY_ENABLED = CUDA_ERROR_PEER_ACCESS_ALREADY_ENABLED;
-
     // Determine, and where possible enable, peer-to-peer access between every device pair.
     for (size_t i = 0; i < m_num_devices; i++) {
         m_peer_access[i][i] = true;
@@ -791,9 +789,13 @@ DeviceEvent MemorySystem::fill_device(
         StreamKind::DeviceToDevice,
         stream_hint,
         deps_in,
-        [&](g_stream_t stream) {
+        [&](g_stream_t stream) -> size_t {
+#if defined(KMM_USE_CUDA) || defined(KMM_USE_HIP)
             memops::fill_gpu(stream, reinterpret_cast<void*>(addr), description);
             return checked_mul<size_t>(description.num_elements(), description.value.length);
+#else
+            throw std::runtime_error("unsupported operation");
+#endif
         }
     );
 }
@@ -835,7 +837,8 @@ DeviceEvent MemorySystem::reduce_device(
         StreamKind::DeviceToDevice,
         stream_hint,
         deps_in,
-        [&](g_stream_t stream) {
+        [&](g_stream_t stream) -> memops_extent_type {
+#if defined(KMM_USE_CUDA) || defined(KMM_USE_HIP)
             memops::reduce_gpu(
                 stream,
                 reinterpret_cast<void*>(src_addr),
@@ -844,6 +847,9 @@ DeviceEvent MemorySystem::reduce_device(
                 description
             );
             return description.num_outputs();
+#else
+            throw std::runtime_error("unsupported operation");
+#endif
         }
     );
 }

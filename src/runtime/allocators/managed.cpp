@@ -13,7 +13,7 @@ ManagedMemoryAllocator::ManagedMemoryAllocator(g_context_t context) : m_context(
 AllocResult ManagedMemoryAllocator::allocate(BufferLayout layout, void** addr_out) {
     GPUContextGuard guard {m_context};
     g_device_ptr_t ptr;
-    g_result_t result = g_mem_alloc_manged(&ptr, layout.size_in_bytes, G_MEM_ATTACH_GLOBAL);
+    g_result_t result = g_mem_alloc_managed(&ptr, layout.size_in_bytes, G_MEM_ATTACH_GLOBAL);
 
     if (result == G_ERROR_OUT_OF_MEMORY) {
         return AllocResult::ErrorOutOfMemory;

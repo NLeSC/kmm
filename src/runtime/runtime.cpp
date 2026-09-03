@@ -710,6 +710,7 @@ static DeviceEvent do_reduce(
     DeviceEvent event;
 
     if (memory_id.is_device()) {
+#if defined(KMM_USE_CUDA) || defined(KMM_USE_HIP)
         KMM_ASSERT(scratch_access.size_in_bytes >= memops::reduce_gpu_scratch_size(description));
 
         event = impl->memory_system->reduce_device(
@@ -721,6 +722,9 @@ static DeviceEvent do_reduce(
             stream_hint,
             deps
         );
+#else
+        throw std::runtime_error("unsupported operation");
+#endif
     } else {
         // TODO: maybe use a thread pool?
         auto fut = std::async([=] {
@@ -822,7 +826,11 @@ DeviceEvent Runtime::submit_reduction(
         }
     });
 
+#if defined(KMM_USE_CUDA) || defined(KMM_USE_HIP)
     size_t scratch_size = memops::reduce_gpu_scratch_size(description);
+#else
+    size_t scratch_size = 0;
+#endif
     bool has_scratch = memory_id.is_device() && scratch_size > 0;
 
     auto transaction = m_impl->memory_manager.create_transaction(parent);

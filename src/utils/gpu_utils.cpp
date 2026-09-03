@@ -26,41 +26,19 @@ GPUContextGuard::~GPUContextGuard() {
 }
 
 GPUContextId::GPUContextId(g_context_t context) {
-#if defined(KMM_USE_HIP)
-    // HIP has no equivalent of `cuCtxGetId`. The context handle itself is
-    // already a stable, unique identity, so it is used directly.
-    m_id = reinterpret_cast<unsigned long long>(context);
-#else
-    KMM_GPU_CHECK(cuCtxGetId(context, &m_id));
-#endif
+    KMM_GPU_CHECK(g_ctx_get_id(context, &m_id));
 }
 
 g_context_t context_from_stream(g_stream_t stream) {
     g_context_t context;
-#if defined(KMM_USE_HIP)
-    // HIP has no equivalent of `cuStreamGetCtx`. Instead, resolve the device
-    // the stream was created on and reuse its primary context, which is what
-    // `SystemInfo` already treats as "the" context for that device.
-    GPUDevice device;
-    KMM_GPU_CHECK(gpuStreamGetDevice(stream, &device));
-    KMM_GPU_CHECK(gpuDevicePrimaryCtxRetain(&context, device));
-    gpuDevicePrimaryCtxRelease(device);
-#else
     KMM_GPU_CHECK(g_stream_get_ctx(stream, &context));
-#endif
     return context;
 }
 
 GPUStreamId::GPUStreamId(g_stream_t stream) : GPUStreamId(stream, context_from_stream(stream)) {}
 
 GPUStreamId::GPUStreamId(g_stream_t stream, g_context_t context) : m_context_id(context) {
-#if defined(KMM_USE_HIP)
-    // HIP has no equivalent of `cuStreamGetId`. The stream handle itself is
-    // already a stable, unique identity, so it is used directly.
-    m_id = reinterpret_cast<unsigned long long>(stream);
-#else
-    KMM_GPU_CHECK(cuStreamGetId(stream, &m_id));
-#endif
+    KMM_GPU_CHECK(g_stream_get_id(stream, &m_id));
 }
 
 GPUStreamId::GPUStreamId(const GPUStreamRef& stream) : GPUStreamId(stream.stream_id()) {}

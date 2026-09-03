@@ -45,12 +45,15 @@ using gpu_mem_pool_attr_t = hipMemPoolAttr;
 #define G_DEVICE_ATTRIBUTE_MAX_GRID_DIM_Z           hipDeviceAttributeMaxGridDimZ
 #define G_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MAJOR hipDeviceAttributeComputeCapabilityMajor
 #define G_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MINOR hipDeviceAttributeComputeCapabilityMinor
+#define GPU_ERROR_PEER_ACCESS_ALREADY_ENABLED       hipErrorPeerAccessAlreadyEnabled
 
 #define g_init                       hipInit
 #define g_device_get_count           hipGetDeviceCount
 #define g_device_get                 hipDeviceGet
 #define g_device_get_name            hipDeviceGetName
+#define g_device_total_mem           hipDeviceTotalMem
 #define g_device_get_attribute       hipDeviceGetAttribute
+#define g_device_can_access_peer     hipDeviceCanAccessPeer
 #define g_ctx_get_device             hipCtxGetDevice
 #define g_ctx_create                 hipCtxCreate
 #define g_ctx_destroy                hipCtxDestroy
@@ -58,16 +61,22 @@ using gpu_mem_pool_attr_t = hipMemPoolAttr;
 #define g_device_primary_ctx_release hipDevicePrimaryCtxRelease
 #define g_ctx_push_current           hipCtxPushCurrent
 #define g_ctx_pop_current            hipCtxPopCurrent
+#define g_ctx_enable_peer_access     hipCtxEnablePeerAccess
 
 // Stream Management Constants & Functions
 
 #define G_STREAM_NON_BLOCKING           hipStreamNonBlocking
 #define g_ctx_get_stream_priority_range hipDeviceGetStreamPriorityRange
+#define g_stream_create                 hipStreamCreateWithFlags
 #define g_stream_create_with_priority   hipStreamCreateWithPriority
+#define g_stream_get_device             hipStreamGetDevice
+#define g_stream_get_id                 hipStreamGetId
 #define g_stream_query                  hipStreamQuery
 #define g_stream_synchronize            hipStreamSynchronize
 #define g_stream_destroy                hipStreamDestroy
 #define g_stream_wait_event             hipStreamWaitEvent
+
+g_result_t g_stream_get_ctx(g_stream_t, g_context_t*);
 
 // Event Management Constants & Functions
 
@@ -91,18 +100,22 @@ using gpu_mem_pool_attr_t = hipMemPoolAttr;
 #define G_MEMHOSTALLOC_DEVICEMAP           hipHostMallocMapped
 #define G_MEMORYTYPE_HOST                  hipMemoryTypeHost
 #define G_MEMORYTYPE_DEVICE                hipMemoryTypeDevice
-#define G_POINTER_ATTRIBUTE_DEVICE_ORDINAL HIP_POINTER_ATTRIBUTE_DEVICE_ORDINAL
 #define G_POINTER_ATTRIBUTE_MEMORY_TYPE    HIP_POINTER_ATTRIBUTE_MEMORY_TYPE
+#define G_POINTER_ATTRIBUTE_DEVICE_ORDINAL HIP_POINTER_ATTRIBUTE_DEVICE_ORDINAL
+#define G_MEM_ATTACH_GLOBAL                hipMemAttachGlobal
 
-#define g_mem_get_info          hipMemGetInfo
-#define gpu_mem_get_info        hipMemGetInfo
-#define g_mem_alloc             hipMalloc
-#define g_mem_free              hipFree
-#define gpu_malloc              hipMalloc
-#define gpu_free                hipFree
-#define g_mem_host_alloc        hipHostMalloc
-#define g_mem_free_host         hipHostFree
-#define g_pointer_get_attribute hipPointerGetAttribute
+#define g_mem_get_info                hipMemGetInfo
+#define gpu_mem_get_info              hipMemGetInfo
+#define g_mem_alloc                   hipMalloc
+#define g_mem_free                    hipFree
+#define gpu_malloc                    hipMalloc
+#define gpu_free                      hipFree
+#define g_mem_host_alloc              hipHostMalloc
+#define g_mem_free_host               hipHostFree
+#define g_pointer_get_attribute       hipPointerGetAttribute
+#define g_mem_alloc_managed           hipMemAllocManaged
+#define g_mem_host_get_device_pointer hipMemHostGetDevicePointer
+#define g_mem_prefetch_async          hipMemPrefetchAsync
 
 // Memory Copy Operations
 

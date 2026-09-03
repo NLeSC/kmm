@@ -50,9 +50,11 @@ struct checked_add_impl {
 
         // if all are signed, the above can be simplified to just this:
         // same-sign operands overflow iff the result's sign differs from both.
-        if constexpr (numeric_type_traits<L>::is_signed &&  //
-                      numeric_type_traits<R>::is_signed &&  //
-                      numeric_type_traits<O>::is_signed) {
+        if constexpr (
+            numeric_type_traits<L>::is_signed &&  //
+            numeric_type_traits<R>::is_signed &&  //
+            numeric_type_traits<O>::is_signed
+        ) {
             int64_t l = static_cast<int64_t>(left);
             int64_t r = static_cast<int64_t>(right);
             int64_t s = static_cast<int64_t>(sum);
@@ -83,9 +85,11 @@ struct checked_sub_impl {
         // if all are signed, the above can be simplified to just this:
         // same-sign operands never overflow; for mixed signs, overflow iff the result's
         // sign differs from `left`.
-        if constexpr (numeric_type_traits<L>::is_signed &&  //
-                      numeric_type_traits<R>::is_signed &&  //
-                      numeric_type_traits<O>::is_signed) {
+        if constexpr (
+            numeric_type_traits<L>::is_signed &&  //
+            numeric_type_traits<R>::is_signed &&  //
+            numeric_type_traits<O>::is_signed
+        ) {
             int64_t l = static_cast<int64_t>(left);
             int64_t r = static_cast<int64_t>(right);
             int64_t d = static_cast<int64_t>(diff);
@@ -102,9 +106,11 @@ struct checked_mul_impl {
     static constexpr bool apply(L left, R right, O* output) {
 #if KMM_IS_DEVICE
         // Fast path when every operand is signed
-        if constexpr (numeric_type_traits<L>::is_signed &&  //
-                      numeric_type_traits<R>::is_signed &&  //
-                      numeric_type_traits<O>::is_signed) {
+        if constexpr (
+            numeric_type_traits<L>::is_signed &&  //
+            numeric_type_traits<R>::is_signed &&  //
+            numeric_type_traits<O>::is_signed
+        ) {
             int64_t l = static_cast<int64_t>(left);
             int64_t r = static_cast<int64_t>(right);
             int64_t lo = static_cast<int64_t>(static_cast<uint64_t>(l) * static_cast<uint64_t>(r));
