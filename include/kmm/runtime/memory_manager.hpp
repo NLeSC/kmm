@@ -1,94 +1,93 @@
 #pragma once
 
+#include <cstddef>
 #include <memory>
-#include <unordered_map>
-#include <unordered_set>
+#include <optional>
 
-#include "kmm/core/buffer.hpp"
+#include "kmm/core/macros.hpp"
+#include "kmm/runtime/buffer.hpp"
+#include "kmm/runtime/data_interfaces/base.hpp"
+#include "kmm/runtime/device_event.hpp"
+#include "kmm/runtime/identifiers.hpp"
 #include "kmm/runtime/memory_system.hpp"
-#include "kmm/runtime/stream_manager.hpp"
+#include "kmm/utils/notify.hpp"
 #include "kmm/utils/poll.hpp"
+#include "kmm/utils/refcnt_ptr.hpp"
+#include "kmm/utils/small_vector.hpp"
 
 namespace kmm {
 
-using TransactionId = uint64_t;
+// MemoryRequestImpl / MemoryRequest are forward-declared in buffer.hpp (included above), since
+// BufferRequest needs them too and this header would otherwise have to be included before it.
+struct MemoryTransactionImpl;
+struct MemoryBufferImpl;
+struct MemoryRequestImpl;
+
+KMM_REFCNT_TRAITS_FWD(MemoryTransactionImpl)
+KMM_REFCNT_TRAITS_FWD(MemoryBufferImpl)
+KMM_REFCNT_TRAITS_FWD(MemoryRequestImpl)
+
+using MemoryBuffer = refcnt_ptr<MemoryBufferImpl>;
+using MemoryTransaction = refcnt_ptr<MemoryTransactionImpl>;
+using MemoryRequest = refcnt_ptr<MemoryRequestImpl>;
+
+enum struct AccessKind { ReadOnly, SharedWrite, Exclusive };
 
 class MemoryManager {
-    KMM_NOT_COPYABLE_OR_MOVABLE(MemoryManager)
-
   public:
-    struct Request;
-    struct Buffer;
-    struct Device;
-    struct Transaction;
+    struct Impl;
 
-    MemoryManager(std::shared_ptr<MemorySystem> memory);
+    MemoryManager();
     ~MemoryManager();
 
-    bool is_idle(DeviceStreamManager& streams) const;
-
-    std::shared_ptr<Transaction> create_transaction(std::shared_ptr<Transaction> parent = nullptr);
-
-    std::shared_ptr<Buffer> create_buffer(BufferLayout layout, std::string name = "");
-    void delete_buffer(std::shared_ptr<Buffer> buffer);
-
-    std::shared_ptr<Request> create_request(
-        std::shared_ptr<Buffer> buffer,
-        MemoryId memory_id,
-        AccessMode mode,
-        std::shared_ptr<Transaction> parent
+    MemoryBuffer create_buffer(
+        std::unique_ptr<DataInterface> data,
+        std::string name,
+        bool evictable = true,
+        std::optional<MemoryId> home_memory_id = {}
     );
-    Poll poll_request(Request& req, DeviceEventSet& deps_out);
-    void release_request(std::shared_ptr<Request> req, DeviceEvent event = {});
 
-    BufferAccessor get_accessor(Request& req);
+    void release_buffer(MemoryBuffer buffer);
+
+    /// Creates a new transaction, optionally as a child of `parent`.
+    MemoryTransaction create_transaction(MemoryTransaction parent = {});
+
+    MemoryRequest create_request(
+        const MemoryBuffer& buffer,
+        MemoryId memory_id,
+        AccessKind mode,
+        MemoryTransaction parent = {},
+        NotifyHandle callback = {}
+    );
+
+    Poll poll_request(const DeviceStreamId& stream_hint, const MemoryRequest& request);
+
+    /// Returns the accessor for a request that has reached `Ready` (see `poll_request`).
+    BufferAccessor access_request(const MemoryRequest& request, DeviceEventSet& deps_out);
+
+    void release_request(MemoryRequest request, const DeviceEventSet& deps = {});
+
+    void prefetch_buffer(
+        const MemoryBuffer& buffer,
+        MemoryId memory_id,
+        AccessKind mode = AccessKind::ReadOnly
+    );
+
+    void try_evict_buffer(const MemoryBuffer& buffer, MemoryId memory_id);
+
+    void invalidate_buffer(const MemoryBuffer& buffer);
+
+    void trim_device(DeviceId id, size_t bytes_remaining = 0);
+
+    void make_progress();
 
   private:
-    void allocate_host(Buffer& buffer, DeviceId device_affinity);
-    void deallocate_host(Buffer& buffer);
-
-    bool try_free_device_memory(DeviceId device_id);
-    AllocationResult try_allocate_device_async(DeviceId device_id, Buffer& buffer);
-    void deallocate_device_async(DeviceId device_id, Buffer& buffer);
-
-    void lock_allocation_host(Buffer& buffer, DeviceId device_affinity, Request& req);
-    static void unlock_allocation_host(Buffer& buffer, Request& req);
-
-    bool try_lock_allocation_device(DeviceId device_id, Buffer& buffer, Request& req);
-    void unlock_allocation_device(DeviceId device_id, Buffer& buffer, Request& req) noexcept;
-
-    void prepare_access_to_buffer(
-        MemoryId memory_id,
-        Buffer& buffer,
-        AccessMode mode,
-        DeviceEventSet& deps_out
-    );
-    static void finalize_access_to_buffer(
-        MemoryId memory_id,
-        Buffer& buffer,
-        AccessMode mode,
-        DeviceEvent event
-    ) noexcept;
-
-    static std::optional<DeviceId> find_valid_device_entry(const Buffer& buffer);
-    void make_entry_valid(MemoryId memory_id, Buffer& buffer, DeviceEventSet& deps_out);
-    void make_entry_exclusive(MemoryId memory_id, Buffer& buffer, DeviceEventSet& deps_out);
-
-    DeviceEvent copy_h2d(DeviceId device_id, Buffer& buffer);
-    DeviceEvent copy_d2h(DeviceId device_id, Buffer& buffer);
-    DeviceEvent copy_d2d(DeviceId device_src_id, DeviceId device_dst_id, Buffer& buffer);
-
-    Device& device_at(DeviceId id) noexcept;
-    bool is_out_of_memory(DeviceId device_id, Request& req);
-
-    void check_consistency() const;
-
-    std::shared_ptr<MemorySystem> m_memory;
-    std::unique_ptr<Device[]> m_devices;
-    std::unordered_set<std::shared_ptr<Buffer>> m_buffers;
-    std::unordered_set<std::shared_ptr<Request>> m_active_requests;
-    uint64_t m_next_transaction_id = 1;
-    uint64_t m_next_request_id = 1;
+    std::unique_ptr<Impl> m_impl;
 };
 
+std::ostream& operator<<(std::ostream& stream, AccessKind access);
+
 }  // namespace kmm
+
+template<>
+struct fmt::formatter<kmm::AccessKind>: fmt::ostream_formatter {};

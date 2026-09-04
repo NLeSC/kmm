@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.10)
 
 # Project setup
 set(PROJECT_NAME "kmm")
-project(${PROJECT_NAME} LANGUAGES CXX VERSION 0.3)
+project(${PROJECT_NAME} LANGUAGES CXX VERSION 0.4.0)
 
 # User options (features)
 option(KMM_STATIC   "Build a static library" OFF)
@@ -14,6 +14,7 @@ option(KMM_ENABLE_LINTER  "Enable clang-tidy linter" OFF)
 option(KMM_BUILD_TESTS    "Build tests" OFF)
 option(KMM_BUILD_EXAMPLES "Build examples" OFF)
 option(KMM_BUILD_BENCHMARKS "Build benchmarks" OFF)
+option(KMM_ENABLE_WARNINGS "Enable -Wall -Wextra -Wconversion" ON)
 
 # Check options
 if(KMM_USE_CUDA AND KMM_USE_HIP)
@@ -29,8 +30,11 @@ file(GLOB_RECURSE sources
   "${PROJECT_SOURCE_DIR}/src/*.cu"
 )
 
-# Exclude backend implementation files from compilation, as they are included in `src/core/backends.cpp`
-list(FILTER sources EXCLUDE REGEX "src/backends/(cuda|hip|cpu)\\.cpp$")
+list(FILTER sources EXCLUDE REGEX "src/utils/backends/cpu.cpp")
+
+if(NOT KMM_USE_CUDA AND NOT KMM_USE_HIP)
+  list(APPEND sources "${PROJECT_SOURCE_DIR}/src/utils/backends/cpu.cpp")
+endif()
 
 # Create library
 if(KMM_STATIC)
@@ -53,7 +57,8 @@ endif()
 target_compile_options(${PROJECT_NAME}
         PUBLIC
         $<$<COMPILE_LANGUAGE:CUDA>:-forward-unknown-to-host-compiler>
-        -Wall -Wextra -Wconversion -Wno-unused-parameter
+        "$<$<BOOL:${KMM_ENABLE_WARNINGS}>:-Wall;-Wextra;-Wconversion;-Wno-unused-parameter>"
+        $<$<NOT:$<BOOL:${KMM_ENABLE_WARNINGS}>>:-w>
         #$<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler=-Werror>
 )
 target_compile_options(${PROJECT_NAME} PUBLIC ${CXXFLAGS})
@@ -72,6 +77,10 @@ set(SPDLOG_FMT_EXTERNAL ON)
 set(SPDLOG_BUILD_PIC ON)
 add_subdirectory(external/spdlog)
 target_link_libraries(${PROJECT_NAME} PUBLIC spdlog)
+
+# Dependencies: unordered_dense
+add_subdirectory(external/unordered_dense)
+target_link_libraries(${PROJECT_NAME} PUBLIC unordered_dense::unordered_dense)
 
 # Install
 include(GNUInstallDirs)
@@ -143,13 +152,29 @@ elseif(KMM_USE_HIP)
   set(CMAKE_MODULE_PATH "${HIP_PATH}/cmake" ${CMAKE_MODULE_PATH})
   find_package(HIP REQUIRED)
   find_package(ROCBLAS REQUIRED)
-  set_source_files_properties(${sources} PROPERTIES LANGUAGE HIP)
+  # CMake only recognizes .cu as CUDA by default, so the actual GPU kernel files (which need to be
+  # compiled by amdclang++'s HIP frontend) must be reassigned explicitly. Plain .cpp files must
+  # stay as CXX -- forcing them to HIP too makes amdclang++ run a device-code compilation pass on
+  # files with no device code, which fails since they never include <hip/hip_runtime.h>.
+  set(hip_kernel_sources ${sources})
+  list(FILTER hip_kernel_sources INCLUDE REGEX "\\.cu$")
+  set_source_files_properties(${hip_kernel_sources} PROPERTIES LANGUAGE HIP)
+
+  # `enable_language(HIP)` above means CMake's native HIP-language support already knows how to
+  # compile the HIP-language kernel sources (invoking amdclang++ with the right -x hip flag and
+  # architecture), the same way CUDA_ARCHITECTURES drives .cu compilation in the CUDA branch. We
+  # deliberately do NOT link hip::device here: it exists for the legacy pattern of writing device
+  # code directly in .cpp files, and does so by force-injecting -x hip onto every CXX-language
+  # source in the target -- which breaks plain host .cpp files that never include hip headers.
+  set_target_properties(
+          ${PROJECT_NAME}
+          PROPERTIES
+          HIP_ARCHITECTURES "gfx90a"
+  )
   target_link_libraries(${PROJECT_NAME}
           PUBLIC
           hip::host
           roc::rocblas
-          PRIVATE
-          hip::device
   )
 
   # Define `KMM_USE_HIP` macro so that headers can detect HIP usage

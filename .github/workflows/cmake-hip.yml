@@ -13,21 +13,26 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     strategy:
-      fail-fast: true
+      fail-fast: false
 
       matrix:
         os: [ubuntu-latest]
-        build_type: [Debug]
+        build_type: [Release]
 
     steps:
-      - uses: loostrum/rocm-installer@main
-        with:
-          version: 6.2.2
-          packages: hip-dev hipcc rocm-device-libs rocblas rocm-hip-runtime-dev rocrand
-
       - uses: actions/checkout@v4
         with:
           submodules: 'recursive'
+
+      - name: Install dependencies
+        run: |
+          sudo apt update
+          sudo apt install python3-setuptools python3-wheel
+          wget https://repo.radeon.com/amdgpu-install/6.3.4/ubuntu/noble/amdgpu-install_6.3.60304-1_all.deb
+          sudo apt install ./amdgpu-install_6.3.60304-1_all.deb
+          rm ./amdgpu-install_6.3.60304-1_all.deb
+          sudo apt update
+          sudo apt install hip-dev hipcc rocm-device-libs rocblas rocm-hip-runtime-dev rocrand
 
       - name: Set reusable strings
         # Turn repeated input strings (such as the build output directory) into step outputs. These step outputs can be used throughout the workflow file.
@@ -42,9 +47,11 @@ jobs:
         run: >
           cmake -B ${{ steps.strings.outputs.build-output-dir }}
           -DCMAKE_PREFIX_PATH=/opt/rocm
+          -DCMAKE_CXX_COMPILER:PATH=/opt/rocm/bin/amdclang++
           -DCMAKE_HIP_COMPILER_ROCM_ROOT:PATH=/opt/rocm
           -DCMAKE_HIP_ARCHITECTURES=gfx90a
           -DAMDGPU_TARGETS=gfx90a
+          -DCMAKE_HIP_COMPILER:PATH=/opt/rocm/bin/amdclang++
           -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
           -DCMAKE_VERBOSE_MAKEFILE:BOOL=ON
           -DSPDLOG_FMT_EXTERNAL:BOOL=ON
@@ -52,8 +59,9 @@ jobs:
           -DKMM_BUILD_TESTS:BOOL=ON
           -DKMM_BUILD_EXAMPLES:BOOL=ON
           -DKMM_BUILD_BENCHMARKS:BOOL=ON
+          -DKMM_ENABLE_WARNINGS:BOOL=OFF
           -S ${{ github.workspace }}
 
       - name: Build
         # Build your program with the given configuration. Note that --config is needed because the default Windows generator is a multi-config generator (Visual Studio generator).
-        run: cmake --build ${{ steps.strings.outputs.build-output-dir }} --config ${{ matrix.build_type }} --parallel 4
+        run: cmake --build ${{ steps.strings.outputs.build-output-dir }} --config ${{ matrix.build_type }}

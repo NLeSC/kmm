@@ -1,5 +1,5 @@
+#include <iterator>
 #include <sstream>
-#include <string>
 
 #include "catch2/catch_all.hpp"
 
@@ -7,166 +7,235 @@
 
 using namespace kmm;
 
-struct MyString {
-    MyString(std::string x = "<uninitialized>") : value(x) {}
-    std::string value;
-};
+TEST_CASE("small_vector construction") {
+    small_vector<int, 4> a;
+    CHECK(a.size() == 0);
+    CHECK(a.is_empty());
+    CHECK(a.capacity() == 4);
+    CHECK_FALSE(a.is_heap_allocated());
 
-TEST_CASE("small_vector") {
-    SECTION("basics") {
-        small_vector<int, 4> x;
-        REQUIRE(x.capacity() == 4);
-        REQUIRE(x.size() == 0);
-        REQUIRE(x.is_empty() == true);
-        REQUIRE(x.is_heap_allocated() == false);
-        REQUIRE(x.begin() == x.data());
-        REQUIRE(x.end() == x.data());
+    small_vector<int, 4> b {1, 2, 3};
+    CHECK(b.size() == 3);
+    CHECK_FALSE(b.is_empty());
+    CHECK(b[0] == 1);
+    CHECK(b[1] == 2);
+    CHECK(b[2] == 3);
+}
 
-        x.push_back(1);
+TEST_CASE("small_vector::push_back") {
+    SECTION("within capacity") {
+        small_vector<int, 4> a;
 
-        REQUIRE(x.capacity() == 4);
-        REQUIRE(x.size() == 1);
-        REQUIRE(x.is_empty() == false);
-        REQUIRE(x.is_heap_allocated() == false);
-        REQUIRE(x.begin() == x.data());
-        REQUIRE(x.end() == x.data() + 1);
-        REQUIRE(&x[0] == x.data());
-        REQUIRE(x[0] == 1);
+        a.push_back(1);
+        a.push_back(2);
+        a.push_back(3);
 
-        x.push_back(2);
-        x.push_back(3);
-        x.push_back(4);
-        x.push_back(5);
-
-        REQUIRE(x.capacity() == 16);
-        REQUIRE(x.size() == 5);
-        REQUIRE(x.is_empty() == false);
-        REQUIRE(x.is_heap_allocated() == true);
-        REQUIRE(x.begin() == x.data());
-        REQUIRE(x.end() == x.data() + 5);
-        REQUIRE(&x[0] == x.data());
-        REQUIRE(x[0] == 1);
-        REQUIRE(x[1] == 2);
-        REQUIRE(x[2] == 3);
-        REQUIRE(x[3] == 4);
-        REQUIRE(x[4] == 5);
-
-        x.truncate(2);
-
-        REQUIRE(x.capacity() == 16);
-        REQUIRE(x.size() == 2);
-        REQUIRE(x.is_empty() == false);
-        REQUIRE(x.is_heap_allocated() == true);
-        REQUIRE(x.begin() == x.data());
-        REQUIRE(x.end() == x.data() + 2);
-        REQUIRE(&x[0] == x.data());
-        REQUIRE(x[0] == 1);
-        REQUIRE(x[1] == 2);
-
-        x.resize(20);
-
-        REQUIRE(x.capacity() == 32);
-        REQUIRE(x.size() == 20);
-        REQUIRE(x.is_empty() == false);
-        REQUIRE(x.is_heap_allocated() == true);
-        REQUIRE(x.begin() == x.data());
-        REQUIRE(x.end() == x.data() + 20);
-        REQUIRE(&x[0] == x.data());
-        REQUIRE(x[0] == 1);
-        REQUIRE(x[1] == 2);
-        REQUIRE(x[2] == 0);
-        REQUIRE(x[3] == 0);
-        REQUIRE(x[4] == 0);
-        REQUIRE(x[5] == 0);
-        REQUIRE(x[6] == 0);
-        REQUIRE(x[7] == 0);
-        REQUIRE(x[19] == 0);
-
-        x.clear();
-
-        REQUIRE(x.capacity() == 32);
-        REQUIRE(x.size() == 0);
-        REQUIRE(x.is_empty() == true);
-        REQUIRE(x.is_heap_allocated() == true);
-        REQUIRE(x.begin() == x.data());
-        REQUIRE(x.end() == x.data());
+        CHECK(a.size() == 3);
+        CHECK(a.capacity() == 4);
+        CHECK_FALSE(a.is_heap_allocated());
+        CHECK(a[0] == 1);
+        CHECK(a[1] == 2);
+        CHECK(a[2] == 3);
     }
 
-    SECTION("constructor") {
-        small_vector<std::string, 4> a;  // default
-        small_vector<std::string, 4> b = {"a", "b"};  // list
-        small_vector<std::string, 4> c = b;  // copy
-        small_vector<std::string, 4> d = std::move(c);  //move
-        small_vector<std::string, 1> e = d;  // copy, different N
-        small_vector<MyString, 4> f = d;  // copy, different T
+    SECTION("beyond capacity") {
+        small_vector<int, 2> a;
 
-        REQUIRE(a.size() == 0);
+        a.push_back(1);
+        a.push_back(2);
+        CHECK_FALSE(a.is_heap_allocated());
 
-        REQUIRE(b.size() == 2);
-        REQUIRE(b[0] == "a");
-        REQUIRE(b[1] == "b");
+        a.push_back(3);
+        CHECK(a.is_heap_allocated());
+        CHECK(a.size() == 3);
+        CHECK(a.capacity() >= 3);
 
-        REQUIRE(c.size() == 0);
+        CHECK(a[0] == 1);
+        CHECK(a[1] == 2);
+        CHECK(a[2] == 3);
+    }
+}
 
-        REQUIRE(d.size() == 2);
-        REQUIRE(d[0] == "a");
-        REQUIRE(d[1] == "b");
+TEST_CASE("small_vector::try_push_back") {
+    small_vector<int, 2> a;
 
-        REQUIRE(e.size() == 2);
-        REQUIRE(e[0] == "a");
-        REQUIRE(e[1] == "b");
+    CHECK(a.try_push_back(1));
+    CHECK(a.try_push_back(2));
+    CHECK(a.try_push_back(3));
 
-        REQUIRE(f.size() == 2);
-        REQUIRE(f[0].value == "a");
-        REQUIRE(f[1].value == "b");
+    CHECK(a.size() == 3);
+    CHECK(a[2] == 3);
+}
 
-        // The other two values must be uninitialized
-        REQUIRE(f.capacity() == 4);
-        REQUIRE(f[2].value == "<uninitialized>");
-        REQUIRE(f[3].value == "<uninitialized>");
+TEST_CASE("small_vector copy constructor") {
+    small_vector<int, 4> a {1, 2, 3};
+    small_vector<int, 4> b = a;
+
+    CHECK(b.size() == 3);
+    CHECK(b[0] == 1);
+    CHECK(b[1] == 2);
+    CHECK(b[2] == 3);
+
+    // modifying the copy should not affect the original
+    b[0] = 99;
+    CHECK(a[0] == 1);
+    CHECK(b[0] == 99);
+}
+
+TEST_CASE("small_vector copy constructor with different data type and inline size") {
+    small_vector<int, 4> a {1, 2, 3};
+    small_vector<long, 8> b = a;
+
+    CHECK(b.size() == 3);
+    CHECK(b[0] == 1);
+    CHECK(b[1] == 2);
+    CHECK(b[2] == 3);
+}
+
+TEST_CASE("small_vector copy assignment") {
+    small_vector<int, 4> a {1, 2, 3};
+    small_vector<int, 4> b {9, 9};
+
+    b = a;
+
+    CHECK(b.size() == 3);
+    CHECK(b[0] == 1);
+    CHECK(b[1] == 2);
+    CHECK(b[2] == 3);
+
+    // self-assignment should be a no-op
+    b = b;
+    CHECK(b.size() == 3);
+    CHECK(b[0] == 1);
+}
+
+TEST_CASE("small_vector move constructor") {
+    small_vector<int, 4> a {1, 2, 3};
+    small_vector<int, 4> b = std::move(a);
+
+    CHECK(b.size() == 3);
+    CHECK(b[0] == 1);
+    CHECK(b[1] == 2);
+    CHECK(b[2] == 3);
+}
+
+TEST_CASE("small_vector move constructor with heap allocation") {
+    small_vector<int, 2> a {1, 2, 3, 4};
+    CHECK(a.is_heap_allocated());
+
+    small_vector<int, 2> b = std::move(a);
+
+    CHECK(b.is_heap_allocated());
+    CHECK(b.size() == 4);
+    CHECK(b[0] == 1);
+    CHECK(b[1] == 2);
+    CHECK(b[2] == 3);
+    CHECK(b[3] == 4);
+}
+
+TEST_CASE("small_vector move assignment") {
+    small_vector<int, 4> a {1, 2, 3};
+    small_vector<int, 4> b {9};
+
+    b = std::move(a);
+
+    CHECK(b.size() == 3);
+    CHECK(b[0] == 1);
+    CHECK(b[1] == 2);
+    CHECK(b[2] == 3);
+}
+
+TEST_CASE("small_vector::resize") {
+    SECTION("within inline") {
+        small_vector<int, 4> a {1, 2};
+        a.resize(4);
+        CHECK(a.size() == 4);
+
+        a.resize(1);
+        CHECK(a.size() == 1);
+        CHECK(a[0] == 1);
     }
 
-    SECTION("operator=") {
-        small_vector<std::string, 4> a = {"foo", "bar"};
-        small_vector<std::string, 4> b;
-        small_vector<std::string, 1> c;
-        small_vector<MyString, 4> d;
-        small_vector<std::string, 4> e;
+    SECTION("beyond inline") {
+        small_vector<int, 2> a {1, 2};
+        a.resize(10);
 
-        b = a;  // operator=(const small_vector&)
-        c = a;  // operator=(const small_vector<U, K>&)
-        d = a;  // operator=(const small_vector<U, K>&)
-        e = std::move(a);  // operator=(small_vector&&)
+        CHECK(a.size() == 10);
+        CHECK(a.is_heap_allocated());
+        CHECK(a[0] == 1);
+        CHECK(a[1] == 2);
+    }
+}
 
-        REQUIRE(a.size() == 0);
+TEST_CASE("small_vector::truncate") {
+    small_vector<int, 4> a {1, 2, 3, 4};
 
-        REQUIRE(b.size() == 2);
-        REQUIRE(b[0] == "foo");
-        REQUIRE(b[1] == "bar");
+    a.truncate(2);
+    CHECK(a.size() == 2);
+    CHECK(a[0] == 1);
+    CHECK(a[1] == 2);
 
-        REQUIRE(c.size() == 2);
-        REQUIRE(c[0] == "foo");
-        REQUIRE(c[1] == "bar");
+    // truncating to a larger size than current size should be a no-op
+    a.truncate(10);
+    CHECK(a.size() == 2);
+}
 
-        REQUIRE(d.size() == 2);
-        REQUIRE(d[0].value == "foo");
-        REQUIRE(d[1].value == "bar");
+TEST_CASE("small_vector::clear") {
+    small_vector<int, 4> a {1, 2, 3};
+    a.clear();
 
-        REQUIRE(e.size() == 2);
-        REQUIRE(e[0] == "foo");
-        REQUIRE(e[1] == "bar");
+    CHECK(a.size() == 0);
+    CHECK(a.is_empty());
+    CHECK(a.capacity() == 4);
+}
+
+TEST_CASE("small_vector::insert_all") {
+    SECTION("iterator") {
+        small_vector<int, 4> a {1, 2};
+        int extra[] = {3, 4, 5};
+
+        a.insert_all(std::begin(extra), std::end(extra));
+
+        CHECK(a.size() == 5);
+        CHECK(a.is_heap_allocated());
+        for (size_t i = 0; i < 5; i++) {
+            CHECK(a[i] == static_cast<int>(i + 1));
+        }
     }
 
-    SECTION("operator<<") {
-        small_vector<int, 4> x = {1, 2, 3, 4, 5, 6};
-        small_vector<int, 4> y = {};
+    SECTION("from small_vector") {
+        small_vector<int, 4> a {1, 2};
+        small_vector<int, 8> b {3, 4};
 
-        auto stream = std::stringstream();
-        stream << x;
-        REQUIRE(stream.str() == "{1, 2, 3, 4, 5, 6}");
+        a.insert_all(b);
 
-        stream = std::stringstream();
-        stream << y;
-        REQUIRE(stream.str() == "{}");
+        CHECK(a.size() == 4);
+        CHECK(a[0] == 1);
+        CHECK(a[1] == 2);
+        CHECK(a[2] == 3);
+        CHECK(a[3] == 4);
     }
+}
+
+TEST_CASE("small_vector iterator") {
+    small_vector<int, 4> a {1, 2, 3};
+
+    int sum = 0;
+    for (int v : a) {
+        sum += v;
+    }
+
+    CHECK(sum == 6);
+
+    auto it = a.begin();
+    CHECK(*it == 1);
+    CHECK(a.end() - a.begin() == 3);
+}
+
+TEST_CASE("small_vector operator<<") {
+    small_vector<int, 4> a {1, 2, 3};
+    CHECK(fmt::to_string(a) == "{1, 2, 3}");
+
+    small_vector<int, 4> empty;
+    CHECK(fmt::to_string(empty) == "{}");
 }

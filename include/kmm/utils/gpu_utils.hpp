@@ -1,26 +1,31 @@
 #pragma once
 
+#include <functional>
+#include <iosfwd>
 #include <memory>
-#include <optional>
+#include <stdexcept>
 #include <string>
-#include <vector>
+#include <utility>
 
-#include "kmm/core/backends.hpp"
-#include "kmm/utils/macros.hpp"
+#include "fmt/ostream.h"
+
+#include "kmm/core/macros.hpp"
+#include "kmm/utils/backends.hpp"
 
 #define KMM_GPU_CHECK(...)                                                        \
     do {                                                                          \
         auto __code = (__VA_ARGS__);                                              \
-        if (__code != decltype(__code)(0)) {                                      \
+        if (KMM_UNLIKELY(__code != decltype(__code)(0))) {                        \
             ::kmm::gpu_throw_exception(__code, __FILE__, __LINE__, #__VA_ARGS__); \
         }                                                                         \
-    } while (0);
+    } while (0)
 
 namespace kmm {
 
+/// \addtogroup utility
+/// @{
+
 void gpu_throw_exception(g_result_t result, const char* file, int line, const char* expression);
-void gpu_throw_exception(gpu_error_t result, const char* file, int line, const char* expression);
-void gpu_throw_exception(blas_status_t result, const char* file, int line, const char* expression);
 
 class GPUException: public std::exception {
   public:
@@ -34,76 +39,163 @@ class GPUException: public std::exception {
     std::string m_message;
 };
 
-class GPUDriverException: public GPUException {
-  public:
-    GPUDriverException(const std::string& message, g_result_t result);
-    GPUDriverException(const char* message, g_result_t result) :
-        GPUDriverException(std::string(message), result) {}
-    g_result_t status;
-};
-
-class GPURuntimeException: public GPUException {
-  public:
-    GPURuntimeException(const std::string& message, gpu_error_t result);
-    gpu_error_t status;
-};
-
-class BlasException: public GPUException {
-  public:
-    BlasException(const std::string& message, blas_status_t result);
-    blas_status_t status;
-};
-
-/**
- * Returns the available devices as a list of `device`s.
- */
-std::vector<g_device_t> get_gpu_devices();
-
-/**
- * If the given address points to memory allocation that has been allocated on a GPU, then
- * this function returns the device ordinal as a `device`. If the address points ot an invalid
- * memory location or a non-GPU buffer, then it returns `std::nullopt`.
- */
-std::optional<g_device_t> get_gpu_device_by_address(const void* address);
-
-class GPUContextHandle {
-    GPUContextHandle() = delete;
-    GPUContextHandle(g_context_t context, std::shared_ptr<void> lifetime);
-
-  public:
-    static GPUContextHandle create_context_for_device(g_device_t device);
-    static GPUContextHandle retain_primary_context_for_device(g_device_t device);
-
-    operator g_context_t() const {
-        return m_context;
-    }
-
-  private:
-    g_context_t m_context;
-    std::shared_ptr<void> m_lifetime;
-};
-
-inline bool operator==(const GPUContextHandle& lhs, const GPUContextHandle& rhs) {
-    return g_context_t(lhs) == g_context_t(rhs);
-}
-
-inline bool operator!=(const GPUContextHandle& lhs, const GPUContextHandle& rhs) {
-    return !(lhs == rhs);
-}
-
 class GPUContextGuard {
     KMM_NOT_COPYABLE_OR_MOVABLE(GPUContextGuard)
 
   public:
-    GPUContextGuard(GPUContextHandle context);
+    GPUContextGuard(g_context_t context);
     ~GPUContextGuard();
 
   private:
-    GPUContextHandle m_context;
+    g_context_t m_context;
 };
 
-inline g_device_ptr_t gpu_deviceptr_offset(g_device_ptr_t ptr, size_t size) {
-    return reinterpret_cast<g_device_ptr_t>(reinterpret_cast<unsigned long long>(ptr) + size);
-}
+g_context_t context_from_stream(g_stream_t stream);
+
+struct GPUContextId {
+    GPUContextId(g_context_t context);
+
+    bool operator==(const GPUContextId& that) const noexcept {
+        return m_id == that.m_id;
+    }
+
+    bool operator!=(const GPUContextId& that) const noexcept {
+        return !(*this == that);
+    }
+
+    unsigned long long get() const noexcept {
+        return m_id;
+    }
+
+    friend std::ostream& operator<<(std::ostream&, const GPUContextId& self);
+
+  private:
+    unsigned long long m_id;
+};
+
+class GPUStreamRef;
+class GPUStreamOwner;
+
+struct GPUStreamId {
+    GPUStreamId(g_stream_t stream);
+    GPUStreamId(g_stream_t stream, g_context_t context);
+    GPUStreamId(const GPUStreamRef& stream);
+    GPUStreamId(const GPUStreamOwner& stream);
+
+    unsigned long long get() const noexcept {
+        return m_id;
+    }
+
+    const GPUContextId& context() const noexcept {
+        return m_context_id;
+    }
+
+    bool operator==(const GPUStreamId& that) const noexcept {
+        return m_id == that.m_id && m_context_id == that.m_context_id;
+    }
+
+    bool operator!=(const GPUStreamId& that) const noexcept {
+        return !(*this == that);
+    }
+
+    friend std::ostream& operator<<(std::ostream&, const GPUStreamId& self);
+
+  private:
+    GPUContextId m_context_id;
+    unsigned long long m_id;
+};
+
+class GPUStreamRef {
+  public:
+    GPUStreamRef(g_stream_t);
+
+    g_context_t context() const noexcept {
+        return m_context;
+    }
+
+    g_stream_t stream() const noexcept {
+        return m_stream;
+    }
+
+    GPUStreamId stream_id() const noexcept {
+        return m_stream_id;
+    }
+
+    operator g_stream_t() const noexcept {
+        return m_stream;
+    }
+
+    friend std::ostream& operator<<(std::ostream&, const GPUStreamRef& self);
+
+  private:
+    g_context_t m_context = nullptr;
+    g_stream_t m_stream = nullptr;
+    GPUStreamId m_stream_id;
+};
+
+class GPUStreamOwner {
+  public:
+    GPUStreamOwner(const GPUStreamOwner&) = delete;
+    GPUStreamOwner& operator=(const GPUStreamOwner&) = delete;
+
+    explicit GPUStreamOwner(g_context_t context, unsigned int flags = G_STREAM_NON_BLOCKING);
+    ~GPUStreamOwner();
+
+    GPUStreamOwner(GPUStreamOwner&& that) noexcept : m_stream(that.m_stream) {
+        that.m_stream = nullptr;
+    }
+
+    GPUStreamOwner& operator=(GPUStreamOwner&& that) noexcept {
+        std::swap(m_stream, that.m_stream);
+        return *this;
+    }
+
+    g_stream_t get() const noexcept {
+        return m_stream;
+    }
+
+    operator g_stream_t() const noexcept {
+        return m_stream;
+    }
+
+    operator GPUStreamRef() const noexcept {
+        return m_stream;
+    }
+
+    friend std::ostream& operator<<(std::ostream&, const GPUStreamOwner& self);
+
+  private:
+    void destroy() noexcept;
+
+    g_stream_t m_stream = nullptr;
+};
+
+/// @}
 
 }  // namespace kmm
+
+template<>
+struct std::hash<kmm::GPUContextId> {
+    size_t operator()(const kmm::GPUContextId& id) const noexcept {
+        return std::hash<unsigned long long> {}(id.get());
+    }
+};
+
+template<>
+struct std::hash<kmm::GPUStreamId> {
+    size_t operator()(const kmm::GPUStreamId& id) const noexcept {
+        return std::hash<unsigned long long> {}(id.get());
+    }
+};
+
+template<>
+struct fmt::formatter<kmm::GPUStreamOwner>: fmt::ostream_formatter {};
+
+template<>
+struct fmt::formatter<kmm::GPUStreamRef>: fmt::ostream_formatter {};
+
+template<>
+struct fmt::formatter<kmm::GPUStreamId>: fmt::ostream_formatter {};
+
+template<>
+struct fmt::formatter<kmm::GPUContextId>: fmt::ostream_formatter {};
