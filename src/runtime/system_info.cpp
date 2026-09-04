@@ -59,17 +59,11 @@ dim3 DeviceInfo::max_block_dim() const {
 }
 
 dim3 DeviceInfo::max_grid_dim() const {
-#if defined(KMM_USE_CUDA)
+#if defined(KMM_USE_CUDA) || defined(KMM_USE_HIP)
     return dim3(
-        static_cast<unsigned int>(attribute(CU_DEVICE_ATTRIBUTE_MAX_GRID_DIM_X)),
-        static_cast<unsigned int>(attribute(CU_DEVICE_ATTRIBUTE_MAX_GRID_DIM_Y)),
-        static_cast<unsigned int>(attribute(CU_DEVICE_ATTRIBUTE_MAX_GRID_DIM_Z))
-    );
-#elif defined(KMM_USE_HIP)
-    return dim3(
-        static_cast<unsigned int>(attribute(HIP_DEVICE_ATTRIBUTE_MAX_BLOCK_DIM_X)),
-        static_cast<unsigned int>(attribute(HIP_DEVICE_ATTRIBUTE_MAX_BLOCK_DIM_Y)),
-        static_cast<unsigned int>(attribute(HIP_DEVICE_ATTRIBUTE_MAX_BLOCK_DIM_Z))
+        static_cast<unsigned int>(attribute(G_DEVICE_ATTRIBUTE_MAX_GRID_DIM_X)),
+        static_cast<unsigned int>(attribute(G_DEVICE_ATTRIBUTE_MAX_GRID_DIM_Y)),
+        static_cast<unsigned int>(attribute(G_DEVICE_ATTRIBUTE_MAX_GRID_DIM_Z))
     );
 #else
     throw std::runtime_error("unsupported operation");
