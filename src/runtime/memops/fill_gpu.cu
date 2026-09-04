@@ -304,7 +304,7 @@ bool try_fill_plan(g_stream_t stream, const FillPlan& plan) {
         }
     } else if (plan.num_dims == 1 && is_greater(plan.strides[0], plan.line_width)) {
         if (plan.is_aligned<uint32_t>()) {
-            KMM_GPU_CHECK(g_memset_2d_d32_async(
+            KMM_GPU_CHECK(g_memset_d2d32_async(
                 reinterpret_cast<g_device_ptr_t>(plan.dst_addr),
                 checked_cast<unsigned int>(plan.strides[0]),
                 plan.pattern_as<uint32_t>(),
@@ -317,7 +317,7 @@ bool try_fill_plan(g_stream_t stream, const FillPlan& plan) {
         }
 
         if (plan.is_aligned<uint16_t>()) {
-            KMM_GPU_CHECK(g_memset_2d_d16_async(
+            KMM_GPU_CHECK(g_memset_d2d16_async(
                 reinterpret_cast<g_device_ptr_t>(plan.dst_addr),
                 checked_cast<unsigned int>(plan.strides[0]),
                 plan.pattern_as<uint16_t>(),
@@ -330,7 +330,7 @@ bool try_fill_plan(g_stream_t stream, const FillPlan& plan) {
         }
 
         if (plan.is_aligned<uint8_t>()) {
-            KMM_GPU_CHECK(g_memset_2d_d8_async(
+            KMM_GPU_CHECK(g_memset_d2d8_async(
                 reinterpret_cast<g_device_ptr_t>(plan.dst_addr),
                 checked_cast<unsigned int>(plan.strides[0]),
                 plan.pattern_as<uint8_t>(),

@@ -204,8 +204,8 @@ gpu_error_t gpu_memset_async(void* dst, int value, size_t sizeBytes, g_stream_t 
 g_result_t g_memcpy_2d(const gpu_memcpy2d_t*);
 g_result_t g_memcpy_2d_async(const gpu_memcpy2d_t*, g_stream_t);
 
-g_result_t g_memset_2d_d8_async(g_device_ptr_t, size_t, unsigned char, size_t, size_t, g_stream_t);
-g_result_t g_memset_2d_d16_async(
+g_result_t g_memset_d2d8_async(g_device_ptr_t, size_t, unsigned char, size_t, size_t, g_stream_t);
+g_result_t g_memset_d2d16_async(
     g_device_ptr_t,
     size_t,
     unsigned short,
@@ -213,7 +213,7 @@ g_result_t g_memset_2d_d16_async(
     size_t,
     g_stream_t
 );
-g_result_t g_memset_2d_d32_async(g_device_ptr_t, size_t, unsigned int, size_t, size_t, g_stream_t);
+g_result_t g_memset_d2d32_async(g_device_ptr_t, size_t, unsigned int, size_t, size_t, g_stream_t);
 
 // Memory Pool Management Constants & Functions
 

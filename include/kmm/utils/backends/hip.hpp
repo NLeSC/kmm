@@ -200,9 +200,9 @@ static inline g_result_t g_memcpy_peer_async(
 #define g_memcpy_2d       hipMemcpyParam2D
 #define g_memcpy_2d_async hipMemcpyParam2DAsync
 
-#define g_memset_2d_d8_async  hipMemsetD2D8Async
-#define g_memset_2d_d16_async hipMemsetD2D16Async
-#define g_memset_2d_d32_async hipMemsetD2D32Async
+#define g_memset_d2d8_async  hipMemsetD2D8Async
+#define g_memset_d2d16_async hipMemsetD2D16Async
+#define g_memset_d2d32_async hipMemsetD2D32Async
 
 // Memory Pool Management Constants & Functions
 
