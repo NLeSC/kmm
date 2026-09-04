@@ -77,7 +77,6 @@ using gpu_mem_pool_attr_t = hipMemPoolAttr;
 #define g_stream_create                 hipStreamCreateWithFlags
 #define g_stream_create_with_priority   hipStreamCreateWithPriority
 #define g_stream_get_device             hipStreamGetDevice
-#define g_stream_get_id                 hipStreamGetId
 #define g_stream_query                  hipStreamQuery
 #define g_stream_synchronize            hipStreamSynchronize
 #define g_stream_destroy                hipStreamDestroy
@@ -102,6 +101,19 @@ static inline g_result_t g_stream_get_ctx(g_stream_t hStream, g_context_t* pctx)
 
     return g_device_primary_ctx_release(device);
 }
+
+// hipStreamGetId was only added in ROCm 7.1.0; on older ROCm (e.g. the 6.3.4 used in CI) there is
+// no native stream-id query. Since g_stream_t (hipStream_t) is itself an opaque pointer that
+// uniquely identifies the stream object for its lifetime, reuse the pointer value as the id --
+// this satisfies the only property callers (GPUStreamId) rely on: stable equality/hashing.
+#if HIP_VERSION_MAJOR > 7 || (HIP_VERSION_MAJOR == 7 && HIP_VERSION_MINOR >= 1)
+    #define g_stream_get_id hipStreamGetId
+#else
+static inline g_result_t g_stream_get_id(g_stream_t hStream, unsigned long long* streamId) {
+    *streamId = reinterpret_cast<unsigned long long>(hStream);
+    return hipSuccess;
+}
+#endif
 
 // Event Management Constants & Functions
 
@@ -318,7 +330,6 @@ static inline g_result_t g_memset_d2d32_async(
 
 // Error Handling Constants & Functions
 
-// HIP has no separate driver/runtime API split, so G_* and GPU_* map to the same symbols.
 #define G_SUCCESS             hipSuccess
 #define G_ERROR_OUT_OF_MEMORY hipErrorOutOfMemory
 #define G_ERROR_UNKNOWN       hipErrorUnknown
