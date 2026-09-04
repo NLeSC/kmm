@@ -1,8 +1,10 @@
 #pragma once
 
 #include <cstddef>
-#include <hip/hip_bf16.h>
-#include <hip/hip_fp16.h>
+#if defined(__HIP__)
+    #include <hip/hip_bf16.h>
+    #include <hip/hip_fp16.h>
+#endif
 #include <hip/hip_runtime.h>
 #include <rocblas/rocblas.h>
 
@@ -12,8 +14,13 @@ namespace kmm {
 
 // Types
 
+#if defined(__HIP__)
 using half_type = __half;
 using bfloat16_type = __hip_bfloat16;
+#else
+using half_type = unsigned char;
+using bfloat16_type = char;
+#endif
 using g_result_t = hipError_t;
 using gpu_error_t = hipError_t;
 using g_device_t = hipDevice_t;
