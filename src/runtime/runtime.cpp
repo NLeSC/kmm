@@ -556,8 +556,8 @@ static DeviceEvent do_copy(
         event = impl->memory_system->copy_device_to_device(
             src_memory_id.as_device(),
             dst_memory_id.as_device(),
-            g_device_ptr_t(src_access.address) + description.src_offset,
-            g_device_ptr_t(dst_access.address) + description.dst_offset,
+            g_device_ptr_t(static_cast<std::byte*>(src_access.address) + description.src_offset),
+            g_device_ptr_t(static_cast<std::byte*>(dst_access.address) + description.dst_offset),
             description.element_size,
             stream_hint,
             deps
@@ -566,7 +566,7 @@ static DeviceEvent do_copy(
         event = impl->memory_system->copy_host_to_device(
             dst_memory_id.as_device(),
             reinterpret_cast<const std::byte*>(src_access.address) + description.src_offset,
-            g_device_ptr_t(dst_access.address) + description.dst_offset,
+            g_device_ptr_t(static_cast<std::byte*>(dst_access.address) + description.dst_offset),
             description.element_size,
             stream_hint,
             deps
@@ -574,7 +574,7 @@ static DeviceEvent do_copy(
     } else if (dst_memory_id.is_host() && src_memory_id.is_device()) {
         event = impl->memory_system->copy_device_to_host(
             src_memory_id.as_device(),
-            g_device_ptr_t(src_access.address) + description.src_offset,
+            g_device_ptr_t(static_cast<std::byte*>(src_access.address) + description.src_offset),
             reinterpret_cast<std::byte*>(dst_access.address) + description.dst_offset,
             description.element_size,
             stream_hint,
