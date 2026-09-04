@@ -1,17 +1,14 @@
 // A minimal example that adds two vectors on the GPU using `Device::parallel_for`: `c[i] = a[i] +
 // b[i]` for every index `i`, with KMM taking care of allocating and moving the buffers.
 #if defined(KMM_USE_CUDA)
-#include <cuda_runtime.h>
+    #include <cuda_runtime.h>
 #elif defined(KMM_USE_HIP)
-#include <hip/hip_runtime.h>
+    #include <hip/hip_runtime.h>
 #endif
 #include <iostream>
 #include <vector>
 
-#include "kmm/api/context.hpp"
-#include "kmm/api/host.hpp"
-#include "kmm/api/launch_arg.hpp"
-#include "kmm/api/parallel_for.hpp"
+#include "kmm/kmm.hpp"
 #include "kmm/runtime/identifiers.hpp"
 #include "kmm/runtime/runtime.hpp"
 

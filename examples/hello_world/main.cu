@@ -1,18 +1,14 @@
 // A minimal example showing the round trip of a buffer through KMM: a vector is written on the
 // CPU, doubled on the GPU, and read back on the CPU.
 #if defined(KMM_USE_CUDA)
-#include <cuda_runtime.h>
+    #include <cuda_runtime.h>
 #elif defined(KMM_USE_HIP)
-#include <hip/hip_runtime.h>
+    #include <hip/hip_runtime.h>
 #endif
 #include <iostream>
 #include <vector>
 
-#include "kmm/api/context.hpp"
-#include "kmm/api/host.hpp"
-#include "kmm/api/kernel.hpp"
-#include "kmm/api/launch_arg.hpp"
-#include "kmm/api/parallel_for.hpp"
+#include "kmm/kmm.hpp"
 #include "kmm/runtime/identifiers.hpp"
 #include "kmm/runtime/runtime.hpp"
 
