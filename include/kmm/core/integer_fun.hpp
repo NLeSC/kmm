@@ -42,36 +42,31 @@ KMM_HOST_DEVICE constexpr T div_ceil(T a, T b) {
     return quotient;
 }
 
+/// Return the absolute value of `input` as the corresponding unsigned integer type.
+template<typename T, typename U = typename detail::numeric_type_traits<T>::unsigned_type>
+KMM_HOST_DEVICE constexpr U unsigned_abs(T input) {
+    U magnitude = static_cast<U>(input);
+    return detail::is_negative(input) ? static_cast<U>(U(0) - magnitude) : magnitude;
+}
+
 /// Round `input` to the next multiple of `multiple`.
 ///
 /// This returns the smallest value greater than or equal to `input` that is divisible
 /// by `multiple`.
 template<typename T>
 KMM_HOST_DEVICE constexpr T round_up_to_multiple(T input, T multiple) {
+    using U = typename detail::numeric_type_traits<T>::unsigned_type;
     const T zero = static_cast<T>(0);
+
     T remainder = input % multiple;
-    T delta = 0;
+    T delta = zero;
 
     if (remainder != zero) {
-        if constexpr (detail::numeric_type_traits<T>::is_signed) {
-            // There are two cases:
-            // - input >= 0: return input + abs(multiple) - remainder
-            // - input < 0:  return input - remainder
-            T abs_multiple = (multiple >= zero ? multiple : -multiple);
-            delta = abs_multiple * (input >= zero) - remainder;
-        } else {
-            delta = multiple - remainder;
-        }
+        U magnitude = unsigned_abs(multiple) * U(input >= zero);
+        delta = static_cast<T>(static_cast<U>(magnitude - static_cast<U>(remainder)));
     }
 
     return checked_add(input, delta);
-}
-
-/// Return the absolute value of `input` as the corresponding unsigned integer type.
-template<typename T, typename U = typename detail::numeric_type_traits<T>::unsigned_type>
-KMM_HOST_DEVICE constexpr U unsigned_abs(T input) {
-    U magnitude = static_cast<U>(input);
-    return detail::is_negative(input) ? static_cast<U>(U(0) - magnitude) : magnitude;
 }
 
 /// Returns `true` if `left` is exactly divisible by `right` (i.e. `left % right == 0`).
