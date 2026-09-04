@@ -70,6 +70,12 @@ using gpu_mem_pool_attr_t = hipMemPoolAttr;
 #define g_ctx_pop_current            hipCtxPopCurrent
 #define g_ctx_enable_peer_access     hipCtxEnablePeerAccess
 
+// Workaround because we rely on older versions of HIP
+static inline g_result_t g_ctx_get_id(g_context_t context, unsigned long long* ctxId) {
+    *ctxId = reinterpret_cast<unsigned long long>(context);
+    return hipSuccess;
+}
+
 // Stream Management Constants & Functions
 
 #define G_STREAM_NON_BLOCKING           hipStreamNonBlocking
