@@ -139,7 +139,7 @@ static inline g_result_t g_stream_get_ctx(g_stream_t hStream, g_context_t* pctx)
 #define g_mem_free_host               hipHostFree
 #define g_pointer_get_attribute       hipPointerGetAttribute
 #define g_mem_alloc_managed           hipMallocManaged
-#define g_mem_host_get_device_pointer hipMemHostGetDevicePointer
+#define g_mem_host_get_device_pointer hipHostGetDevicePointer
 #define g_mem_prefetch_async          hipMemPrefetchAsync
 
 // Memory Copy Operations
