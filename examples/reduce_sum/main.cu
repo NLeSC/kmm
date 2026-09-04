@@ -2,7 +2,11 @@
 // splitting it across every available GPU: each device reduces its own slice into a single value,
 // and KMM combines the per-device results into one final sum.
 #include <algorithm>
+#if defined(KMM_USE_CUDA)
 #include <cuda_runtime.h>
+#elif defined(KMM_USE_HIP)
+#include <hip/hip_runtime.h>
+#endif
 #include <iostream>
 #include <vector>
 
