@@ -157,12 +157,22 @@ elseif(KMM_USE_HIP)
   set(hip_kernel_sources ${sources})
   list(FILTER hip_kernel_sources INCLUDE REGEX "\\.cu$")
   set_source_files_properties(${hip_kernel_sources} PROPERTIES LANGUAGE HIP)
+
+  # `enable_language(HIP)` above means CMake's native HIP-language support already knows how to
+  # compile the HIP-language kernel sources (invoking amdclang++ with the right -x hip flag and
+  # architecture), the same way CUDA_ARCHITECTURES drives .cu compilation in the CUDA branch. We
+  # deliberately do NOT link hip::device here: it exists for the legacy pattern of writing device
+  # code directly in .cpp files, and does so by force-injecting -x hip onto every CXX-language
+  # source in the target -- which breaks plain host .cpp files that never include hip headers.
+  set_target_properties(
+          ${PROJECT_NAME}
+          PROPERTIES
+          HIP_ARCHITECTURES "gfx90a"
+  )
   target_link_libraries(${PROJECT_NAME}
           PUBLIC
           hip::host
           roc::rocblas
-          PRIVATE
-          hip::device
   )
 
   # Define `KMM_USE_HIP` macro so that headers can detect HIP usage
