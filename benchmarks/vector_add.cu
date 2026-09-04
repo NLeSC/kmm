@@ -69,7 +69,7 @@ bool inner_loop(
     // Each chunk of `A`/`B`/`C` is its own array (own buffer, own home device), which is what
     // lets `num_chunks` independent submissions below actually run concurrently/pipelined,
     // rather than serializing on one shared buffer.
-    kmm::Distribution<1> dist(kmm::Shape<1>(n), kmm::Shape<1>(chunk_size));
+    kmm::Distribution<1> dist{kmm::Shape<1>(n), kmm::Shape<1>(chunk_size)};
     kmm::DistArray<real_type, 1> A(context.runtime(), dist);
     kmm::DistArray<real_type, 1> B(context.runtime(), dist);
     kmm::DistArray<real_type, 1> C(context.runtime(), dist);
