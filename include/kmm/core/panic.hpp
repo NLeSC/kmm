@@ -36,6 +36,17 @@
             while (1)                                                             \
                 ;                                                                 \
         } while (0)
+#else
+    // blockIdx/threadIdx are only declared once the platform's runtime header is included; unlike
+    // CUDA, HIP does not make them available as bare compiler builtins. This include must stay
+    // outside `namespace kmm` -- putting it inside nests everything the runtime header transitively
+    // pulls in (e.g. libstdc++'s <thread> -> <bits/unique_ptr.h>) under kmm::, which breaks std::
+    // lookups throughout the translation unit.
+    #if defined(__CUDACC__)
+        #include <cuda_runtime.h>
+    #elif defined(__HIPCC__)
+        #include <hip/hip_runtime.h>
+    #endif
 #endif
 
 namespace kmm {
@@ -50,11 +61,6 @@ namespace kmm {
 /// reason for the panic.
 [[noreturn]] void panic(const char* filename, int lineno, const char* message);
 #else
-    #if defined(__CUDACC__)
-        #include <cuda_runtime.h>
-    #elif defined(__HIPCC__)
-        #include <hip/hip_runtime.h>
-    #endif
 
 [[noreturn]] KMM_DEVICE void panic(const char* filename, int lineno, const char* message) {
     printf(
