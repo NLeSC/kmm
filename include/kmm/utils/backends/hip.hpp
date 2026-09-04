@@ -7,7 +7,6 @@
 #include <rocblas/rocblas.h>
 
 #include "kmm/core/macros.hpp"
-#include "kmm/utils/gpu_utils.hpp"
 
 namespace kmm {
 
@@ -82,10 +81,19 @@ static inline g_result_t g_stream_get_ctx(g_stream_t hStream, g_context_t* pctx)
     // the stream was created on and reuse its primary context, which is what
     // `SystemInfo` already treats as "the" context for that device.
     g_device_t device;
+    g_result_t result;
 
-    KMM_GPU_CHECK(g_stream_get_device(hStream, &device));
-    KMM_GPU_CHECK(g_device_primary_ctx_retain(pctx, device));
-    KMM_GPU_CHECK(g_device_primary_ctx_release(device));
+    result = g_stream_get_device(hStream, &device);
+    if (result != hipSuccess) {
+        return result;
+    }
+
+    result = g_device_primary_ctx_retain(pctx, device);
+    if (result != hipSuccess) {
+        return result;
+    }
+
+    return g_device_primary_ctx_release(device);
 }
 
 // Event Management Constants & Functions
