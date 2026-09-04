@@ -14,6 +14,7 @@ option(KMM_ENABLE_LINTER  "Enable clang-tidy linter" OFF)
 option(KMM_BUILD_TESTS    "Build tests" OFF)
 option(KMM_BUILD_EXAMPLES "Build examples" OFF)
 option(KMM_BUILD_BENCHMARKS "Build benchmarks" OFF)
+option(KMM_ENABLE_WARNINGS "Enable -Wall -Wextra -Wconversion" ON)
 
 # Check options
 if(KMM_USE_CUDA AND KMM_USE_HIP)
@@ -56,7 +57,8 @@ endif()
 target_compile_options(${PROJECT_NAME}
         PUBLIC
         $<$<COMPILE_LANGUAGE:CUDA>:-forward-unknown-to-host-compiler>
-        -Wall -Wextra -Wconversion -Wno-unused-parameter
+        "$<$<BOOL:${KMM_ENABLE_WARNINGS}>:-Wall;-Wextra;-Wconversion;-Wno-unused-parameter>"
+        $<$<NOT:$<BOOL:${KMM_ENABLE_WARNINGS}>>:-w>
         #$<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler=-Werror>
 )
 target_compile_options(${PROJECT_NAME} PUBLIC ${CXXFLAGS})

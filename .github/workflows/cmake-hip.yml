@@ -17,7 +17,7 @@ jobs:
 
       matrix:
         os: [ubuntu-latest]
-        build_type: [Debug]
+        build_type: [Release]
 
     steps:
       - uses: actions/checkout@v4
@@ -59,6 +59,7 @@ jobs:
           -DKMM_BUILD_TESTS:BOOL=ON
           -DKMM_BUILD_EXAMPLES:BOOL=ON
           -DKMM_BUILD_BENCHMARKS:BOOL=ON
+          -DKMM_ENABLE_WARNINGS:BOOL=OFF
           -S ${{ github.workspace }}
 
       - name: Build
