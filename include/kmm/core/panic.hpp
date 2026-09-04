@@ -77,7 +77,11 @@ namespace kmm {
     );
 
     while (true) {
+    #if defined(__HIPCC__)
+        __builtin_trap();
+    #else
         asm volatile("trap;");
+    #endif
     }
 }
 #endif
