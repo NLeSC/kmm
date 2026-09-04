@@ -19,9 +19,9 @@ namespace kmm {
 
 // MemoryRequestImpl / MemoryRequest are forward-declared in buffer.hpp (included above), since
 // BufferRequest needs them too and this header would otherwise have to be included before it.
-class MemoryTransactionImpl;
-class MemoryBufferImpl;
-class MemoryRequestImpl;
+struct MemoryTransactionImpl;
+struct MemoryBufferImpl;
+struct MemoryRequestImpl;
 
 KMM_REFCNT_TRAITS_FWD(MemoryTransactionImpl)
 KMM_REFCNT_TRAITS_FWD(MemoryBufferImpl)
