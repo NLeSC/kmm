@@ -200,9 +200,93 @@ static inline g_result_t g_memcpy_peer_async(
 #define g_memcpy_2d       hipMemcpyParam2D
 #define g_memcpy_2d_async hipMemcpyParam2DAsync
 
-#define g_memset_d2d8_async  hipMemsetD2D8Async
-#define g_memset_d2d16_async hipMemsetD2D16Async
-#define g_memset_d2d32_async hipMemsetD2D32Async
+// hipMemsetD2D{8,16,32}Async were only added in ROCm 7.1.0; on older ROCm (e.g. the
+// 6.3.4 used in CI) emulate them with a per-row loop over the linear (1D) memsets, which do exist
+// on ROCm 6. All calls go on the same stream, so this preserves the same stream-ordered semantics
+// as a single native call would.
+#if HIP_VERSION_MAJOR > 7 || (HIP_VERSION_MAJOR == 7 && HIP_VERSION_MINOR >= 1)
+    #define g_memset_d2d8_async  hipMemsetD2D8Async
+    #define g_memset_d2d16_async hipMemsetD2D16Async
+    #define g_memset_d2d32_async hipMemsetD2D32Async
+#else
+static inline g_result_t g_memset_d2d8_async(
+    g_device_ptr_t dstDevice,
+    size_t dstPitch,
+    unsigned char uc,
+    size_t Width,
+    size_t Height,
+    g_stream_t hStream
+) {
+    auto* base = reinterpret_cast<unsigned char*>(dstDevice);
+
+    for (size_t row = 0; row < Height; row++) {
+        auto result = hipMemsetD8Async(
+            reinterpret_cast<g_device_ptr_t>(base + row * dstPitch),
+            uc,
+            Width,
+            hStream
+        );
+
+        if (result != hipSuccess) {
+            return result;
+        }
+    }
+
+    return hipSuccess;
+}
+
+static inline g_result_t g_memset_d2d16_async(
+    g_device_ptr_t dstDevice,
+    size_t dstPitch,
+    unsigned short us,
+    size_t Width,
+    size_t Height,
+    g_stream_t hStream
+) {
+    auto* base = reinterpret_cast<unsigned char*>(dstDevice);
+
+    for (size_t row = 0; row < Height; row++) {
+        auto result = hipMemsetD16Async(
+            reinterpret_cast<g_device_ptr_t>(base + row * dstPitch),
+            us,
+            Width,
+            hStream
+        );
+
+        if (result != hipSuccess) {
+            return result;
+        }
+    }
+
+    return hipSuccess;
+}
+
+static inline g_result_t g_memset_d2d32_async(
+    g_device_ptr_t dstDevice,
+    size_t dstPitch,
+    unsigned int ui,
+    size_t Width,
+    size_t Height,
+    g_stream_t hStream
+) {
+    auto* base = reinterpret_cast<unsigned char*>(dstDevice);
+
+    for (size_t row = 0; row < Height; row++) {
+        auto result = hipMemsetD32Async(
+            reinterpret_cast<g_device_ptr_t>(base + row * dstPitch),
+            ui,
+            Width,
+            hStream
+        );
+
+        if (result != hipSuccess) {
+            return result;
+        }
+    }
+
+    return hipSuccess;
+}
+#endif
 
 // Memory Pool Management Constants & Functions
 
