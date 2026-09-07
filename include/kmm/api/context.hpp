@@ -162,6 +162,37 @@ class Context {
         );
     }
 
+    template<typename T, typename SrcLayoutT, typename DstLayoutT>
+    DeviceEvent reduce_into(
+        ReductionOp op,
+        const NDArray<T, SrcLayoutT>& src,
+        const NDArray<T, DstLayoutT>& dst
+    ) {
+        auto desc =
+            make_reduction_description(dst.layout(), src.layout(), 0, data_type_of<T>(), op);
+
+        return m_runtime.submit_reduction(
+            dst.buffer().id(),
+            src.buffer().id(),
+            desc,
+            affinity_memory_id(),
+            affinity_stream(),
+            m_transaction
+        );
+    }
+
+    template<typename T, typename LayoutT>
+    T reduce(ReductionOp op, const NDArray<T, LayoutT>& src) {
+        Scalar<T> result;
+        reduce_into(op, src, result);
+        return to_scalar(result);
+    }
+
+    template<typename T, typename LayoutT>
+    T sum(const NDArray<T, LayoutT>& src) {
+        return reduce(ReductionOp::Sum, src);
+    }
+
     void prefetch(const Buffer& buffer, bool invalidate_others = false) {
         buffer.prefetch(affinity_memory_id(), invalidate_others);
     }

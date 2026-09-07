@@ -2,7 +2,6 @@
 #include <cstdint>
 #include <stdexcept>
 
-#include "reduction_traits.hpp"
 #include "simplify_dims.hpp"
 
 #include "kmm/core/const_value.hpp"
@@ -10,6 +9,7 @@
 #include "kmm/core/panic.hpp"
 #include "kmm/runtime/memops/copy.hpp"
 #include "kmm/runtime/memops/fill.hpp"
+#include "kmm/runtime/memops/reducer.hpp"
 #include "kmm/runtime/memops/reduction.hpp"
 
 namespace kmm {
@@ -145,7 +145,7 @@ FillDescription ReductionDescription::as_fill() const {
 template<typename T, ReductionOp Op>
 static FillValue reduction_identity_checked() {
     if constexpr (memops::is_reduction_supported<T, Op>) {
-        return FillValue::from(memops::ReductionTraits<T, Op>::identity());
+        return FillValue::from(memops::Reducer<T, Op> {}.finish());
     } else {
         throw std::runtime_error("reduction operator not supported for this data type");
     }
@@ -196,7 +196,7 @@ FillValue reduction_identity(DataType dtype, ReductionOp op) {
     KMM_PANIC("invalid data type");
 }
 
-template<typename T, ReductionOp Op, bool Accumulate, typename E>
+template<typename Reduction, bool Accumulate, typename E>
 static void reduce_leaf(
     const std::byte* src,
     std::byte* dst,
@@ -206,25 +206,26 @@ static void reduce_leaf(
     // `src`/`dst` and every stride are assumed to be `T`-aligned. This holds for any description
     // built by `make_reduction_description`, which derives every offset and stride from
     // `element_size == sizeof(T)`.
-    T acc = memops::ReductionTraits<T, Op>::identity();
-
-    for (memops_extent_type i = 0; i < reduction_extent; i++) {
-        T value = *reinterpret_cast<const T*>(src + i * reduction_stride);
-        acc = memops::ReductionTraits<T, Op>::combine(acc, value);
-    }
+    using T = typename Reduction::element_type;
+    Reduction acc {};
 
     if constexpr (Accumulate) {
         T previous = *reinterpret_cast<const T*>(dst);
-        acc = memops::ReductionTraits<T, Op>::combine(previous, acc);
+        acc = Reduction {previous};
     }
 
-    *reinterpret_cast<T*>(dst) = acc;
+    for (memops_extent_type i = 0; i < reduction_extent; i++) {
+        T value = *reinterpret_cast<const T*>(src + i * reduction_stride);
+        acc.consume(value);
+    }
+
+    *reinterpret_cast<T*>(dst) = acc.finish();
 }
 
 /// Recurses over the batch axes with `Rank` (the number of remaining axes) as a template
 /// parameter, so the compiler can fully unroll the loop nest for the common, small ranks instead
 /// of looping over a runtime-sized `dims` array.
-template<typename T, ReductionOp Op, bool Accumulate, size_t Rank, typename E>
+template<typename Reduction, bool Accumulate, size_t Rank, typename E>
 static void reduce_dim(
     const std::byte* src,
     std::byte* dst,
@@ -233,10 +234,10 @@ static void reduce_dim(
     memops_stride_type reduction_stride
 ) {
     if constexpr (Rank == 0) {
-        reduce_leaf<T, Op, Accumulate>(src, dst, reduction_extent, reduction_stride);
+        reduce_leaf<Reduction, Accumulate>(src, dst, reduction_extent, reduction_stride);
     } else {
         for (memops_extent_type i = 0; i < dims->extent; i++) {
-            reduce_dim<T, Op, Accumulate, Rank - 1>(
+            reduce_dim<Reduction, Accumulate, Rank - 1>(
                 src + i * dims->input_stride,
                 dst + i * dims->output_stride,
                 dims + 1,
@@ -249,7 +250,7 @@ static void reduce_dim(
 
 /// Dispatches the runtime `num_dims` (at most `MEMOPS_MAX_DIMS`, checked by the caller) to the
 /// matching `reduce_dim<T, Op, Accumulate, Rank>` instantiation.
-template<typename T, ReductionOp Op, bool Accumulate, size_t Rank = MEMOPS_MAX_DIMS, typename E>
+template<typename Reduction, bool Accumulate, size_t Rank = MEMOPS_MAX_DIMS, typename E>
 static void reduce_dim_dispatch(
     size_t num_dims,
     const std::byte* src,
@@ -259,9 +260,9 @@ static void reduce_dim_dispatch(
     memops_stride_type reduction_stride
 ) {
     if (num_dims == Rank) {
-        reduce_dim<T, Op, Accumulate, Rank>(src, dst, dims, reduction_extent, reduction_stride);
+        reduce_dim<Reduction, Accumulate, Rank>(src, dst, dims, reduction_extent, reduction_stride);
     } else if constexpr (Rank > 0) {
-        reduce_dim_dispatch<T, Op, Accumulate, Rank - 1>(
+        reduce_dim_dispatch<Reduction, Accumulate, Rank - 1>(
             num_dims,
             src,
             dst,
@@ -274,7 +275,7 @@ static void reduce_dim_dispatch(
     }
 }
 
-template<typename T, ReductionOp Op, bool Accumulate>
+template<typename Reduction, bool Accumulate>
 static void reduce_op_accumulate(
     const void* src_addr,
     void* dst_addr,
@@ -285,7 +286,7 @@ static void reduce_op_accumulate(
     // * reduction_extent == 2: reduce two buffers into one
     // * reduction_extent > 2: arbitrary reduction axis
     if (description.reduction_extent == 1) {
-        reduce_dim_dispatch<T, Op, Accumulate>(
+        reduce_dim_dispatch<Reduction, Accumulate>(
             description.num_dims,
             static_cast<const std::byte*>(src_addr) + description.input_offset,
             static_cast<std::byte*>(dst_addr) + description.output_offset,
@@ -294,7 +295,7 @@ static void reduce_op_accumulate(
             description.reduction_stride
         );
     } else if (description.reduction_extent == 2) {
-        reduce_dim_dispatch<T, Op, Accumulate>(
+        reduce_dim_dispatch<Reduction, Accumulate>(
             description.num_dims,
             static_cast<const std::byte*>(src_addr) + description.input_offset,
             static_cast<std::byte*>(dst_addr) + description.output_offset,
@@ -303,7 +304,7 @@ static void reduce_op_accumulate(
             description.reduction_stride
         );
     } else {
-        reduce_dim_dispatch<T, Op, Accumulate>(
+        reduce_dim_dispatch<Reduction, Accumulate>(
             description.num_dims,
             static_cast<const std::byte*>(src_addr) + description.input_offset,
             static_cast<std::byte*>(dst_addr) + description.output_offset,
@@ -314,16 +315,16 @@ static void reduce_op_accumulate(
     }
 }
 
-template<typename T, ReductionOp Op>
+template<typename Reduction>
 static void reduce_op(
     const void* src_addr,
     void* dst_addr,
     const ReductionDescription& description
 ) {
     if (description.accumulate) {
-        reduce_op_accumulate<T, Op, true>(src_addr, dst_addr, description);
+        reduce_op_accumulate<Reduction, true>(src_addr, dst_addr, description);
     } else {
-        reduce_op_accumulate<T, Op, false>(src_addr, dst_addr, description);
+        reduce_op_accumulate<Reduction, false>(src_addr, dst_addr, description);
     }
 }
 
@@ -338,7 +339,7 @@ static void reduce_op_checked(
     const ReductionDescription& description
 ) {
     if constexpr (memops::is_reduction_supported<T, Op>) {
-        reduce_op<T, Op>(src_addr, dst_addr, description);
+        reduce_op<memops::Reducer<T, Op>>(src_addr, dst_addr, description);
     } else {
         throw std::runtime_error("reduction operator not supported for this data type");
     }
@@ -371,39 +372,37 @@ static void reduce_typed(
 namespace memops {
 
 void reduce(const void* src_addr, void* dst_addr, const ReductionDescription& description) {
-    auto simplified = description.simplify();
-
-    if (simplified.is_noop()) {
+    if (description.is_noop()) {
         return;
     }
 
-    if (simplified.is_equivalent_to_copy()) {
-        return copy(src_addr, dst_addr, simplified.as_copy());
+    if (description.is_equivalent_to_copy()) {
+        return copy(src_addr, dst_addr, description.as_copy());
     }
 
-    if (simplified.is_equivalent_to_fill()) {
-        return fill(dst_addr, simplified.as_fill());
+    if (description.is_equivalent_to_fill()) {
+        return fill(dst_addr, description.as_fill());
     }
 
-    switch (simplified.dtype) {
+    switch (description.dtype) {
         case DataType::Unknown:
             break;
         case DataType::Int32:
-            return reduce_typed<int32_t>(src_addr, dst_addr, simplified);
+            return reduce_typed<int32_t>(src_addr, dst_addr, description);
         case DataType::Int64:
-            return reduce_typed<int64_t>(src_addr, dst_addr, simplified);
+            return reduce_typed<int64_t>(src_addr, dst_addr, description);
         case DataType::Uint32:
-            return reduce_typed<uint32_t>(src_addr, dst_addr, simplified);
+            return reduce_typed<uint32_t>(src_addr, dst_addr, description);
         case DataType::Uint64:
-            return reduce_typed<uint64_t>(src_addr, dst_addr, simplified);
+            return reduce_typed<uint64_t>(src_addr, dst_addr, description);
         case DataType::Float32:
-            return reduce_typed<float>(src_addr, dst_addr, simplified);
+            return reduce_typed<float>(src_addr, dst_addr, description);
         case DataType::Float64:
-            return reduce_typed<double>(src_addr, dst_addr, simplified);
+            return reduce_typed<double>(src_addr, dst_addr, description);
         case DataType::KeyValueInt64:
-            return reduce_typed<KeyValue<int64_t>>(src_addr, dst_addr, simplified);
+            return reduce_typed<KeyValue<int64_t>>(src_addr, dst_addr, description);
         case DataType::KeyValueFloat64:
-            return reduce_typed<KeyValue<double>>(src_addr, dst_addr, simplified);
+            return reduce_typed<KeyValue<double>>(src_addr, dst_addr, description);
     }
 
     KMM_PANIC("invalid data type");

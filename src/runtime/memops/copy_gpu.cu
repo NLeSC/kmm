@@ -5,7 +5,10 @@
 #include <iostream>
 #include <optional>
 
+#include "memops_gpu_kernels.cuh"
+
 #include "kmm/core/checked_compare.hpp"
+#include "kmm/core/fast_divisor.hpp"
 #include "kmm/core/integer_fun.hpp"
 #include "kmm/core/vec.hpp"
 #include "kmm/runtime/memops/copy_gpu.hpp"
@@ -18,9 +21,9 @@ struct CopyPlan {
     void* dst_addr;
     size_t line_width;
     size_t num_dims;
-    size_t extents[MEMOPS_MAX_DIMS] = {};
-    ptrdiff_t input_strides[MEMOPS_MAX_DIMS] = {};
-    ptrdiff_t output_strides[MEMOPS_MAX_DIMS] = {};
+    size_t extents[MEMOPS_MAX_DIMS + 1] = {};
+    ptrdiff_t input_strides[MEMOPS_MAX_DIMS + 1] = {};
+    ptrdiff_t output_strides[MEMOPS_MAX_DIMS + 1] = {};
 
     template<typename T>
     bool is_address_aligned() const {
@@ -138,200 +141,269 @@ CopyPlan make_plan(const void* src_base, void* dst_base, const CopyDescription& 
     return plan;
 }
 
-template<typename T, size_t Rank>
-__global__ void elementwise_copy_kernel(
-    void* dst_addr,
-    const void* src_addr,
-    Vec<ptrdiff_t, Rank> input_strides,
-    Vec<ptrdiff_t, Rank> output_strides,
-    Vec<uint, Rank> extents
+template<typename T, size_t N>
+void launch_strided_kernel_rank_typed_recur(
+    g_stream_t stream,
+    Vec<size_t, N> extents,
+    std::byte* dst_addr,
+    const std::byte* src_addr,
+    Vec<ptrdiff_t, N> dst_strides,
+    Vec<ptrdiff_t, N> src_strides
 ) {
-    uint p[3] = {
-        blockIdx.x * blockDim.x + threadIdx.x,
-        blockIdx.y * blockDim.y + threadIdx.y,
-        blockIdx.z * blockDim.z + threadIdx.z,
-    };
+    constexpr uint32_t max_blocks = 1024;
+    constexpr uint32_t threads_per_block = 256;
 
-#pragma unroll
-    for (size_t i = 0; i < Rank; i++) {
-        if (p[i] >= extents[i]) {
+    // stride 0 must be contiguous
+    KMM_ASSERT(dst_strides[0] == sizeof(T));
+    KMM_ASSERT(src_strides[0] == sizeof(T));
+
+    Vec<uint32_t, N> local_extents;
+    uint32_t num_threads = 1;
+
+    for (size_t i = 0; i < N; i++) {
+        if (extents[i] == 0) {
             return;
         }
 
-        dst_addr = static_cast<std::byte*>(dst_addr) + output_strides[i] * ptrdiff_t(p[i]);
-        src_addr = static_cast<const std::byte*>(src_addr) + input_strides[i] * ptrdiff_t(p[i]);
+        // Largest count along axis `i` that keeps the running thread total within the range
+        // that `FastDivisor` accepts as a numerator.
+        uint32_t chunk = IndexMapper<uint32_t, N>::max_volume / num_threads;
+
+        while (extents[i] > chunk) {
+            Vec<size_t, N> head = extents;
+            head[i] = chunk;
+
+            launch_strided_kernel_rank_typed_recur<T>(
+                stream,
+                head,
+                dst_addr,
+                src_addr,
+                dst_strides,
+                src_strides
+            );
+
+            dst_addr += ptrdiff_t(chunk) * dst_strides[i];
+            src_addr += ptrdiff_t(chunk) * src_strides[i];
+            extents[i] -= chunk;
+        }
+
+        local_extents[i] = static_cast<uint32_t>(extents[i]);  // safe cast
+        num_threads *= static_cast<uint32_t>(extents[i]);
     }
 
-    *static_cast<T*>(dst_addr) = *static_cast<const T*>(src_addr);
+    uint32_t grid_size = std::min(div_ceil(num_threads, threads_per_block), max_blocks);
+    auto mapper = IndexMapper<uint32_t, N>(local_extents);
+
+    elementwise_copy_kernel<T, N><<<grid_size, threads_per_block, 0, stream>>>(
+        dst_addr,
+        src_addr,
+        mapper,
+        dst_strides,
+        src_strides
+    );
 }
 
-// Choose a thread-block shape for `elementwise_copy_kernel`.
-template<size_t Rank>
-dim3 compute_block_size(
-    size_t elem_size,
-    Vec<ptrdiff_t, Rank> input_strides,
-    Vec<ptrdiff_t, Rank> output_strides,
-    Vec<size_t, Rank> extents
+template<typename T, size_t N>
+void launch_transpose_kernel_rank_typed_recur(
+    g_stream_t stream,
+    Vec<size_t, N> extents,
+    std::byte* dst_addr,
+    const std::byte* src_addr,
+    Vec<ptrdiff_t, N> dst_strides,
+    Vec<ptrdiff_t, N> src_strides
 ) {
-    constexpr size_t BYTES_PER_LINE = 128;
-    constexpr size_t THREADS_PER_BLOCK = 512;
+    static_assert(N >= 2, "transpose kernel must have at least 2 dimensions");
+    constexpr uint32_t max_blocks = 1024;
+    constexpr uint32_t tile_size = 32;
+    constexpr uint32_t block_dim_x = 32;
+    constexpr uint32_t block_dim_y = 8;
 
-    // Distinct cache lines touched by `n` elements spaced `stride` bytes apart.
-    auto lines = [&](size_t n, size_t stride) -> size_t {
-        if (n <= 1) {
-            return 1;
+    Vec<uint32_t, N> grid_extents;
+    uint32_t num_blocks = 1;
+
+    for (size_t i = 0; i < 2; i++) {
+        if (extents[i] == 0) {
+            return;
         }
 
-        size_t span = (n - 1) * stride + elem_size;
-        return std::min(n, div_ceil<size_t>(span, BYTES_PER_LINE));
-    };
+        size_t count = div_ceil(extents[i], size_t(tile_size));
+        uint32_t chunk = IndexMapper<uint32_t, N>::max_volume / num_blocks;
 
-    // upper bound on the block extent per axis.
-    size_t cap[3] = {1, 1, 1};
-    for (size_t i = 0; i < Rank; i++) {
-        cap[i] = round_up_to_power_of_two(std::min(extents[i], THREADS_PER_BLOCK));
-    }
+        chunk = std::min(chunk, IndexMapper<uint32_t, N>::max_volume / tile_size);
 
-    // Z-axis cannot exceed 64.
-    if constexpr (Rank >= 3) {
-        cap[2] = std::min(cap[2], size_t(64));
-    }
+        while (count > chunk) {
+            Vec<size_t, N> head = extents;
+            head[i] = size_t(chunk) * tile_size;
 
-    dim3 best = {1, 1, 1};
-    size_t best_ws = 1;  // best `ws / vol` seen so far, kept as a fraction
-    size_t best_vol = 0;  // 0 marks "unset", i.e. compares as +infinity
+            launch_transpose_kernel_rank_typed_recur<T>(
+                stream,
+                head,
+                dst_addr,
+                src_addr,
+                dst_strides,
+                src_strides
+            );
 
-    for (size_t bz = 1; bz <= cap[2]; bz *= 2) {
-        for (size_t by = 1; by <= cap[1]; by *= 2) {
-            for (size_t bx = 1; bx <= cap[0]; bx *= 2) {
-                size_t vol = bx * by * bz;
-                if (vol > THREADS_PER_BLOCK) {
-                    break;
-                }
-
-                size_t b[3] = {bx, by, bz};
-                size_t ws_in = 1;
-                size_t ws_out = 1;
-
-                for (size_t i = 0; i < Rank; i++) {
-                    ws_in *= lines(b[i], unsigned_abs(input_strides[i]));
-                    ws_out *= lines(b[i], unsigned_abs(output_strides[i]));
-                }
-
-                size_t ws = ws_in + ws_out;
-
-                // Compare `ws / vol` by cross-multiplication; break ties toward the more
-                // occupied block, then toward more threads on `x`.
-                bool better = ws * best_vol < best_ws * vol;
-                bool tie = ws * best_vol == best_ws * vol;
-
-                if (better || (tie && vol > best_vol) || (tie && vol == best_vol && bx > best.x)) {
-                    best = {checked_cast<uint>(bx), checked_cast<uint>(by), checked_cast<uint>(bz)};
-                    best_ws = ws;
-                    best_vol = vol;
-                }
-            }
+            dst_addr += ptrdiff_t(head[i]) * dst_strides[i];
+            src_addr += ptrdiff_t(head[i]) * src_strides[i];
+            extents[i] -= head[i];
+            count -= chunk;
         }
+
+        grid_extents[i] = static_cast<uint32_t>(count);
+        num_blocks *= static_cast<uint32_t>(count);
     }
 
-    return best;
+    for (size_t i = 2; i < N; i++) {
+        if (extents[i] == 0) {
+            return;
+        }
+
+        size_t count = extents[i];
+        uint32_t chunk = IndexMapper<uint32_t, N>::max_volume / num_blocks;
+
+        while (count > chunk) {
+            Vec<size_t, N> head = extents;
+            head[i] = size_t(chunk);
+
+            launch_transpose_kernel_rank_typed_recur<T>(
+                stream,
+                head,
+                dst_addr,
+                src_addr,
+                dst_strides,
+                src_strides
+            );
+
+            dst_addr += ptrdiff_t(head[i]) * dst_strides[i];
+            src_addr += ptrdiff_t(head[i]) * src_strides[i];
+            extents[i] -= head[i];
+            count -= chunk;
+        }
+
+        grid_extents[i] = static_cast<uint32_t>(count);
+        num_blocks *= static_cast<uint32_t>(count);
+    }
+
+    uint32_t grid_size = std::min(num_blocks, max_blocks);
+    auto mapper = IndexMapper<uint32_t, N>(grid_extents);
+
+    transpose_copy_kernel<T, N, tile_size, block_dim_x, block_dim_y>
+        <<<grid_size, dim3(block_dim_x, block_dim_y), 0, stream>>>(
+            dst_addr,
+            src_addr,
+            static_cast<uint32_t>(extents[0]),
+            static_cast<uint32_t>(extents[1]),
+            mapper,
+            dst_strides,
+            src_strides
+        );
 }
 
-template<typename T, size_t Rank>
+template<typename T, size_t N>
 void launch_strided_kernel_rank_typed(g_stream_t stream, const CopyPlan& plan) {
-    static_assert(Rank >= 1 && Rank <= 3, "invalid rank");
-    KMM_ASSERT(plan.line_width == sizeof(T));
+    KMM_ASSERT(plan.num_dims == N);
+    KMM_ASSERT(plan.line_width % sizeof(T) == 0);
 
-    Vec<ptrdiff_t, Rank> input_strides;
-    Vec<ptrdiff_t, Rank> output_strides;
-    Vec<size_t, Rank> extents;
+    Vec<size_t, N + 1> extents;
+    Vec<ptrdiff_t, N + 1> src_strides;
+    Vec<ptrdiff_t, N + 1> dst_strides;
 
-    for (size_t i = 0; i < Rank; i++) {
-        input_strides[i] = plan.input_strides[i];
-        output_strides[i] = plan.output_strides[i];
-        extents[i] = plan.extents[i];
+    extents[0] = plan.line_width / sizeof(T);
+    src_strides[0] = sizeof(T);
+    dst_strides[0] = sizeof(T);
+
+    for (size_t i = 0; i < N; i++) {
+        extents[i + 1] = plan.extents[i];
+        src_strides[i + 1] = plan.input_strides[i];
+        dst_strides[i + 1] = plan.output_strides[i];
     }
 
-    constexpr size_t TILE_X = size_t(1) << 31;
-    constexpr size_t TILE_YZ = 65535;
+    auto* dst_addr = static_cast<std::byte*>(plan.dst_addr);
+    const auto* src_addr = static_cast<const std::byte*>(plan.src_addr);
 
-    dim3 block_size = compute_block_size<Rank>(sizeof(T), input_strides, output_strides, extents);
+    if constexpr (N >= 2) {
+        // if N >= 2, we can check if this copy is actually a transposition. To detect this, we scan over the
+        // strides and attempt to find the "unit" axes for the source and destination. This is the axis that meets
+        // the following criteria:
+        //  - Must be sufficiently large
+        //  - The stride cannot be zero
+        //  - The stride is contiguous (or very close to contiguous).
+        //
+        // If the unit source axis is different from the unit destination axis, then we have a transposition and we
+        // call the special transposition kernel to handle this.
+        const size_t minimum_length = 32;
+        const size_t near_contiguous = 4 * sizeof(T);
 
-    size_t nx = extents[0];
-    size_t ny = Rank >= 2 ? plan.extents[1] : 1;
-    size_t nz = Rank >= 3 ? plan.extents[2] : 1;
+        size_t src_unit = 0;
+        size_t dst_unit = 0;
 
-    for (size_t ox = 0; ox < nx; ox += TILE_X) {
-        for (size_t oy = 0; oy < ny; oy += TILE_YZ) {
-            for (size_t oz = 0; oz < nz; oz += TILE_YZ) {
-                size_t ex = std::min(TILE_X, nx - ox);
-                size_t ey = std::min(TILE_YZ, ny - oy);
-                size_t ez = std::min(TILE_YZ, nz - oz);
-
-                auto* src_addr = static_cast<const std::byte*>(plan.src_addr);
-                auto* dst_addr = static_cast<std::byte*>(plan.dst_addr);
-                Vec<uint, Rank> sub;
-
-                if constexpr (Rank >= 1) {
-                    src_addr += ptrdiff_t(ox) * input_strides[0];
-                    dst_addr += ptrdiff_t(ox) * output_strides[0];
-                    sub[0] = checked_cast<uint>(ex);
-                }
-
-                if constexpr (Rank >= 2) {
-                    src_addr += ptrdiff_t(oy) * input_strides[1];
-                    dst_addr += ptrdiff_t(oy) * output_strides[1];
-                    sub[1] = checked_cast<uint>(ey);
-                }
-
-                if constexpr (Rank >= 3) {
-                    src_addr += ptrdiff_t(oz) * input_strides[2];
-                    dst_addr += ptrdiff_t(oz) * output_strides[2];
-                    sub[2] = checked_cast<uint>(ez);
-                }
-
-                dim3 grid_size = {
-                    checked_cast<uint>(div_ceil<size_t>(ex, block_size.x)),
-                    checked_cast<uint>(div_ceil<size_t>(ey, block_size.y)),
-                    checked_cast<uint>(div_ceil<size_t>(ez, block_size.z)),
-                };
-
-                elementwise_copy_kernel<T, Rank><<<grid_size, block_size, 0, stream>>>(
-                    dst_addr,
-                    src_addr,
-                    input_strides,
-                    output_strides,
-                    sub
-                );
+        for (size_t i = 1; i < N + 1; i++) {
+            if (extents[i] >= minimum_length && src_strides[i] != 0
+                && unsigned_abs(src_strides[i]) <= near_contiguous
+                && (src_unit == 0
+                    || unsigned_abs(src_strides[i]) < unsigned_abs(src_strides[src_unit]))) {
+                src_unit = i;
+            }
+            if (extents[i] >= minimum_length && dst_strides[i] != 0
+                && unsigned_abs(dst_strides[i]) <= near_contiguous
+                && (dst_unit == 0
+                    || unsigned_abs(dst_strides[i]) < unsigned_abs(dst_strides[dst_unit]))) {
+                dst_unit = i;
             }
         }
+
+        if (src_unit != 0 && dst_unit != 0 && src_unit != dst_unit) {
+            // A genuine transpose never merges anything into the line-width axis, so it stays a
+            // single element. In that case drop it and dispatch over the N real axes, so e.g. a
+            // 2D transpose runs the rank-2 kernel rather than a rank-3 one with a trailing 1.
+            const bool drop_line_axis = extents[0] == 1;
+
+            // rotate the src-contiguous axis to position 0
+            for (size_t i = src_unit; i > 0; i--) {
+                std::swap(src_strides[i], src_strides[i - 1]);
+                std::swap(dst_strides[i], dst_strides[i - 1]);
+                std::swap(extents[i], extents[i - 1]);
+            }
+
+            // that rotation shifted every axis below src_unit up by one
+            if (dst_unit < src_unit) {
+                dst_unit += 1;
+            }
+
+            // rotate the dst-contiguous axis to position 1
+            for (size_t i = dst_unit; i > 1; i--) {
+                std::swap(src_strides[i], src_strides[i - 1]);
+                std::swap(dst_strides[i], dst_strides[i - 1]);
+                std::swap(extents[i], extents[i - 1]);
+            }
+
+            launch_transpose_kernel_rank_typed_recur<T>(
+                stream,
+                extents,
+                dst_addr,
+                src_addr,
+                dst_strides,
+                src_strides
+            );
+
+            return;
+        }
     }
+
+    launch_strided_kernel_rank_typed_recur<T>(
+        stream,
+        extents,
+        dst_addr,
+        src_addr,
+        dst_strides,
+        src_strides
+    );
 }
 
 template<typename T>
 void launch_strided_kernel_typed(g_stream_t stream, const CopyPlan& plan) {
     size_t num_dims = plan.num_dims;
-
-    // if line_width != sizeof(T), inject a new axis at the beginning.
-    if (plan.line_width != sizeof(T) && num_dims < MEMOPS_MAX_DIMS) {
-        CopyPlan p = plan;
-        p.line_width = sizeof(T);
-        p.num_dims = num_dims + 1;
-
-        // insert at the start
-        p.extents[0] = plan.line_width / sizeof(T);
-        p.input_strides[0] = sizeof(T);
-        p.output_strides[0] = sizeof(T);
-
-        // shift all one forward
-        std::copy_n(plan.extents, num_dims, p.extents + 1);
-        std::copy_n(plan.input_strides, num_dims, p.input_strides + 1);
-        std::copy_n(plan.output_strides, num_dims, p.output_strides + 1);
-
-        return launch_strided_kernel_typed<T>(stream, p);
-    }
-
-    KMM_ASSERT(num_dims >= 1);
 
     if (num_dims == 1) {
         launch_strided_kernel_rank_typed<T, 1>(stream, plan);
@@ -339,29 +411,11 @@ void launch_strided_kernel_typed(g_stream_t stream, const CopyPlan& plan) {
         launch_strided_kernel_rank_typed<T, 2>(stream, plan);
     } else if (num_dims == 3) {
         launch_strided_kernel_rank_typed<T, 3>(stream, plan);
+    } else if (num_dims == 4) {
+        launch_strided_kernel_rank_typed<T, 4>(stream, plan);
     } else {
-        KMM_ASSERT(num_dims <= MEMOPS_MAX_DIMS);
-
-        // The strided kernel handles at most three axes (Rank == 3).
-        size_t k = std::min_element(plan.extents, plan.extents + num_dims) - plan.extents;
-
-        CopyPlan sub = plan;
-        sub.num_dims = num_dims - 1;
-
-        // Drop axis `k` from the descriptor arrays, shifting the trailing axes down.
-        for (size_t d = k; d + 1 < num_dims; d++) {
-            sub.extents[d] = plan.extents[d + 1];
-            sub.input_strides[d] = plan.input_strides[d + 1];
-            sub.output_strides[d] = plan.output_strides[d + 1];
-        }
-
-        for (size_t i = 0; i < plan.extents[k]; i++) {
-            sub.src_addr =
-                static_cast<const std::byte*>(plan.src_addr) + ptrdiff_t(i) * plan.input_strides[k];
-            sub.dst_addr =
-                static_cast<std::byte*>(plan.dst_addr) + ptrdiff_t(i) * plan.output_strides[k];
-            launch_strided_kernel_typed<T>(stream, sub);
-        }
+        // should not happen
+        KMM_PANIC("invalid dimensionality");
     }
 }
 

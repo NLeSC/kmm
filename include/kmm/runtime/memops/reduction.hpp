@@ -1,5 +1,8 @@
 #pragma once
 
+#include <initializer_list>
+#include <optional>
+
 #include "kmm/core/checked_math.hpp"
 #include "kmm/core/macros.hpp"
 #include "kmm/core/panic.hpp"
@@ -141,16 +144,6 @@ struct ReductionDescription {
         return result;
     }
 
-    /// Returns a copy of this description with `dims` sorted from the largest `input_stride` to
-    /// the smallest, and adjacent axes merged whenever they are contiguous (i.e. the outer axis's
-    /// `input_stride`/`output_stride` equal the inner axis's `extent * input_stride`/
-    /// `extent * output_stride`). Does not touch `reduction_extent`/`reduction_stride`, since
-    /// those describe a different axis (the one reduced over, shared by every output element).
-    ///
-    /// If some batch axis has extent zero, `dims` collapses to a single axis with `extent == 0`
-    /// and all strides zero (so no output elements are produced); see `is_noop`.
-    ReductionDescription simplify() const;
-
     /// Returns the half-open range of byte offsets (relative to `src_addr`) that this reduction
     /// reads from. Accounts for `input_offset`, the batch axes (`dims`), and the reduced axis
     /// (`reduction_extent`/`reduction_stride`).
@@ -159,6 +152,10 @@ struct ReductionDescription {
     /// Returns the half-open range of byte offsets (relative to `dst_addr`) that this reduction
     /// writes to. Accounts for `output_offset` and the batch axes (`dims`).
     Range<ptrdiff_t> dst_range() const;
+
+    /// Returns an equivalent description with adjacent contiguous batch axes (`dims`) merged, to
+    /// keep `num_dims` small.
+    ReductionDescription simplify() const;
 
     /// Returns `true` if this reduction combines exactly one input element into each output
     /// element without accumulating into the previous value: every `combine(identity, value)`
@@ -255,7 +252,114 @@ ReductionDescription make_reduction_description(
         dst_axis++;
     }
 
-    return descr.simplify();
+    return descr;
+}
+
+/// Multi-axis counterpart of `make_reduction_description`: reduces `src` over *every* axis listed
+/// in `axes` at once. This collapses into a single `ReductionDescription` only when those axes
+/// occupy one contiguous run of memory -- sorted by stride, each axis starts exactly where the
+/// previous one ends -- so they fold into one reduced axis. Returns `std::nullopt` when they do
+/// not, leaving the caller to reduce one axis at a time.
+///
+/// `dst`'s rank must be `src`'s rank minus `axes.size()`; every axis of `src` not in `axes` maps,
+/// in order, onto the corresponding axis of `dst`. Reduced axes of extent one are ignored (they
+/// never contribute to the fold).
+template<typename DstLayoutT, typename SrcLayoutT>
+std::optional<ReductionDescription> make_reduction_description(
+    const DstLayoutT& dst,
+    const SrcLayoutT& src,
+    std::initializer_list<size_t> axes,
+    DataType dtype,
+    ReductionOp op
+) {
+    static_assert(SrcLayoutT::rank >= 1, "src must have at least one axis");
+    static_assert(SrcLayoutT::rank <= MEMOPS_MAX_DIMS + 1, "rank exceeds maximum");
+    KMM_ASSERT(DstLayoutT::rank + axes.size() == SrcLayoutT::rank);
+
+    size_t element_size = data_type_size(dtype);
+
+    bool is_reduced[SrcLayoutT::rank] = {};
+
+    for (size_t axis : axes) {
+        KMM_ASSERT(axis < SrcLayoutT::rank);
+        KMM_ASSERT(!is_reduced[axis]);
+        is_reduced[axis] = true;
+    }
+
+    // Collect the reduced axes in element space, dropping extent-one axes, then sort them by
+    // ascending stride so a contiguous run reads as `stride[i] == stride[i - 1] * extent[i - 1]`.
+    ptrdiff_t run_extent[SrcLayoutT::rank];
+    ptrdiff_t run_stride[SrcLayoutT::rank];
+    size_t run_count = 0;
+
+    for (size_t i = 0; i < SrcLayoutT::rank; i++) {
+        if (is_reduced[i] && src.extent(i) != 1) {
+            run_extent[run_count] = static_cast<ptrdiff_t>(src.extent(i));
+            run_stride[run_count] = static_cast<ptrdiff_t>(src.stride(i));
+            run_count++;
+        }
+    }
+
+    for (size_t i = 1; i < run_count; i++) {
+        for (size_t j = i; j > 0 && run_stride[j] < run_stride[j - 1]; j--) {
+            ptrdiff_t tmp_extent = run_extent[j];
+            run_extent[j] = run_extent[j - 1];
+            run_extent[j - 1] = tmp_extent;
+
+            ptrdiff_t tmp_stride = run_stride[j];
+            run_stride[j] = run_stride[j - 1];
+            run_stride[j - 1] = tmp_stride;
+        }
+    }
+
+    ptrdiff_t merged_extent = 1;
+    ptrdiff_t merged_stride = 0;
+
+    for (size_t i = 0; i < run_count; i++) {
+        if (i == 0) {
+            merged_stride = run_stride[0];
+            merged_extent = run_extent[0];
+        } else if (run_stride[i] == merged_stride * merged_extent) {
+            merged_extent *= run_extent[i];
+        } else {
+            return std::nullopt;
+        }
+    }
+
+    ptrdiff_t dst_offset = dst.base_offset();
+    ptrdiff_t src_offset = src.base_offset();
+
+    for (size_t i = 0; i < DstLayoutT::rank; i++) {
+        dst_offset += static_cast<ptrdiff_t>(dst.stride(i)) * static_cast<ptrdiff_t>(dst.begin(i));
+    }
+
+    for (size_t i = 0; i < SrcLayoutT::rank; i++) {
+        src_offset += static_cast<ptrdiff_t>(src.stride(i)) * static_cast<ptrdiff_t>(src.begin(i));
+    }
+
+    ReductionDescription descr(dtype, op);
+    descr.input_offset = checked_mul<memops_stride_type>(src_offset, element_size);
+    descr.output_offset = checked_mul<memops_stride_type>(dst_offset, element_size);
+    descr.reduction_extent = checked_cast<memops_extent_type>(merged_extent);
+    descr.reduction_stride = checked_mul<memops_stride_type>(merged_stride, element_size);
+
+    size_t dst_axis = 0;
+
+    for (size_t i = 0; i < SrcLayoutT::rank; i++) {
+        if (is_reduced[i]) {
+            continue;
+        }
+
+        descr.add_dimension(
+            checked_cast<memops_extent_type>(dst.extent(dst_axis)),
+            checked_mul<memops_stride_type>(src.stride(i), element_size),
+            checked_mul<memops_stride_type>(dst.stride(dst_axis), element_size)
+        );
+
+        dst_axis++;
+    }
+
+    return descr;
 }
 
 /// @}

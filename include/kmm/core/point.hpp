@@ -123,6 +123,18 @@ KMM_HOST_DEVICE bool operator!=(const Point<N, T>& lhs, const Point<M, U>& rhs) 
     return !(lhs == rhs);
 }
 
+/// Adds two points coordinate-wise.
+template<size_t N, typename T>
+KMM_HOST_DEVICE constexpr Point<N, T> operator+(const Point<N, T>& lhs, const Point<N, T>& rhs) {
+    Point<N, T> result = lhs;
+
+    for (size_t i = 0; is_less(i, N); i++) {
+        result[i] += rhs[i];
+    }
+
+    return result;
+}
+
 /// @}
 
 }  // namespace kmm

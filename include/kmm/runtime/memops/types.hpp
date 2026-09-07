@@ -22,10 +22,7 @@ using memops_extent_type = signed long long int;
 /// A byte offset between consecutive elements along a single axis of a `kmm/memops` descriptor.
 using memops_stride_type = signed long long int;
 
-/// A runtime tag for the scalar element type operated on by `fill`/`reduce`. Since the functions
-/// in `kmm/memops` operate on type-erased `void*` buffers, they need this at runtime to know how
-/// to interpret the bytes at each element (e.g. how to add two elements together for a `Sum`
-/// reduction, or how wide the fill pattern is).
+/// A runtime tag for the scalar element type operated on by `reduce`.
 enum class DataType {
     Unknown = 0,
     Int32,
@@ -46,8 +43,7 @@ size_t data_type_size(DataType dtype);
 /// Returns a human-readable name for the given data type (e.g. `"Float32"`).
 const char* data_type_name(DataType dtype);
 
-/// The operator applied by `reduce`/`reduce_gpu` to combine elements. `BitwiseAnd`/`BitwiseOr` are
-/// only valid for the integer data types.
+/// The operator applied by `reduce`/`reduce_gpu` to combine elements.
 enum class ReductionOp {
     Sum,
     Product,
@@ -60,27 +56,48 @@ enum class ReductionOp {
 /// Returns a human-readable name for the given reduction operator (e.g. `"Sum"`).
 const char* reduction_op_name(ReductionOp op);
 
-template<typename T>
-struct data_type_of {};
+/// Properties of a `DataType` tag, keyed on the tag itself. Each specialization provides:
+///  - `element_type`: the C++ type stored in each element;
+///  - `name`: a human-readable name (e.g. `"Float32"`).
+template<DataType dtype>
+struct data_type_traits;
 
-#define KMM_IMPL_DATA_TYPE_OF(TYPE, DTYPE)    \
-    template<>                                \
-    struct data_type_of<TYPE> {               \
-        constexpr operator DataType() const { \
-            return DataType::DTYPE;           \
-        }                                     \
+/// The C++ element type corresponding to the `DataType` tag `dtype`.
+template<DataType dtype>
+using element_type_t = typename data_type_traits<dtype>::element_type;
+
+/// Maps a C++ element type to its `DataType` tag via a `static constexpr DataType value` member.
+template<typename T>
+struct data_type_of_impl;
+
+/// The `DataType` tag for `T`. Valid for every built-in element type and any type with a
+/// `data_type_of_impl` specialization.
+template<typename T>
+constexpr DataType data_type_of() {
+    return data_type_of_impl<T>::value;
+}
+
+#define KMM_IMPL_DATA_TYPE(TYPE, DTYPE)                    \
+    template<>                                             \
+    struct data_type_traits<DataType::DTYPE> {             \
+        using element_type = TYPE;                         \
+        static constexpr const char* name = #DTYPE;        \
+    };                                                     \
+    template<>                                             \
+    struct data_type_of_impl<TYPE> {                       \
+        static constexpr DataType value = DataType::DTYPE; \
     };
 
-KMM_IMPL_DATA_TYPE_OF(int32_t, Int32)
-KMM_IMPL_DATA_TYPE_OF(int64_t, Int64)
-KMM_IMPL_DATA_TYPE_OF(uint32_t, Uint32)
-KMM_IMPL_DATA_TYPE_OF(uint64_t, Uint64)
-KMM_IMPL_DATA_TYPE_OF(float, Float32)
-KMM_IMPL_DATA_TYPE_OF(double, Float64)
-KMM_IMPL_DATA_TYPE_OF(KeyValue<int64_t>, KeyValueInt64)
-KMM_IMPL_DATA_TYPE_OF(KeyValue<double>, KeyValueFloat64)
+KMM_IMPL_DATA_TYPE(int32_t, Int32)
+KMM_IMPL_DATA_TYPE(int64_t, Int64)
+KMM_IMPL_DATA_TYPE(uint32_t, Uint32)
+KMM_IMPL_DATA_TYPE(uint64_t, Uint64)
+KMM_IMPL_DATA_TYPE(float, Float32)
+KMM_IMPL_DATA_TYPE(double, Float64)
+KMM_IMPL_DATA_TYPE(KeyValue<int64_t>, KeyValueInt64)
+KMM_IMPL_DATA_TYPE(KeyValue<double>, KeyValueFloat64)
 
-#undef KMM_IMPL_DATA_TYPE_OF
+#undef KMM_IMPL_DATA_TYPE
 
 /// @}
 

@@ -2,7 +2,6 @@
 
 #include <utility>
 
-#include "kmm/api/device.hpp"
 #include "kmm/utils/gpu_utils.hpp"
 
 namespace kmm {

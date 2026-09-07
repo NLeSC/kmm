@@ -188,6 +188,28 @@ TEST_CASE("is_divisible") {
     CHECK_FALSE(is_divisible(ULONG_MAX, ULONG_MAX - 1));
 }
 
+TEST_CASE("is_power_of_two") {
+    CHECK_FALSE(is_power_of_two(INT_MIN));
+    CHECK_FALSE(is_power_of_two(-1));
+    CHECK_FALSE(is_power_of_two(0));
+    CHECK(is_power_of_two(1));
+    CHECK(is_power_of_two(2));
+    CHECK_FALSE(is_power_of_two(3));
+    CHECK(is_power_of_two(4));
+    CHECK_FALSE(is_power_of_two(5));
+    CHECK(is_power_of_two(128));
+    CHECK_FALSE(is_power_of_two(100));
+    CHECK(is_power_of_two(1 << 30));
+    CHECK_FALSE(is_power_of_two(INT_MAX));
+
+    CHECK_FALSE(is_power_of_two(u32(0)));
+    CHECK(is_power_of_two(u32(1)));
+    CHECK(is_power_of_two(u32(2)));
+    CHECK_FALSE(is_power_of_two(u32(100)));
+    CHECK(is_power_of_two(u32(INT_MAX) + u32(1)));
+    CHECK_FALSE(is_power_of_two(UINT_MAX));
+}
+
 TEST_CASE("round_up_to_power_of_two") {
     // <1 always becomes 1
     CHECK(round_up_to_power_of_two(INT_MIN) == 1);

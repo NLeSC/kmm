@@ -5,8 +5,12 @@
 #include <iostream>
 #include <optional>
 
+#include "memops_gpu_kernels.cuh"
+
 #include "kmm/core/checked_compare.hpp"
+#include "kmm/core/fast_divisor.hpp"
 #include "kmm/core/integer_fun.hpp"
+#include "kmm/core/point.hpp"
 #include "kmm/core/vec.hpp"
 #include "kmm/runtime/memops/fill_gpu.hpp"
 #include "kmm/utils/gpu_utils.hpp"
@@ -18,8 +22,8 @@ struct FillPlan {
     FillValue fill_pattern;
     size_t line_width;
     size_t num_dims;
-    size_t extents[MEMOPS_MAX_DIMS] = {};
-    ptrdiff_t strides[MEMOPS_MAX_DIMS] = {};
+    size_t extents[MEMOPS_MAX_DIMS + 1] = {};
+    ptrdiff_t strides[MEMOPS_MAX_DIMS + 1] = {};
 
     template<typename T>
     T pattern_as() const {
@@ -136,92 +140,73 @@ FillPlan make_plan(void* dst_base, const FillDescription& description) {
     return plan;
 }
 
+// Launch `elementwise_fill_kernel` over an index space whose axis 0 is the contiguous run and
+// whose remaining axes are strided. The space is peeled apart along each axis so that no single
+// launch has more threads than `IndexMapper` can invert (mirrors `ParallelFor::launch_recur`).
 template<typename T, size_t Rank>
-__global__ void elementwise_fill_kernel(
-    void* dst_addr,
+void launch_strided_fill_recur(
+    g_stream_t stream,
+    std::byte* dst_addr,
     T value,
-    Vec<ptrdiff_t, Rank> strides,
-    Vec<size_t, Rank> extents
+    Vec<size_t, Rank> extents,
+    Vec<ptrdiff_t, Rank> strides
 ) {
-    static_assert(Rank <= 3, "grid is at most 3-dimensional");
+    constexpr uint32_t max_blocks = 1024;
+    constexpr uint32_t threads_per_block = 256;
+    Vec<uint32_t, Rank> local_extents;
+    uint32_t num_threads = 1;
 
-    uint p[3] = {
-        blockIdx.x * blockDim.x + threadIdx.x,
-        blockIdx.y * blockDim.y + threadIdx.y,
-        blockIdx.z * blockDim.z + threadIdx.z,
-    };
-
-#pragma unroll
     for (size_t i = 0; i < Rank; i++) {
-        if (p[i] >= extents[i]) {
+        if (extents[i] == 0) {
             return;
         }
 
-        dst_addr = static_cast<std::byte*>(dst_addr) + strides[i] * ptrdiff_t(p[i]);
+        // Largest count along axis `i` that keeps the running thread total within the range
+        // that `FastDivisor` accepts as a numerator.
+        uint32_t chunk = IndexMapper<uint32_t, Rank>::max_volume / num_threads;
+
+        while (extents[i] > chunk) {
+            Vec<size_t, Rank> head = extents;
+            head[i] = chunk;
+            launch_strided_fill_recur<T, Rank>(stream, dst_addr, value, head, strides);
+
+            dst_addr += ptrdiff_t(chunk) * strides[i];
+            extents[i] -= chunk;
+        }
+
+        local_extents[i] = static_cast<uint32_t>(extents[i]);  // safe cast
+        num_threads *= local_extents[i];
     }
 
-    *static_cast<T*>(dst_addr) = value;
+    uint32_t grid_size = std::min(div_ceil(num_threads, threads_per_block), max_blocks);
+    auto mapper = IndexMapper<uint32_t, Rank>(local_extents);
+
+    KMM_ASSERT(Rank > 0 && strides[0] == sizeof(T));
+    elementwise_fill_kernel<T, Rank>
+        <<<grid_size, threads_per_block, 0, stream>>>(dst_addr, value, mapper, strides);
 }
 
 template<typename T, size_t Rank>
 void launch_strided_kernel_rank_typed(g_stream_t stream, const FillPlan& plan) {
-    Vec<ptrdiff_t, Rank> strides;
+    KMM_ASSERT(plan.num_dims + 1 == Rank);
     Vec<size_t, Rank> extents;
+    Vec<ptrdiff_t, Rank> strides;
 
-    strides[0] = sizeof(T);
     extents[0] = plan.line_width / sizeof(T);
+    strides[0] = ptrdiff_t(sizeof(T));
 
     for (size_t i = 1; i < Rank; i++) {
-        strides[i] = plan.strides[i - 1];
         extents[i] = plan.extents[i - 1];
+        strides[i] = plan.strides[i - 1];
     }
 
-    constexpr size_t TILE_X = size_t(1) << 31;
-    constexpr size_t TILE_YZ = 65535;
-
-    dim3 block_size = {256, 1, 1};
-    T value = plan.pattern_as<T>();
-
-    size_t nx = plan.line_width / sizeof(T);
-    size_t ny = Rank >= 2 ? plan.extents[0] : 1;
-    size_t nz = Rank >= 3 ? plan.extents[1] : 1;
-
-    for (size_t ox = 0; ox < nx; ox += TILE_X) {
-        for (size_t oy = 0; oy < ny; oy += TILE_YZ) {
-            for (size_t oz = 0; oz < nz; oz += TILE_YZ) {
-                size_t ex = std::min<size_t>(TILE_X, nx - ox);
-                size_t ey = std::min<size_t>(TILE_YZ, ny - oy);
-                size_t ez = std::min<size_t>(TILE_YZ, nz - oz);
-
-                auto* addr = static_cast<std::byte*>(plan.dst_addr);
-                Vec<size_t, Rank> sub = extents;
-
-                if constexpr (Rank >= 2) {
-                    addr += ptrdiff_t(ox) * strides[0];
-                    sub[0] = ex;
-                }
-
-                if constexpr (Rank >= 2) {
-                    addr += ptrdiff_t(oy) * strides[1];
-                    sub[1] = ey;
-                }
-
-                if constexpr (Rank >= 3) {
-                    addr += ptrdiff_t(oz) * strides[2];
-                    sub[2] = ez;
-                }
-
-                dim3 grid_size = {
-                    checked_cast<uint>(div_ceil<size_t>(ex, block_size.x)),
-                    checked_cast<uint>(div_ceil<size_t>(ey, block_size.y)),
-                    checked_cast<uint>(div_ceil<size_t>(ez, block_size.z)),
-                };
-
-                elementwise_fill_kernel<T, Rank>
-                    <<<grid_size, block_size, 0, stream>>>(addr, value, strides, sub);
-            }
-        }
-    }
+    launch_strided_fill_recur<T, Rank>(
+        stream,
+        static_cast<std::byte*>(plan.dst_addr),
+        plan.pattern_as<T>(),
+        extents,
+        strides
+    );
 }
 
 template<typename T>
@@ -229,20 +214,25 @@ void launch_strided_kernel_typed(g_stream_t stream, const FillPlan& plan) {
     size_t num_dims = plan.num_dims;
 
     if (num_dims == 0) {
-        launch_strided_kernel_rank_typed<T, 1>(stream, plan);
+        // a 0D fill is rare since it will typically (always?) be performed by cuMemsetD32Async
+        // instead, we turn it into a 1D fill since that will reduce the number of kernels
+        // that are precompiled.
+        FillPlan p = plan;
+        p.extents[0] = 1;
+        p.strides[0] = 0;
+        p.num_dims++;
+        launch_strided_kernel_typed<T>(stream, p);
     } else if (num_dims == 1) {
         launch_strided_kernel_rank_typed<T, 2>(stream, plan);
     } else if (num_dims == 2) {
         launch_strided_kernel_rank_typed<T, 3>(stream, plan);
+    } else if (num_dims == 3) {
+        launch_strided_kernel_rank_typed<T, 4>(stream, plan);
+    } else if (num_dims == 4) {
+        launch_strided_kernel_rank_typed<T, 5>(stream, plan);
     } else {
-        for (size_t i = 0; i < plan.extents[num_dims - 1]; i++) {
-            FillPlan subplan = plan;
-            subplan.num_dims -= 1;
-            subplan.dst_addr = static_cast<std::byte*>(subplan.dst_addr)
-                + ptrdiff_t(i) * plan.strides[num_dims - 1];
-
-            launch_strided_kernel_typed<T>(stream, subplan);
-        }
+        // should not happen
+        KMM_PANIC("invalid dimensionality");
     }
 }
 

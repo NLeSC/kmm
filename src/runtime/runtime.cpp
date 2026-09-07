@@ -753,7 +753,6 @@ DeviceEvent Runtime::submit_reduction(
     MemoryTransaction parent
 ) {
     std::unique_lock<std::mutex> guard(m_impl->mutex);
-    description = description.simplify();
 
     auto stream_hint = DeviceStreamId::null();
 

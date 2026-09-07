@@ -5,6 +5,8 @@
 #include <utility>
 
 #include "kmm/api/context.hpp"
+#include "kmm/api/parallel_for.hpp"
+#include "kmm/api/parallel_reduce.hpp"
 #include "kmm/api/resource_guard.hpp"
 #include "kmm/core/shape.hpp"
 #include "kmm/runtime/device_data_streams.hpp"
@@ -15,9 +17,6 @@
 #include "kmm/utils/refcnt_ptr.hpp"
 
 namespace kmm {
-
-template<typename F, size_t N>
-class ParallelFor;
 
 template<typename... Args>
 class DeviceGuard;
@@ -54,11 +53,22 @@ class Device: public Context {
         );
     }
 
-    /// Shorthand for `access(args...).parallel_for(shape, fun)`: applies `fun` to every point of
-    /// the N-dimensional index space `shape`, one GPU thread per point.
     template<size_t N, typename F, typename... Args>
-    decltype(auto) parallel_for(Shape<N> shape, F fun, Args&&... args) {
-        return access(std::forward<Args>(args)...).parallel_for(shape, std::move(fun));
+    void parallel_for(Shape<N> shape, F fun, Args&&... args) {
+        submit(ParallelFor<F, N>(shape, std::move(fun)), args...);
+    }
+
+    template<
+        size_t N,
+        typename F,
+        typename... Args,
+        typename OutputT =
+            std::invoke_result_t<F, Point<N>, typename LaunchArg<Args>::resolve_type...>>
+    OutputT parallel_reduce(Shape<N> shape, F fun, Args&&... args) {
+        auto redux = ParallelReduce<F, N, OutputT>(shape, fun);
+        auto partials = empty<OutputT>(redux.num_outputs());
+        submit(redux, write(partials), args...);
+        return this->sum(partials);
     }
 
     MemoryId affinity_memory_id() const noexcept override {
@@ -126,14 +136,6 @@ class DeviceGuard {
     template<typename F>
     void operator>>(F fun) {
         submit(std::move(fun));
-    }
-
-    /// Shorthand for `submit(ParallelFor(shape, fun))`: applies `fun` to every point of the
-    /// N-dimensional index space `shape`, one GPU thread per point, using the views already
-    /// acquired by this guard.
-    template<size_t N, typename F>
-    void parallel_for(Shape<N> shape, F fun) {
-        submit(ParallelFor<F, N>(shape, std::move(fun)));
     }
 
   private:

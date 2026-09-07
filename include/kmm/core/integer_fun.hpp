@@ -62,7 +62,7 @@ KMM_HOST_DEVICE constexpr T round_up_to_multiple(T input, T multiple) {
     T delta = zero;
 
     if (remainder != zero) {
-        U magnitude = unsigned_abs(multiple) * U(input >= zero);
+        U magnitude = unsigned_abs(multiple) * !detail::is_negative(input);
         delta = static_cast<T>(static_cast<U>(magnitude - static_cast<U>(remainder)));
     }
 
@@ -74,6 +74,13 @@ KMM_HOST_DEVICE constexpr T round_up_to_multiple(T input, T multiple) {
 template<typename L, typename R>
 KMM_HOST_DEVICE constexpr bool is_divisible(L left, R right) {
     return right != R {0} && unsigned_abs(left) % unsigned_abs(right) == 0U;
+}
+
+/// Returns `true` if `input` is a power of two (i.e. `1`, `2`, `4`, `8`, ...).
+/// Returns `false` otherwise, including for `input <= 0`.
+template<typename T>
+KMM_HOST_DEVICE constexpr bool is_power_of_two(T input) {
+    return input > static_cast<T>(0) && (input & (input - static_cast<T>(1))) == static_cast<T>(0);
 }
 
 /// Return the smallest integer that is a power of two and is not less than `input`.

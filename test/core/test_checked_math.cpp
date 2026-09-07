@@ -219,7 +219,7 @@ void stress_test_checked(F op, G checked_op) {
 
     for (auto a : left_inputs) {
         for (auto b : right_inputs) {
-            O c;
+            O c {};
 
             INFO("left=" << a);
             INFO("right=" << b);
