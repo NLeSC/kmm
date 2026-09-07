@@ -29,6 +29,7 @@ size_t ExternalDataInterface::size_in_bytes() const noexcept {
 }
 
 AllocResult ExternalDataInterface::allocate(
+    MemorySystem& system,
     MemoryId memory_id,
     const DeviceStreamId& stream_hint,
     DeviceEventSet& deps_out
@@ -38,6 +39,7 @@ AllocResult ExternalDataInterface::allocate(
 }
 
 void ExternalDataInterface::deallocate(
+    MemorySystem& system,
     MemoryId memory_id,
     const DeviceStreamId& stream_hint,
     const DeviceEventSet& deps
@@ -52,6 +54,7 @@ void* ExternalDataInterface::address(MemoryId memory_id) const noexcept {
 }
 
 void ExternalDataInterface::copy(
+    MemorySystem& system,
     MemoryId src,
     MemoryId dst,
     const DeviceStreamId& stream_hint,
@@ -63,7 +66,11 @@ void ExternalDataInterface::copy(
     deps_out.insert(deps);
 }
 
-bool ExternalDataInterface::is_copy_supported(MemoryId src, MemoryId dst) const noexcept {
+bool ExternalDataInterface::is_copy_supported(
+    MemorySystem& system,
+    MemoryId src,
+    MemoryId dst
+) const noexcept {
     return src == m_memory_id && dst == m_memory_id;
 }
 

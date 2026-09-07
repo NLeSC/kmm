@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <cstring>
 
+#include "kmm/core/fast_divisor.hpp"
 #include "kmm/core/vec.hpp"
 #include "kmm/utils/gpu_utils.hpp"
 

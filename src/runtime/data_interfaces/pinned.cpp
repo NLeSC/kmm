@@ -5,6 +5,7 @@
 #include "kmm/core/panic.hpp"
 #include "kmm/runtime/data_interfaces/pinned.hpp"
 #include "kmm/runtime/memops/fill.hpp"
+#include "kmm/runtime/memory_system.hpp"
 
 namespace kmm {
 
@@ -15,22 +16,22 @@ static BufferLayout normalize_buffer_layout(BufferLayout layout) {
     return {round_up_to_multiple(layout.size_in_bytes, align), align};
 }
 
-PinnedDataInterface::PinnedDataInterface(BufferLayout layout, refcnt_ptr<MemorySystem> system) :
-    m_layout(normalize_buffer_layout(layout)),
-    m_system(std::move(system)) {}
+PinnedDataInterface::PinnedDataInterface(BufferLayout layout) :
+    m_layout(normalize_buffer_layout(layout)) {}
 
 size_t PinnedDataInterface::size_in_bytes() const noexcept {
     return m_layout.size_in_bytes;
 }
 
 AllocResult PinnedDataInterface::allocate(
+    MemorySystem& system,
     MemoryId memory_id,
     const DeviceStreamId& stream_hint,
     DeviceEventSet& deps_out
 ) {
     if (m_refcount == 0) {
         DeviceEventSet deps;
-        auto result = m_system->allocate_host(m_layout, &m_host_ptr, stream_hint, deps);
+        auto result = system.allocate_host(m_layout, &m_host_ptr, stream_hint, deps);
 
         if (result != AllocResult::Success) {
             return result;
@@ -43,7 +44,7 @@ AllocResult PinnedDataInterface::allocate(
     // `allocate` throws the exception and address remains exception-free.
     if (!memory_id.is_host()) {
         auto device_id = memory_id.as_device();
-        m_device_ptrs[device_id.get()] = m_system->translate_host_pointer(device_id, m_host_ptr);
+        m_device_ptrs[device_id.get()] = system.translate_host_pointer(device_id, m_host_ptr);
     }
 
     m_refcount++;
@@ -52,6 +53,7 @@ AllocResult PinnedDataInterface::allocate(
 }
 
 void PinnedDataInterface::deallocate(
+    MemorySystem& system,
     MemoryId memory_id,
     const DeviceStreamId& stream_hint,
     const DeviceEventSet& deps
@@ -60,7 +62,7 @@ void PinnedDataInterface::deallocate(
     m_dealloc_deps.insert(deps);
 
     if (--m_refcount == 0) {
-        m_system->deallocate_host(m_host_ptr, m_layout, stream_hint, m_dealloc_deps);
+        system.deallocate_host(m_host_ptr, m_layout, stream_hint, m_dealloc_deps);
         m_host_ptr = nullptr;
         for (auto& ptr : m_device_ptrs) {
             ptr = nullptr;
@@ -78,11 +80,16 @@ void* PinnedDataInterface::address(MemoryId memory_id) const noexcept {
     return m_device_ptrs[memory_id.as_device().get()];
 }
 
-bool PinnedDataInterface::is_copy_supported(MemoryId src, MemoryId dst) const noexcept {
-    return m_system->is_copy_supported(src, dst);
+bool PinnedDataInterface::is_copy_supported(
+    MemorySystem& system,
+    MemoryId src,
+    MemoryId dst
+) const noexcept {
+    return system.is_copy_supported(src, dst);
 }
 
 void PinnedDataInterface::copy(
+    MemorySystem& system,
     MemoryId src,
     MemoryId dst,
     const DeviceStreamId& stream_hint,

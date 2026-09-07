@@ -37,7 +37,7 @@ class MemoryManager {
   public:
     struct Impl;
 
-    MemoryManager();
+    explicit MemoryManager(refcnt_ptr<MemorySystem> memory_system);
     ~MemoryManager();
 
     MemoryBuffer create_buffer(

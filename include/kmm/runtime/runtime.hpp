@@ -2,6 +2,7 @@
 
 #include <chrono>
 #include <limits>
+#include <memory>
 #include <optional>
 
 #include "runtime_config.hpp"
@@ -62,6 +63,23 @@ class Runtime {
         function_ref<bool()> callback,
         std::chrono::system_clock::time_point deadline =
             std::chrono::system_clock::time_point::max()
+    );
+
+    /**
+     * Register a caller-provided `DataInterface` as a buffer. This is the low-level primitive that
+     * `create_buffer` and `adopt_buffer` are built on.
+     *
+     * @param data The interface backing the buffer. Must not be null.
+     * @param name The name of the new buffer.
+     * @param home If set, the memory where the buffer is preferentially kept resident.
+     * @param evictable If false, the buffer's device locations are never evicted.
+     * @return The identifier of the new buffer.
+     */
+    BufferId register_buffer(
+        std::unique_ptr<DataInterface> data,
+        std::string name,
+        std::optional<MemoryId> home = {},
+        bool evictable = true
     );
 
     /**

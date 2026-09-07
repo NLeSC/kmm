@@ -98,6 +98,7 @@ void MemoryBufferImpl::unregister_request(BufferQueueNode* req) noexcept {
 }
 
 AllocResult MemoryBufferImpl::try_allocate_location(
+    MemorySystem& system,
     const DeviceStreamId& stream_hint,
     MemoryId dst_id
 ) {
@@ -113,10 +114,12 @@ AllocResult MemoryBufferImpl::try_allocate_location(
     bool peer_ready = !src_id.is_host() || host_location.poll_pending_future() == Poll::Ready;
 
     if (has_peer && peer_ready
-        && (dst_id.is_host() || src_id.is_host() || data->is_copy_supported(src_id, dst_id))) {
+        && (dst_id.is_host() || src_id.is_host()
+            || data->is_copy_supported(system, src_id, dst_id))) {
         auto& src_loc = location(src_id);
         DeviceEventSet events;
         AllocResult result = data->allocate_and_copy(
+            system,
             src_id,
             dst_id,
             stream_hint,
@@ -133,7 +136,7 @@ AllocResult MemoryBufferImpl::try_allocate_location(
     }
 
     DeviceEventSet deps;
-    AllocResult result = data->allocate(dst_id, stream_hint, deps);
+    AllocResult result = data->allocate(system, dst_id, stream_hint, deps);
 
     if (result == AllocResult::Success) {
         dst_loc.mark_allocated(std::move(deps));
@@ -142,10 +145,10 @@ AllocResult MemoryBufferImpl::try_allocate_location(
     return result;
 }
 
-bool MemoryBufferImpl::allocate_host(const DeviceStreamId& stream_hint) {
+bool MemoryBufferImpl::allocate_host(MemorySystem& system, const DeviceStreamId& stream_hint) {
     spdlog::debug("allocate buffer {} in memory {}", name, MemoryId::host());
 
-    if (try_allocate_location(stream_hint, MemoryId::host()) != AllocResult::Success) {
+    if (try_allocate_location(system, stream_hint, MemoryId::host()) != AllocResult::Success) {
         throw std::runtime_error("could not allocate, out of host memory");
     }
 
@@ -173,7 +176,7 @@ void MemoryBufferImpl::decrement_host_users() noexcept {
     host_location.alloc_count--;
 }
 
-bool MemoryBufferImpl::deallocate_host(const DeviceStreamId& stream_hint) {
+bool MemoryBufferImpl::deallocate_host(MemorySystem& system, const DeviceStreamId& stream_hint) {
     auto& loc = host_location;
     KMM_ASSERT(loc.alloc_count == 0);
 
@@ -189,16 +192,21 @@ bool MemoryBufferImpl::deallocate_host(const DeviceStreamId& stream_hint) {
     spdlog::debug("deallocate buffer {} in memory {}", name, MemoryId::host());
 
     auto deps = loc.mark_deallocated();
-    data->deallocate(MemoryId::host(), stream_hint, std::move(deps));
+    data->deallocate(system, MemoryId::host(), stream_hint, std::move(deps));
     return true;
 }
 
-AllocResult MemoryBufferImpl::try_allocate_device(const DeviceStreamId& stream_hint, DeviceId id) {
+AllocResult MemoryBufferImpl::try_allocate_device(
+    MemorySystem& system,
+    const DeviceStreamId& stream_hint,
+    DeviceId id
+) {
     spdlog::debug("allocate buffer {} in memory {}", name, MemoryId::device(id));
-    return try_allocate_location(stream_hint, MemoryId::device(id));
+    return try_allocate_location(system, stream_hint, MemoryId::device(id));
 }
 
 bool MemoryBufferImpl::deallocate_device(
+    MemorySystem& system,
     const DeviceStreamId& stream_hint,
     DeviceId id,
     DeviceLRU& lru
@@ -213,7 +221,7 @@ bool MemoryBufferImpl::deallocate_device(
     spdlog::debug("deallocate buffer {} in memory {}", name, MemoryId::device(id));
 
     auto deps = loc.mark_deallocated();
-    data->deallocate(MemoryId::device(id), stream_hint, std::move(deps));
+    data->deallocate(system, MemoryId::device(id), stream_hint, std::move(deps));
     lru.remove(&loc);
 
     return true;
@@ -253,6 +261,7 @@ void MemoryBufferImpl::decrement_device_users(DeviceId id, DeviceLRU& lru) noexc
 }
 
 void MemoryBufferImpl::evict_device(
+    MemorySystem& system,
     const DeviceStreamId& stream_hint,
     DeviceId memory_id,
     DeviceLRU& lru
@@ -266,13 +275,17 @@ void MemoryBufferImpl::evict_device(
     if (loc.is_valid && !find_valid_location(MemoryId::device(memory_id), other_id)) {
         // `allocate_host` finds this device (still valid, not yet deallocated) as its copy
         // source and copies from it directly -- src is a device, so this can never be Pending.
-        allocate_host(stream_hint);
+        allocate_host(system, stream_hint);
     }
 
-    deallocate_device(stream_hint, memory_id, lru);
+    deallocate_device(system, stream_hint, memory_id, lru);
 }
 
-Poll MemoryBufferImpl::ensure_alloc_valid(const DeviceStreamId& stream_hint, MemoryId memory_id) {
+Poll MemoryBufferImpl::ensure_alloc_valid(
+    MemorySystem& system,
+    const DeviceStreamId& stream_hint,
+    MemoryId memory_id
+) {
     auto& loc = location(memory_id);
 
     // If we are accessing the host, we must first check if the future on the host is ready.
@@ -301,23 +314,23 @@ Poll MemoryBufferImpl::ensure_alloc_valid(const DeviceStreamId& stream_hint, Mem
         spdlog::debug("initializing buffer {} on {}", name, memory_id);
 
         if (memory_id.is_host()) {
-            host_location.pending_future = data->initialize_host(deps);
+            host_location.pending_future = data->initialize_host(system, deps);
             loc.mark_valid(DeviceEvent::null());
             return host_location.poll_pending_future();
         } else {
-            auto event = data->initialize_device(memory_id.as_device(), stream_hint, deps);
+            auto event = data->initialize_device(system, memory_id.as_device(), stream_hint, deps);
             loc.mark_valid(event);
             return Poll::Ready;
         }
     } else if (memory_id.is_host() || peer_id.is_host()
-               || data->is_copy_supported(peer_id, memory_id)) {
+               || data->is_copy_supported(system, peer_id, memory_id)) {
         // copy D2H or H2D or D2D (if possible)
-        return poll_copy(stream_hint, peer_id, memory_id);
+        return poll_copy(system, stream_hint, peer_id, memory_id);
     } else {
         // copy D2H -> H2D: `allocate_host` finds `peer_id` (or another valid location) as its
         // copy source and performs the D2H leg itself; only the H2D leg remains here.
-        allocate_host(stream_hint);
-        do_copy(stream_hint, MemoryId::host(), memory_id);
+        allocate_host(system, stream_hint);
+        do_copy(system, stream_hint, MemoryId::host(), memory_id);
         return Poll::Ready;
     }
 }
@@ -393,12 +406,13 @@ static AccessKind waiting_mode_for(AccessKind mode) {
 }
 
 Poll MemoryBufferImpl::before_access(
+    MemorySystem& system,
     const DeviceStreamId& stream_hint,
     MemoryId memory_id,
     AccessKind mode
 ) {
     // 1) ensure that the allocation contains valid data
-    if (ensure_alloc_valid(stream_hint, memory_id) == Poll::Pending) {
+    if (ensure_alloc_valid(system, stream_hint, memory_id) == Poll::Pending) {
         return Poll::Pending;
     }
 
@@ -409,7 +423,7 @@ Poll MemoryBufferImpl::before_access(
 
     // Hint the eventual access so the backend can prefetch, if it wants to.
     auto& loc = location(memory_id);
-    data->hint_access(memory_id, stream_hint, loc.retrieve_access(waiting_mode_for(mode)));
+    data->hint_access(system, memory_id, stream_hint, loc.retrieve_access(waiting_mode_for(mode)));
 
     return Poll::Ready;
 }
@@ -439,6 +453,7 @@ void MemoryBufferImpl::after_access(
 }
 
 Poll MemoryBufferImpl::poll_copy(
+    MemorySystem& system,
     const DeviceStreamId& stream_hint,
     MemoryId src_id,
     MemoryId dst_id
@@ -451,11 +466,12 @@ Poll MemoryBufferImpl::poll_copy(
         return Poll::Pending;
     }
 
-    do_copy(stream_hint, src_id, dst_id);
+    do_copy(system, stream_hint, src_id, dst_id);
     return Poll::Ready;
 }
 
 void MemoryBufferImpl::do_copy(
+    MemorySystem& system,
     const DeviceStreamId& stream_hint,
     MemoryId src_id,
     MemoryId dst_id
@@ -474,7 +490,7 @@ void MemoryBufferImpl::do_copy(
     deps.insert(dst_alloc.retrieve_access(AccessKind::ReadOnly));
 
     spdlog::debug("launch copy for buffer {} from {} to {} (deps: {})", name, src_id, dst_id, deps);
-    data->copy(src_id, dst_id, stream_hint, deps, deps);
+    data->copy(system, src_id, dst_id, stream_hint, deps, deps);
 
     src_alloc.record_access(AccessKind::ReadOnly, deps);
     dst_alloc.mark_valid(deps);

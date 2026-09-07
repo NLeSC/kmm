@@ -4,8 +4,6 @@
 #include "kmm/runtime/data_interfaces/base.hpp"
 #include "kmm/runtime/device_event_registry.hpp"
 #include "kmm/runtime/memops/fill.hpp"
-#include "kmm/runtime/memory_system.hpp"
-#include "kmm/utils/refcnt_ptr.hpp"
 
 namespace kmm {
 
@@ -14,17 +12,19 @@ namespace kmm {
 /// staged.
 class PinnedDataInterface final: public DataInterface {
   public:
-    PinnedDataInterface(BufferLayout layout, refcnt_ptr<MemorySystem> system);
+    PinnedDataInterface(BufferLayout layout);
 
     size_t size_in_bytes() const noexcept override;
 
     AllocResult allocate(  //
+        MemorySystem& system,
         MemoryId memory_id,
         const DeviceStreamId& stream_hint,
         DeviceEventSet& deps_out
     ) override;
 
     void deallocate(  //
+        MemorySystem& system,
         MemoryId memory_id,
         const DeviceStreamId& stream_hint,
         const DeviceEventSet& deps
@@ -34,9 +34,14 @@ class PinnedDataInterface final: public DataInterface {
         MemoryId memory_id
     ) const noexcept override;
 
-    bool is_copy_supported(MemoryId src, MemoryId dst) const noexcept override;
+    bool is_copy_supported(
+        MemorySystem& system,
+        MemoryId src,
+        MemoryId dst
+    ) const noexcept override;
 
     void copy(
+        MemorySystem& system,
         MemoryId src,
         MemoryId dst,
         const DeviceStreamId& stream_hint,
@@ -46,7 +51,6 @@ class PinnedDataInterface final: public DataInterface {
 
   private:
     BufferLayout m_layout;
-    refcnt_ptr<MemorySystem> m_system;
     void* m_host_ptr = nullptr;
     void* m_device_ptrs[MAX_DEVICES] {};
     size_t m_refcount = 0;

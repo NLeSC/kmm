@@ -5,6 +5,7 @@
 #include "kmm/core/panic.hpp"
 #include "kmm/runtime/data_interfaces/flat.hpp"
 #include "kmm/runtime/memops/fill.hpp"
+#include "kmm/runtime/memory_system.hpp"
 
 namespace kmm {
 
@@ -15,13 +16,8 @@ static BufferLayout normalize_buffer_layout(BufferLayout layout) {
     return {round_up_to_multiple(layout.size_in_bytes, align), align};
 }
 
-FlatDataInterface::FlatDataInterface(
-    BufferLayout layout,
-    refcnt_ptr<MemorySystem> system,
-    FillValue fill_value
-) :
+FlatDataInterface::FlatDataInterface(BufferLayout layout, FillValue fill_value) :
     m_layout(normalize_buffer_layout(layout)),
-    m_system(std::move(system)),
     m_fill_value(std::move(fill_value)) {}
 
 size_t FlatDataInterface::size_in_bytes() const noexcept {
@@ -29,36 +25,38 @@ size_t FlatDataInterface::size_in_bytes() const noexcept {
 }
 
 AllocResult FlatDataInterface::allocate(
+    MemorySystem& system,
     MemoryId memory_id,
     const DeviceStreamId& stream_hint,
     DeviceEventSet& deps_out
 ) {
     if (memory_id.is_host()) {
         KMM_ASSERT(m_host_ptr == nullptr);
-        return m_system->allocate_host(m_layout, &m_host_ptr, stream_hint, deps_out);
+        return system.allocate_host(m_layout, &m_host_ptr, stream_hint, deps_out);
     } else {
         auto id = memory_id.as_device();
         auto& ptr = m_device_ptrs[id.get()];
         KMM_ASSERT(ptr == 0);
-        return m_system->allocate_device(id, m_layout, &ptr, stream_hint, deps_out);
+        return system.allocate_device(id, m_layout, &ptr, stream_hint, deps_out);
     }
 }
 
 void FlatDataInterface::deallocate(
+    MemorySystem& system,
     MemoryId memory_id,
     const DeviceStreamId& stream_hint,
     const DeviceEventSet& deps
 ) {
     if (memory_id.is_host()) {
         KMM_ASSERT(m_host_ptr != nullptr);
-        m_system->deallocate_host(m_host_ptr, m_layout, stream_hint, deps);
+        system.deallocate_host(m_host_ptr, m_layout, stream_hint, deps);
         m_host_ptr = nullptr;
     } else {
         auto id = memory_id.as_device();
         auto& ptr = m_device_ptrs[id.get()];
         KMM_ASSERT(ptr != 0);
 
-        m_system->deallocate_device(id, ptr, m_layout, stream_hint, deps);
+        system.deallocate_device(id, ptr, m_layout, stream_hint, deps);
         ptr = 0;
     }
 }
@@ -72,6 +70,7 @@ void* FlatDataInterface::address(MemoryId memory_id) const noexcept {
 }
 
 void FlatDataInterface::copy(
+    MemorySystem& system,
     MemoryId src,
     MemoryId dst,
     const DeviceStreamId& stream_hint,
@@ -82,7 +81,7 @@ void FlatDataInterface::copy(
 
     if (src.is_host() && dst.is_device()) {
         auto id = dst.as_device();
-        auto event = m_system->copy_host_to_device(  //
+        auto event = system.copy_host_to_device(  //
             id,
             m_host_ptr,
             m_device_ptrs[id.get()],
@@ -98,7 +97,7 @@ void FlatDataInterface::copy(
     if (src.is_device() && dst.is_host()) {
         auto id = src.as_device();
 
-        auto event = m_system->copy_device_to_host(  //
+        auto event = system.copy_device_to_host(  //
             id,
             m_device_ptrs[id.get()],
             m_host_ptr,
@@ -115,7 +114,7 @@ void FlatDataInterface::copy(
         auto src_id = src.as_device();
         auto dst_id = dst.as_device();
 
-        auto event = m_system->copy_device_to_device(
+        auto event = system.copy_device_to_device(
             src_id,
             dst_id,
             m_device_ptrs[src_id.get()],
@@ -132,11 +131,18 @@ void FlatDataInterface::copy(
     KMM_PANIC("cannot copy from host memory to host memory");
 }
 
-bool FlatDataInterface::is_copy_supported(MemoryId src, MemoryId dst) const noexcept {
-    return m_system->is_copy_supported(src, dst);
+bool FlatDataInterface::is_copy_supported(
+    MemorySystem& system,
+    MemoryId src,
+    MemoryId dst
+) const noexcept {
+    return system.is_copy_supported(src, dst);
 }
 
-std::future<void> FlatDataInterface::initialize_host(const DeviceEventSet& deps) {
+std::future<void> FlatDataInterface::initialize_host(
+    MemorySystem& system,
+    const DeviceEventSet& deps
+) {
     if (m_fill_value.length == 0) {
         return {};
     }
@@ -150,10 +156,11 @@ std::future<void> FlatDataInterface::initialize_host(const DeviceEventSet& deps)
         static_cast<memops_stride_type>(element_size)
     );
 
-    return m_system->fill_host(m_host_ptr, description, deps);
+    return system.fill_host(m_host_ptr, description, deps);
 }
 
 DeviceEvent FlatDataInterface::initialize_device(
+    MemorySystem& system,
     DeviceId memory_id,
     const DeviceStreamId& stream_hint,
     const DeviceEventSet& deps
@@ -172,7 +179,7 @@ DeviceEvent FlatDataInterface::initialize_device(
         static_cast<memops_stride_type>(element_size)
     );
 
-    return m_system->fill_device(
+    return system.fill_device(
         memory_id,
         m_device_ptrs[memory_id.get()],
         description,
@@ -182,6 +189,7 @@ DeviceEvent FlatDataInterface::initialize_device(
 }
 
 AllocResult FlatDataInterface::allocate_and_copy(
+    MemorySystem& system,
     MemoryId src,
     MemoryId dst,
     const DeviceStreamId& stream_hint,
@@ -194,7 +202,7 @@ AllocResult FlatDataInterface::allocate_and_copy(
         KMM_ASSERT(ptr == 0);
 
         auto dep_out = DeviceEvent {};
-        auto result = m_system->allocate_device_and_copy_from_host(  //
+        auto result = system.allocate_device_and_copy_from_host(  //
             id,
             m_layout,
             &m_device_ptrs[id.get()],
@@ -214,7 +222,7 @@ AllocResult FlatDataInterface::allocate_and_copy(
         KMM_ASSERT(m_host_ptr == nullptr);
 
         auto dep_out = DeviceEvent {};
-        auto result = m_system->allocate_host_and_copy_from_device(
+        auto result = system.allocate_host_and_copy_from_device(
             m_layout,
             &m_host_ptr,
             id,
@@ -229,7 +237,7 @@ AllocResult FlatDataInterface::allocate_and_copy(
     }
 
     // just forward to the default impl.
-    return DataInterface::allocate_and_copy(src, dst, stream_hint, deps_in, deps_out);
+    return DataInterface::allocate_and_copy(system, src, dst, stream_hint, deps_in, deps_out);
 }
 
 }  // namespace kmm

@@ -15,12 +15,14 @@ class ExternalDataInterface final: public DataInterface {
     size_t size_in_bytes() const noexcept override;
 
     AllocResult allocate(  //
+        MemorySystem& system,
         MemoryId memory_id,
         const DeviceStreamId& stream_hint,
         DeviceEventSet& deps_out
     ) override;
 
     void deallocate(  //
+        MemorySystem& system,
         MemoryId memory_id,
         const DeviceStreamId& stream_hint,
         const DeviceEventSet& deps
@@ -31,6 +33,7 @@ class ExternalDataInterface final: public DataInterface {
     ) const noexcept override;
 
     void copy(
+        MemorySystem& system,
         MemoryId src,
         MemoryId dst,
         const DeviceStreamId& stream_hint,
@@ -38,7 +41,11 @@ class ExternalDataInterface final: public DataInterface {
         DeviceEventSet& deps_out
     ) override;
 
-    bool is_copy_supported(MemoryId src, MemoryId dst) const noexcept override;
+    bool is_copy_supported(
+        MemorySystem& system,
+        MemoryId src,
+        MemoryId dst
+    ) const noexcept override;
 
   private:
     void check_memory_id(MemoryId memory_id) const;

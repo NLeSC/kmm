@@ -270,26 +270,53 @@ struct MemoryBufferImpl: reference_count<MemoryBufferImpl> {
         return location(id).is_allocated;
     }
 
-    AllocResult try_allocate_location(const DeviceStreamId& stream_hint, MemoryId dst_id);
+    AllocResult try_allocate_location(
+        MemorySystem& system,
+        const DeviceStreamId& stream_hint,
+        MemoryId dst_id
+    );
 
-    bool allocate_host(const DeviceStreamId& stream_hint);
-    bool deallocate_host(const DeviceStreamId& stream_hint);
+    bool allocate_host(MemorySystem& system, const DeviceStreamId& stream_hint);
+    bool deallocate_host(MemorySystem& system, const DeviceStreamId& stream_hint);
     void increment_host_users() noexcept;
     void decrement_host_users() noexcept;
 
-    AllocResult try_allocate_device(const DeviceStreamId& stream_hint, DeviceId id);
-    bool deallocate_device(const DeviceStreamId& stream_hint, DeviceId id, DeviceLRU& lru);
+    AllocResult try_allocate_device(
+        MemorySystem& system,
+        const DeviceStreamId& stream_hint,
+        DeviceId id
+    );
+    bool deallocate_device(
+        MemorySystem& system,
+        const DeviceStreamId& stream_hint,
+        DeviceId id,
+        DeviceLRU& lru
+    );
     void increment_device_users(DeviceId id, DeviceLRU& lru) noexcept;
     void decrement_device_users(DeviceId id, DeviceLRU& lru) noexcept;
 
-    void evict_device(const DeviceStreamId& stream_hint, DeviceId id, DeviceLRU& lru);
-    Poll ensure_alloc_valid(const DeviceStreamId& stream_hint, MemoryId memory_id);
+    void evict_device(
+        MemorySystem& system,
+        const DeviceStreamId& stream_hint,
+        DeviceId id,
+        DeviceLRU& lru
+    );
+    Poll ensure_alloc_valid(
+        MemorySystem& system,
+        const DeviceStreamId& stream_hint,
+        MemoryId memory_id
+    );
     void invalidate_other_allocs(MemoryId memory_id);
     DeviceEventSet invalidate_all();
 
     // Called once a request's location has been granted, right before the
     // caller is allowed to actually read/write through it.
-    Poll before_access(const DeviceStreamId& stream_hint, MemoryId memory_id, AccessKind mode);
+    Poll before_access(
+        MemorySystem& system,
+        const DeviceStreamId& stream_hint,
+        MemoryId memory_id,
+        AccessKind mode
+    );
 
     // Called right after the caller is done reading/writing through a
     // granted location, recording the resulting dependencies.
@@ -297,8 +324,18 @@ struct MemoryBufferImpl: reference_count<MemoryBufferImpl> {
 
     // Returns `Pending` (without touching any state) if `src_id` is host and its data is
     // still being produced by an in-flight `pending_future`.
-    Poll poll_copy(const DeviceStreamId& stream_hint, MemoryId src_id, MemoryId dst_id);
-    void do_copy(const DeviceStreamId& stream_hint, MemoryId src_id, MemoryId dst_id);
+    Poll poll_copy(
+        MemorySystem& system,
+        const DeviceStreamId& stream_hint,
+        MemoryId src_id,
+        MemoryId dst_id
+    );
+    void do_copy(
+        MemorySystem& system,
+        const DeviceStreamId& stream_hint,
+        MemoryId src_id,
+        MemoryId dst_id
+    );
 
     // Returns the accessor granting access to this buffer (once `before_access` has returned
     // `Ready`), and inserts into `deps_out` the events that must complete before it is safe to

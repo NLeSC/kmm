@@ -45,6 +45,7 @@ class RuntimeImpl: public reference_count<RuntimeImpl> {
         default_buffer_kind(config.default_buffer_kind),
         system_info {},
         memory_system {std::make_unique<MemorySystem>(system_info, event_registry, config)},
+        memory_manager(memory_system),
         reduction_manager(memory_manager, memory_system) {}
 
     // Buffers are normally released one at a time via `Runtime::release_buffer`, but any that
@@ -190,42 +191,17 @@ void Runtime::synchronize() {
     poll_until_completion([&] { return m_impl->event_registry.is_all_ready(); });
 }
 
-BufferId Runtime::create_buffer(
-    BufferLayout layout,
+BufferId Runtime::register_buffer(
+    std::unique_ptr<DataInterface> data,
     std::string name,
-    FillValue fill_value,
     std::optional<MemoryId> home,
-    std::optional<BufferKind> kind
+    bool evictable
 ) {
-    std::lock_guard<std::mutex> guard(m_impl->mutex);
-
-    auto system = refcnt_ptr<MemorySystem>(m_impl->memory_system.get(), true);
-
-    std::unique_ptr<DataInterface> data;
-    switch (kind.value_or(m_impl->default_buffer_kind)) {
-        case BufferKind::Discrete:
-            data = std::make_unique<FlatDataInterface>(
-                layout,
-                std::move(system),
-                std::move(fill_value)
-            );
-            break;
-        case BufferKind::Managed:
-            data = std::make_unique<ManagedDataInterface>(
-                layout,
-                std::move(system),
-                std::move(fill_value)
-            );
-            break;
-        case BufferKind::HostPinned:
-            if (fill_value.length != 0) {
-                throw std::runtime_error(
-                    "create_buffer: BufferKind::HostPinned does not support a fill value"
-                );
-            }
-            data = std::make_unique<PinnedDataInterface>(layout, std::move(system));
-            break;
+    if (data == nullptr) {
+        throw std::runtime_error("register_buffer: data interface must not be null");
     }
+
+    std::lock_guard<std::mutex> guard(m_impl->mutex);
 
     auto id = BufferId(m_impl->next_buffer_id_counter++);
 
@@ -234,9 +210,37 @@ BufferId Runtime::create_buffer(
     }
 
     auto buffer =
-        m_impl->memory_manager.create_buffer(std::move(data), std::move(name), true, home);
+        m_impl->memory_manager.create_buffer(std::move(data), std::move(name), evictable, home);
     m_impl->buffers.emplace(id, std::move(buffer));
     return id;
+}
+
+BufferId Runtime::create_buffer(
+    BufferLayout layout,
+    std::string name,
+    FillValue fill_value,
+    std::optional<MemoryId> home,
+    std::optional<BufferKind> kind
+) {
+    std::unique_ptr<DataInterface> data;
+    switch (kind.value_or(m_impl->default_buffer_kind)) {
+        case BufferKind::Discrete:
+            data = std::make_unique<FlatDataInterface>(layout, std::move(fill_value));
+            break;
+        case BufferKind::Managed:
+            data = std::make_unique<ManagedDataInterface>(layout, std::move(fill_value));
+            break;
+        case BufferKind::HostPinned:
+            if (fill_value.length != 0) {
+                throw std::runtime_error(
+                    "create_buffer: BufferKind::HostPinned does not support a fill value"
+                );
+            }
+            data = std::make_unique<PinnedDataInterface>(layout);
+            break;
+    }
+
+    return register_buffer(std::move(data), std::move(name), home, /* evictable = */ true);
 }
 
 BufferId Runtime::adopt_buffer(
@@ -245,21 +249,16 @@ BufferId Runtime::adopt_buffer(
     void* external_ptr,
     MemoryId memory_id
 ) {
-    std::lock_guard<std::mutex> guard(m_impl->mutex);
-
     auto data =
         std::make_unique<ExternalDataInterface>(external_ptr, layout.size_in_bytes, memory_id);
-    auto id = BufferId(m_impl->next_buffer_id_counter++);
-
-    if (name.empty()) {
-        name = std::to_string(id.get());
-    }
 
     // Not evictable: KMM does not own the allocation and cannot recreate it after eviction.
-    auto buffer =
-        m_impl->memory_manager.create_buffer(std::move(data), std::move(name), false, memory_id);
-    m_impl->buffers.emplace(id, std::move(buffer));
-    return id;
+    return register_buffer(
+        std::move(data),
+        std::move(name),
+        memory_id,
+        /* evictable = */ false
+    );
 }
 
 void Runtime::prefetch_buffer(BufferId id, MemoryId memory_id, bool invalidate_others) {
@@ -850,7 +849,7 @@ DeviceEvent Runtime::submit_reduction(
 
     if (has_scratch) {
         auto layout = BufferLayout::for_type<std::byte>(scratch_size);
-        auto iface = std::make_unique<FlatDataInterface>(layout, m_impl->memory_system);
+        auto iface = std::make_unique<FlatDataInterface>(layout);
 
         scratch_buffer = m_impl->memory_manager.create_buffer(
             std::move(iface),

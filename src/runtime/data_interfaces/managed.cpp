@@ -4,6 +4,7 @@
 #include "kmm/core/integer_fun.hpp"
 #include "kmm/core/panic.hpp"
 #include "kmm/runtime/data_interfaces/managed.hpp"
+#include "kmm/runtime/memory_system.hpp"
 #include "kmm/utils/gpu_utils.hpp"
 
 namespace kmm {
@@ -15,13 +16,8 @@ static BufferLayout normalize_buffer_layout(BufferLayout layout) {
     return {round_up_to_multiple(layout.size_in_bytes, align), align};
 }
 
-ManagedDataInterface::ManagedDataInterface(
-    BufferLayout layout,
-    refcnt_ptr<MemorySystem> system,
-    FillValue fill_value
-) :
+ManagedDataInterface::ManagedDataInterface(BufferLayout layout, FillValue fill_value) :
     m_layout(normalize_buffer_layout(layout)),
-    m_system(std::move(system)),
     m_fill_value(std::move(fill_value)) {}
 
 size_t ManagedDataInterface::size_in_bytes() const noexcept {
@@ -29,13 +25,14 @@ size_t ManagedDataInterface::size_in_bytes() const noexcept {
 }
 
 AllocResult ManagedDataInterface::allocate(
+    MemorySystem& system,
     MemoryId memory_id,
     const DeviceStreamId& stream_hint,
     DeviceEventSet& deps_out
 ) {
     if (m_refcount == 0) {
         DeviceEventSet deps;
-        auto result = m_system->allocate_managed(m_layout, &m_ptr, stream_hint, deps);
+        auto result = system.allocate_managed(m_layout, &m_ptr, stream_hint, deps);
 
         if (result != AllocResult::Success) {
             return result;
@@ -50,6 +47,7 @@ AllocResult ManagedDataInterface::allocate(
 }
 
 void ManagedDataInterface::deallocate(
+    MemorySystem& system,
     MemoryId memory_id,
     const DeviceStreamId& stream_hint,
     const DeviceEventSet& deps
@@ -58,7 +56,7 @@ void ManagedDataInterface::deallocate(
     m_dealloc_deps.insert(deps);
 
     if (--m_refcount == 0) {
-        m_system->deallocate_managed(m_ptr, m_layout, stream_hint, m_dealloc_deps);
+        system.deallocate_managed(m_ptr, m_layout, stream_hint, m_dealloc_deps);
         m_ptr = nullptr;
         m_alloc_deps.clear();
         m_dealloc_deps.clear();
@@ -69,19 +67,25 @@ void* ManagedDataInterface::address(MemoryId memory_id) const noexcept {
     return m_ptr;
 }
 
-bool ManagedDataInterface::is_copy_supported(MemoryId src, MemoryId dst) const noexcept {
+bool ManagedDataInterface::is_copy_supported(
+    MemorySystem& system,
+    MemoryId src,
+    MemoryId dst
+) const noexcept {
     return true;
 }
 
 void ManagedDataInterface::hint_access(
+    MemorySystem& system,
     MemoryId memory_id,
     const DeviceStreamId& stream_hint,
     const DeviceEventSet& deps
 ) {
-    m_system->prefetch_managed(memory_id, m_ptr, m_layout, stream_hint, deps);
+    system.prefetch_managed(memory_id, m_ptr, m_layout, stream_hint, deps);
 }
 
 void ManagedDataInterface::copy(
+    MemorySystem& system,
     MemoryId src,
     MemoryId dst,
     const DeviceStreamId& stream_hint,
@@ -91,7 +95,10 @@ void ManagedDataInterface::copy(
     deps_out.insert(deps);
 }
 
-std::future<void> ManagedDataInterface::initialize_host(const DeviceEventSet& deps) {
+std::future<void> ManagedDataInterface::initialize_host(
+    MemorySystem& system,
+    const DeviceEventSet& deps
+) {
     if (m_fill_value.length == 0) {
         return {};
     }
@@ -105,10 +112,11 @@ std::future<void> ManagedDataInterface::initialize_host(const DeviceEventSet& de
         static_cast<memops_stride_type>(element_size)
     );
 
-    return m_system->fill_host(m_ptr, description, deps);
+    return system.fill_host(m_ptr, description, deps);
 }
 
 DeviceEvent ManagedDataInterface::initialize_device(
+    MemorySystem& system,
     DeviceId memory_id,
     const DeviceStreamId& stream_hint,
     const DeviceEventSet& deps
@@ -126,9 +134,13 @@ DeviceEvent ManagedDataInterface::initialize_device(
         static_cast<memops_stride_type>(element_size)
     );
 
-    return m_system
-        ->fill_device( //
-            memory_id, reinterpret_cast<g_device_ptr_t>(m_ptr), description, stream_hint, deps);
+    return system.fill_device( //
+        memory_id,
+        reinterpret_cast<g_device_ptr_t>(m_ptr),
+        description,
+        stream_hint,
+        deps
+    );
 }
 
 }  // namespace kmm

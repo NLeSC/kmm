@@ -74,14 +74,13 @@ static ReductionDescription describe_reduction(
 // as the accumulation target for its group).
 static MemoryBuffer allocate_reduction_buffer(
     MemoryManager& memory_manager,
-    refcnt_ptr<MemorySystem> memory_system,
     DataType dtype,
     size_t count,
     const std::string& name
 ) {
     size_t elem_size = data_type_size(dtype);
     auto layout = BufferLayout {elem_size * count, elem_size};
-    auto data = std::make_unique<FlatDataInterface>(layout, std::move(memory_system));
+    auto data = std::make_unique<FlatDataInterface>(layout);
     return memory_manager.create_buffer(std::move(data), name);
 }
 
@@ -120,7 +119,6 @@ MemoryBuffer ReductionManager::acquire_partial(
 
     auto buffer = allocate_reduction_buffer(
         m_memory_manager,
-        m_memory_system,
         reduction->dtype,
         reduction->count,
         "reduction-partial:" + reduction->home_buffer->name
