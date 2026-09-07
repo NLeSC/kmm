@@ -54,7 +54,10 @@ class MemorySystem: public reference_count<MemorySystem> {
 
     void make_progress();
     void trim_host(size_t bytes_remaining = 0);
-    void trim_device(size_t bytes_remaining = 0);
+    void trim_device(DeviceId id, size_t bytes_remaining = 0);
+
+    /// Real bytes the memory's allocator holds reserved from the OS/driver.
+    size_t bytes_reserved(MemoryId id) const;
 
     AllocResult allocate_host(
         BufferLayout layout,

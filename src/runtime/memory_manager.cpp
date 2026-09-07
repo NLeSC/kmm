@@ -1,5 +1,6 @@
 #include <ankerl/unordered_dense.h>
 #include <cstddef>
+#include <limits>
 #include <stdexcept>
 #include <utility>
 
@@ -701,31 +702,52 @@ void MemoryManager::invalidate_buffer(const MemoryBuffer& buffer) {
     m_impl->reclaim_invalidated(stream_hint, buffer.get());
 }
 
-void MemoryManager::trim_device(DeviceId id, size_t bytes_remaining) {
+void MemoryManager::trim_device(DeviceId id, size_t bytes_remaining, bool evict) {
     auto& device = m_impl->device(id);
+    auto& system = m_impl->system();
     auto stream_hint = DeviceStreamId::null();
-    auto bytes_before = device.bytes_allocated;
+    auto memory_id = MemoryId::device(id);
+    auto bytes_before = system.bytes_reserved(memory_id);
 
-    // Evict LRU-eligible locations until `bytes_allocated` is below `bytes_remaining`.
-    while (device.bytes_allocated > bytes_remaining) {
-        if (!device.try_evict_one(m_impl->system(), stream_hint)) {
-            break;
+    // repeatedly try to evict a buffer until we get under the limit.
+    if (evict) {
+        // 1. attempt to get bytes_allocated below the given limit.
+        while (device.bytes_allocated > bytes_remaining) {
+            if (!device.try_evict_one(system, stream_hint)) {
+                break;
+            }
+        }
+
+        // 2. attempt to get bytes_reserved below the given limit.
+        while (system.bytes_reserved(memory_id) > bytes_remaining) {
+            if (!device.try_evict_one(system, stream_hint)) {
+                break;
+            }
+
+            // if still not below the limit, try to trim memory and see if that helps.
+            if (system.bytes_reserved(memory_id) > bytes_remaining) {
+                system.trim_device(id, bytes_remaining);
+            }
         }
     }
 
-    if (device.bytes_allocated != bytes_before) {
+    // trim memory
+    system.trim_device(id, bytes_remaining);
+
+    auto bytes_after = system.bytes_reserved(memory_id);
+    if (bytes_after != bytes_before) {
         spdlog::debug(
-            "trimmed device {} from {} to {} bytes (target: {} bytes)",
+            "trimmed device {} from {} to {} bytes reserved (target: {})",
             id,
             bytes_before,
-            device.bytes_allocated,
+            bytes_after,
             bytes_remaining
         );
     }
 }
 
 void MemoryManager::make_progress() {
-    //
+    // maybe in the future...
 }
 
 std::ostream& operator<<(std::ostream& stream, AccessKind access) {

@@ -37,6 +37,8 @@ class LimitAllocator: public Allocator {
 
     void trim(size_t nbytes_remaining) final;
 
+    std::optional<size_t> bytes_reserved() const override final;
+
   private:
     bool ensure_enough_space(const DeviceStream* stream, size_t nbytes);
 

@@ -127,6 +127,16 @@ void LimitAllocator::trim(size_t nbytes_remaining) {
     m_inner->trim(nbytes_remaining);
 }
 
+std::optional<size_t> LimitAllocator::bytes_reserved() const {
+    // Prefer the inner allocator's real reservation; otherwise fall back to what this layer has
+    // handed out (allocated plus not-yet-reclaimed), which is what it caps.
+    if (auto inner = m_inner->bytes_reserved()) {
+        return inner;
+    }
+
+    return m_bytes_active + m_bytes_pending;
+}
+
 bool LimitAllocator::ensure_enough_space(const DeviceStream* stream, size_t nbytes) {
     // we can allocate now, we are done
     size_t remaining_bytes = m_bytes_limit - m_bytes_active - m_bytes_pending;

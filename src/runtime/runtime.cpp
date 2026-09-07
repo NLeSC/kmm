@@ -314,6 +314,17 @@ void Runtime::invalidate_buffer(BufferId id) {
     m_impl->memory_manager.invalidate_buffer(m_impl->find_buffer(id));
 }
 
+void Runtime::trim(MemoryId memory_id, size_t bytes_to_keep, bool evict) {
+    std::lock_guard<std::mutex> guard(m_impl->mutex);
+
+    if (memory_id.is_host()) {
+        // No eviction path for host memory; `evict` only affects device memory.
+        m_impl->memory_system->trim_host(bytes_to_keep);
+    } else {
+        m_impl->memory_manager.trim_device(memory_id.as_device(), bytes_to_keep, evict);
+    }
+}
+
 void Runtime::begin_reduction(BufferId id, DataType dtype, ReductionOp op) {
     std::lock_guard<std::mutex> guard(m_impl->mutex);
     auto& entry = m_impl->find_entry(id);

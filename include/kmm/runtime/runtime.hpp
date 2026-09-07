@@ -208,6 +208,20 @@ class Runtime {
     void invalidate_buffer(BufferId id);
 
     /**
+     * Release memory that the given memory's allocator is holding cached but not using, handing it
+     * back to the OS. Memory that is currently in use is not freed. If the allocator has no free
+     * memory available to give back or if it does not cache allocations, this is a no-op.
+     *
+     * @param memory_id The memory whose allocator pool should be trimmed.
+     * @param bytes_to_keep The amount of cached memory the allocator may keep reserved. Anything
+     *  above this that is not in use is released.
+     * @param evict By default, the system only releases unused allocations from, for example, a
+     *  memory pool. If this is `true`, then buffers are also forcefully evicted to make enough
+     *  space to reach `bytes_to_keep`.
+     */
+    void trim(MemoryId memory_id, size_t bytes_to_keep = 0, bool evict = false);
+
+    /**
      * Submit a batch of buffer requests. If a stream is provided, all required dependencies will
      * be put onto the stream and this method returns immediately. If no stream is provided, the
      * method blocks until the dependencies are available. Every request is granted by the time

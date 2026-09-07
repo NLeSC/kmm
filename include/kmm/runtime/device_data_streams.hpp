@@ -36,8 +36,7 @@ class DeviceDataStreams {
     DeviceStreamId acquire_stream(DeviceId device_id, StreamKind kind, const DeviceEventSet& deps);
 
     /**
-     * See `release_stream(const DeviceStream&, uint64_t)`. Useful when only the id of the stream
-     * to release is known, not the `DeviceStream` object itself.
+     * See `release_stream(const DeviceStream&, uint64_t)`.
      */
     DeviceEvent release_stream(DeviceStreamId stream_id, uint64_t cost = 1);
 

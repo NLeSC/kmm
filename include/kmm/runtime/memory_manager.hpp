@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <limits>
 #include <memory>
 #include <optional>
 
@@ -77,7 +78,7 @@ class MemoryManager {
 
     void invalidate_buffer(const MemoryBuffer& buffer);
 
-    void trim_device(DeviceId id, size_t bytes_remaining = 0);
+    void trim_device(DeviceId id, size_t bytes_remaining = 0, bool evict = false);
 
     void make_progress();
 

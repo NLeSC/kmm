@@ -215,8 +215,8 @@ MemorySystem::~MemorySystem() {
         spdlog::info("   - copied from device {}: {} bytes", i, m_devices[i]->stats.bytes_to_host);
     }
 
-    if (const auto* arena = dynamic_cast<const ArenaAllocator*>(m_host_allocator.get())) {
-        spdlog::info("   - reserved from underlying allocator: {} bytes", arena->bytes_reserved());
+    if (auto reserved = m_host_allocator->bytes_reserved()) {
+        spdlog::info("   - reserved from underlying allocator: {} bytes", *reserved);
     }
 
     for (size_t i = 0; i < m_num_devices; i++) {
@@ -243,11 +243,8 @@ MemorySystem::~MemorySystem() {
             }
         }
 
-        if (const auto* arena = dynamic_cast<const ArenaAllocator*>(state.allocator.get())) {
-            spdlog::info(
-                "   - reserved from underlying allocator: {} bytes",
-                arena->bytes_reserved()
-            );
+        if (auto reserved = state.allocator->bytes_reserved()) {
+            spdlog::info("   - reserved from underlying allocator: {} bytes", *reserved);
         }
     }
 }
@@ -271,10 +268,17 @@ void MemorySystem::trim_host(size_t bytes_remaining) {
     m_host_allocator->trim(bytes_remaining);
 }
 
-void MemorySystem::trim_device(size_t bytes_remaining) {
-    for (size_t i = 0; i < m_num_devices; i++) {
-        m_devices[i]->allocator->trim(bytes_remaining);
+void MemorySystem::trim_device(DeviceId id, size_t bytes_remaining) {
+    device_state(id).allocator->trim(bytes_remaining);
+}
+
+size_t MemorySystem::bytes_reserved(MemoryId id) const {
+    if (id.is_host()) {
+        return m_host_allocator->bytes_reserved().value_or(m_host_stats.bytes_inuse);
     }
+
+    const auto& state = device_state(id.as_device());
+    return state.allocator->bytes_reserved().value_or(state.stats.bytes_inuse);
 }
 
 template<typename F>

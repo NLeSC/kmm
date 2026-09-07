@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <map>
 #include <memory>
+#include <optional>
 #include <set>
 #include <unordered_map>
 #include <utility>
@@ -61,7 +62,7 @@ class ArenaAllocator: public Allocator {
     bool trim_one(const DeviceStream* stream_opt);
 
     // Total number of bytes reserved from the inner allocator (i.e. the sum of block sizes).
-    size_t bytes_reserved() const {
+    std::optional<size_t> bytes_reserved() const override final {
         return m_bytes_reserved;
     }
 
