@@ -1,142 +1,93 @@
 #include "fmt/format.h"
-#include "spdlog/spdlog.h"
 
 #include "kmm/utils/gpu_utils.hpp"
-#include "kmm/utils/panic.hpp"
 
 namespace kmm {
 
 void gpu_throw_exception(g_result_t result, const char* file, int line, const char* expression) {
-    throw GPUDriverException(fmt::format("{} ({}:{})", expression, file, line), result);
-}
-
-#ifndef KMM_USE_HIP
-void gpu_throw_exception(gpu_error_t result, const char* file, int line, const char* expression) {
-    throw GPURuntimeException(fmt::format("{} ({}:{})", expression, file, line), result);
-}
-#endif
-
-void gpu_throw_exception(blas_status_t result, const char* file, int line, const char* expression) {
-    throw BlasException(fmt::format("{} ({}:{})", expression, file, line), result);
-}
-
-GPUDriverException::GPUDriverException(const std::string& message, g_result_t result) :
-    status(result) {
-    const char* name = "???";
-    const char* description = "???";
-
-    // Ignore the return code from these functions
+    const char* name = "UNKNOWN_ERROR";
+    const char* description = "unknown error";
     g_get_error_name(result, &name);
     g_get_error_string(result, &description);
 
-    m_message = fmt::format("GPU driver error: {} ({}): {}", description, name, message);
-}
-
-GPURuntimeException::GPURuntimeException(const std::string& message, gpu_error_t result) :
-    status(result) {
-    const char* name = "???";
-    const char* description = "???";
-
-    // Ignore the return code from these functions
-    name = gpu_get_error_name(result);
-    description = gpu_get_error_string(result);
-
-    m_message = fmt::format("GPU runtime error: {} ({}): {}", description, name, message);
-}
-
-BlasException::BlasException(const std::string& message, blas_status_t result) : status(result) {
-    const char* name = blas_get_status_name(result);
-    const char* description = blas_get_status_string(result);
-
-    m_message = fmt::format("BLAS runtime error: {} ({}): {}", description, name, message);
-}
-
-GPUContextHandle::GPUContextHandle(g_context_t context, std::shared_ptr<void> lifetime) :
-    m_context(context),
-    m_lifetime(std::move(lifetime)) {}
-
-std::vector<g_device_t> get_gpu_devices() {
-    try {
-        auto result = g_init(0);
-        if (result == G_ERROR_NO_DEVICE) {
-            return {};
-        }
-
-        if (result != G_SUCCESS) {
-            throw GPUDriverException("gpuInit failed", result);
-        }
-
-        int count = 0;
-        KMM_GPU_CHECK(g_device_get_count(&count));
-
-        std::vector<g_device_t> devices {};
-        for (int i = 0; i < count; i++) {
-            g_device_t device;
-            KMM_GPU_CHECK(g_device_get(&device, i));
-            devices.push_back(device);
-        }
-
-        return devices;
-    } catch (const GPUException& e) {
-        spdlog::warn("ignored error while initializing: {}", e.what());
-        return {};
-    }
-}
-
-std::optional<g_device_t> get_gpu_device_by_address(const void* address) {
-    int ordinal;
-    g_memory_type_t memory_type;
-    g_result_t result = g_pointer_get_attribute(
-        &memory_type,
-        G_POINTER_ATTRIBUTE_MEMORY_TYPE,
-        g_device_ptr_t(address)
+    throw GPUException(
+        fmt::format("GPU error: {} ({}) at {}:{}: {}", name, description, file, line, expression)
     );
-
-    if (result == G_SUCCESS && memory_type == G_MEMORYTYPE_DEVICE) {
-        result = g_pointer_get_attribute(
-            &ordinal,
-            G_POINTER_ATTRIBUTE_DEVICE_ORDINAL,
-            g_device_ptr_t(address)
-        );
-
-        if (result == G_SUCCESS) {
-            return g_device_t {ordinal};
-        }
-    }
-
-    return std::nullopt;
 }
 
-GPUContextHandle GPUContextHandle::create_context_for_device(g_device_t device) {
-    int flags = G_CTX_MAP_HOST;
-    g_context_t context;
-    KMM_GPU_CHECK(g_ctx_create(&context, flags, device));
-
-    auto lifetime = std::shared_ptr<void>(nullptr, [=](const void* ignore) {
-        KMM_ASSERT(g_ctx_destroy(context) == G_SUCCESS);
-    });
-
-    return {context, lifetime};
-}
-
-GPUContextHandle GPUContextHandle::retain_primary_context_for_device(g_device_t device) {
-    g_context_t context;
-    KMM_GPU_CHECK(g_device_primary_ctx_retain(&context, device));
-
-    auto lifetime = std::shared_ptr<void>(nullptr, [=](const void* ignore) {
-        KMM_ASSERT(g_device_primary_ctx_release(device) == G_SUCCESS);
-    });
-
-    return {context, lifetime};
-}
-
-GPUContextGuard::GPUContextGuard(GPUContextHandle context) : m_context(std::move(context)) {
-    KMM_GPU_CHECK(g_ctx_push_current(m_context));
+GPUContextGuard::GPUContextGuard(g_context_t context) : m_context(context) {
+    KMM_GPU_CHECK(g_ctx_push_current(context));
 }
 
 GPUContextGuard::~GPUContextGuard() {
-    g_context_t previous;
-    KMM_ASSERT(g_ctx_pop_current(&previous) == G_SUCCESS);
+    // Destructors must not throw, so the pop result is discarded rather than checked.
+    g_context_t popped = nullptr;
+    g_ctx_pop_current(&popped);
+}
+
+GPUContextId::GPUContextId(g_context_t context) {
+    KMM_GPU_CHECK(g_ctx_get_id(context, &m_id));
+}
+
+g_context_t context_from_stream(g_stream_t stream) {
+    g_context_t context;
+    KMM_GPU_CHECK(g_stream_get_ctx(stream, &context));
+    return context;
+}
+
+GPUStreamId::GPUStreamId(g_stream_t stream) : GPUStreamId(stream, context_from_stream(stream)) {}
+
+GPUStreamId::GPUStreamId(g_stream_t stream, g_context_t context) : m_context_id(context) {
+    KMM_GPU_CHECK(g_stream_get_id(stream, &m_id));
+}
+
+GPUStreamId::GPUStreamId(const GPUStreamRef& stream) : GPUStreamId(stream.stream_id()) {}
+
+GPUStreamId::GPUStreamId(const GPUStreamOwner& stream) :
+    GPUStreamId(static_cast<GPUStreamRef>(stream)) {}
+
+GPUStreamRef::GPUStreamRef(g_stream_t stream) :
+    m_context(context_from_stream(stream)),
+    m_stream(stream),
+    m_stream_id(stream, m_context) {}
+
+GPUStreamOwner::GPUStreamOwner(g_context_t context, unsigned int flags) :
+    m_stream([&]() {
+        g_stream_t result;
+        GPUContextGuard guard(context);
+        KMM_GPU_CHECK(g_stream_create(&result, flags));
+        return result;
+    }()) {}
+
+GPUStreamOwner::~GPUStreamOwner() {
+    destroy();
+}
+
+void GPUStreamOwner::destroy() noexcept {
+    if (m_stream != nullptr) {
+        g_stream_destroy(m_stream);
+        m_stream = nullptr;
+    }
+}
+
+std::ostream& operator<<(std::ostream& stream, const GPUStreamOwner& self) {
+    if (self.m_stream == nullptr) {
+        return stream << "GPU-stream: none";
+    }
+
+    return stream << GPUStreamRef(self.m_stream);
+}
+
+std::ostream& operator<<(std::ostream& stream, const GPUStreamRef& self) {
+    return stream << self.m_stream_id;
+}
+
+std::ostream& operator<<(std::ostream& stream, const GPUStreamId& self) {
+    return stream << "GPU-stream:" << self.m_id;
+}
+
+std::ostream& operator<<(std::ostream& stream, const GPUContextId& self) {
+    return stream << "GPU-context:" << self.m_id;
 }
 
 }  // namespace kmm

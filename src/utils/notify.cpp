@@ -2,13 +2,7 @@
 
 namespace kmm {
 
-NotifyHandle::NotifyHandle(std::shared_ptr<Notify> m) : m_impl(std::move(m)) {}
-
-NotifyHandle::NotifyHandle(std::unique_ptr<Notify> m) : m_impl(std::move(m)) {}
-
-NotifyHandle::~NotifyHandle() {
-    notify_and_clear();
-}
+NotifyHandle::~NotifyHandle() = default;
 
 void NotifyHandle::notify() const noexcept {
     if (m_impl) {
@@ -17,13 +11,12 @@ void NotifyHandle::notify() const noexcept {
 }
 
 void NotifyHandle::clear() noexcept {
-    m_impl = nullptr;
+    m_impl.reset();
 }
 
 void NotifyHandle::notify_and_clear() noexcept {
-    if (auto m = std::exchange(m_impl, nullptr)) {
-        m->notify();
-    }
+    notify();
+    clear();
 }
 
 }  // namespace kmm

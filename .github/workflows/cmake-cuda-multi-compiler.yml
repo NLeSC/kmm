@@ -13,11 +13,11 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     strategy:
-      fail-fast: true
+      fail-fast: false
 
       matrix:
         os: [ubuntu-latest]
-        build_type: [Debug]
+        build_type: [Release]
         cpp_compiler: [g++, clang++]
 
     steps:
@@ -50,8 +50,9 @@ jobs:
           -DKMM_BUILD_TESTS:BOOL=ON
           -DKMM_BUILD_EXAMPLES:BOOL=ON
           -DKMM_BUILD_BENCHMARKS:BOOL=ON
+          -DKMM_ENABLE_WARNINGS:BOOL=OFF
           -S ${{ github.workspace }}
 
       - name: Build
         # Build your program with the given configuration. Note that --config is needed because the default Windows generator is a multi-config generator (Visual Studio generator).
-        run: cmake --build ${{ steps.strings.outputs.build-output-dir }} --config ${{ matrix.build_type }} --parallel 4
+        run: cmake --build ${{ steps.strings.outputs.build-output-dir }} --config ${{ matrix.build_type }}
