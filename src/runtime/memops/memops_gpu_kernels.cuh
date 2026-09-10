@@ -170,7 +170,11 @@ KMM_DEVICE T shfl_xor(T value, int offset) {
 
 #pragma unroll
     for (auto& word : words) {
+#if defined(KMM_USE_HIP)
+        word = __shfl_xor(word, offset);
+#else
         word = __shfl_xor_sync(0xffffffffu, word, offset);
+#endif
     }
 
     std::memcpy(&value, words, sizeof(T));
