@@ -3,7 +3,12 @@
 #include <type_traits>
 #include <utility>
 
-#include "cub/block/block_reduce.cuh"
+#ifdef KMM_USE_CUDA
+    #include "cub/block/block_reduce.cuh"
+#elif KMM_USE_HIP
+    #include "hipcub/hipcub.hpp"
+namespace cub = hipcub;
+#endif
 
 #include "kmm/api/device.hpp"
 #include "kmm/api/kernel.hpp"

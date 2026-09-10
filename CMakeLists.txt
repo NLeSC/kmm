@@ -152,6 +152,7 @@ elseif(KMM_USE_HIP)
   set(CMAKE_MODULE_PATH "${HIP_PATH}/cmake" ${CMAKE_MODULE_PATH})
   find_package(HIP REQUIRED)
   find_package(ROCBLAS REQUIRED)
+  find_package(hipcub REQUIRED)
   # CMake only recognizes .cu as CUDA by default, so the actual GPU kernel files (which need to be
   # compiled by amdclang++'s HIP frontend) must be reassigned explicitly. Plain .cpp files must
   # stay as CXX -- forcing them to HIP too makes amdclang++ run a device-code compilation pass on
@@ -175,6 +176,7 @@ elseif(KMM_USE_HIP)
           PUBLIC
           hip::host
           roc::rocblas
+          hip::hipcub
   )
 
   # Define `KMM_USE_HIP` macro so that headers can detect HIP usage
