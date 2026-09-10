@@ -165,8 +165,18 @@ constexpr uint32_t KMM_REDUCE_WARP_SIZE = 32;
 template<typename T>
 KMM_DEVICE T shfl_xor(T value, int offset) {
     static_assert(sizeof(T) % sizeof(uint32_t) == 0, "size of T must be a multiple of 4 bytes");
-    uint32_t words[sizeof(T) / sizeof(uint32_t)];
+    constexpr size_t num_words = sizeof(T) / sizeof(uint32_t);
+    uint32_t words[num_words];
+
+#if defined(KMM_USE_HIP)
+    // HIP does not consider `std::memcpy` callable from device code, so copy word-by-word instead.
+#pragma unroll
+    for (size_t i = 0; i < num_words; i++) {
+        words[i] = reinterpret_cast<const uint32_t*>(&value)[i];
+    }
+#else
     std::memcpy(words, &value, sizeof(T));
+#endif
 
 #pragma unroll
     for (auto& word : words) {
@@ -177,7 +187,15 @@ KMM_DEVICE T shfl_xor(T value, int offset) {
 #endif
     }
 
+#if defined(KMM_USE_HIP)
+#pragma unroll
+    for (size_t i = 0; i < num_words; i++) {
+        reinterpret_cast<uint32_t*>(&value)[i] = words[i];
+    }
+#else
     std::memcpy(&value, words, sizeof(T));
+#endif
+
     return value;
 }
 
