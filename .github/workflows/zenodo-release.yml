@@ -4,22 +4,27 @@ on:
   release:
     types: [published]
 
+permissions:
+  contents: read
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
       - name: Download archive to runner
         env:
           tarball: ${{ github.event.release.tarball_url }}
         run: |
           name=$(basename ${tarball})        
-          curl -L $tarball > $name
+          curl -L "$tarball" > "$name"
           echo "archive=${name}" >> $GITHUB_ENV
 
       - name: Run Zenodo Deploy
-        uses: rseng/zenodo-release@main
+        uses: rseng/zenodo-release@a9c88701a0176df755015f8ca4cf8cc754162f27 # main as of 2026-11-06
         with:
           token: ${{ secrets.ZENODO_TOKEN }}
           version: ${{ github.event.release.tag_name }}
