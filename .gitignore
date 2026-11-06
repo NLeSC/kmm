@@ -5,3 +5,6 @@ cmake-build*
 # Editors
 .idea/
 .vscode/
+
+# Generated docs
+docs/html/

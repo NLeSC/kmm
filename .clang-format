@@ -53,6 +53,7 @@ IndentWrappedFunctionNames: false
 KeepEmptyLinesAtTheStartOfBlocks: false
 MaxEmptyLinesToKeep: 1
 NamespaceIndentation: None
+PenaltyBreakBeforeMemberAccess: 1000
 PenaltyReturnTypeOnItsOwnLine: 400
 PointerAlignment: Left
 ReflowComments: false
