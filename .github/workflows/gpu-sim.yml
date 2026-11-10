@@ -1,0 +1,79 @@
+name: GPU Simulator
+
+# Optional, non-required check. The hosted runners have no GPU, so this builds
+# the HIP backend for gfx90a and runs the Catch2 unit tests plus the
+# `vector_add` example (which checks its own result) on a simulated AMD MI250X
+# (https://github.com/pantheongpu/pantheonsim). A simulator cannot reproduce
+# hardware-specific behavior or timing, so it complements real-GPU testing and
+# does not replace it.
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [ "main", "dev" ]
+    paths:
+      - "include/**"
+      - "src/**"
+      - "test/**"
+      - "examples/**"
+      - "external/**"
+      - "CMakeLists.txt"
+      - ".github/workflows/gpu-sim.yml"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  hip-tests:
+    name: HIP tests (ROCm 7.1 and simulated MI250X)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          submodules: 'recursive'
+          persist-credentials: false
+
+      - name: Set up the simulated GPU and ROCm
+        uses: pantheongpu/setup-pantheonsim@ca87fe3143b29166822b923d6050945c5179408c # v0.1.5
+        with:
+          gpu: amd/mi250x
+          cuda-toolkit: none
+          rocm: "7.1"
+
+      # The action installs only the compiler side of ROCm.
+      - name: Install rocBLAS
+        run: sudo apt-get install -y rocblas-dev rocrand-dev
+
+      # The example allocates three 800 MB arrays; shrink it for the simulator
+      # (the checkout only, the repository is not changed).
+      - name: Shrink the vector_add example
+        run: sed -i "s/long n = 200'000'000;/long n = 2'000'000;/" examples/vector_add.cu
+
+      - name: Configure
+        run: >
+          cmake -B build -S .
+          -DCMAKE_PREFIX_PATH=/opt/rocm
+          -DCMAKE_HIP_COMPILER_ROCM_ROOT:PATH=/opt/rocm
+          -DCMAKE_HIP_ARCHITECTURES=gfx90a
+          -DAMDGPU_TARGETS=gfx90a
+          -DCMAKE_BUILD_TYPE=Release
+          -DSPDLOG_FMT_EXTERNAL:BOOL=ON
+          -DKMM_USE_HIP:BOOL=ON
+          -DKMM_BUILD_TESTS:BOOL=ON
+          -DKMM_BUILD_EXAMPLES:BOOL=ON
+
+      - name: Build
+        run: cmake --build build --target kmmTest vector_add_example -j3
+
+      # The tests are not registered with ctest, so run the Catch2 binary.
+      - name: Unit tests
+        run: vgpu run ./build/test/kmmTest
+
+      - name: vector_add example
+        run: vgpu run ./build/examples/vector_add_example
